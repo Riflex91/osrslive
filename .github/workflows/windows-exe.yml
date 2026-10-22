@@ -7,6 +7,12 @@ on:
       - 'native/**'
       - 'docs/**'
       - '.github/workflows/windows-exe.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - 'docs/**'
+      - '.github/workflows/windows-exe.yml'
   workflow_dispatch:
 
 permissions:
@@ -45,6 +51,7 @@ jobs:
           Write-Host "Single EXE verified: $size bytes"
           Write-Host (Get-FileHash $exe -Algorithm SHA256).Hash
       - name: Publish verified GitHub release
+        if: github.event_name != 'pull_request'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
