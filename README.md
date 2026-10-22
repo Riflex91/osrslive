@@ -66,3 +66,13 @@ Diese Anwendung ist weiterhin ausschliesslich ein Diagnose-/Simulationsclient, k
 - Kein OSRS-Login, keine Verbindung zu Jagex, kein Input-Sender und keine Erkennungsumgehung.
 
 Siehe [Offline-Agent-Architektur](docs/OFFLINE-AGENT-ROADMAP.md) und die [Bot-Vergleichsanalyse](docs/OSRS-BOT-ARCHITEKTUR-ANALYSE-2026-10-22.md).
+
+## v0.4.1 – Weltzustandskonsistenz und verzögerte Bestätigungen
+
+- Der Simulator führt **einen** Inventarzähler und einen Health-Zustand. Die Agentenentscheidung liest diese Werte, und `INVENTORY_CHANGED` meldet exakt diesen Zustand.
+- `ACTION_PLANNED` bestätigt keinen Erfolg: der simulierte Effekt tritt frühestens im nächsten Game-Tick ein. `ACTION_CONFIRMED` enthält den geplanten und den bestätigten Tick.
+- Jede 17. simulierte Aktion erhält absichtlich **keine Wirkung**. Nach drei Ticks erscheint `ACTION_TIMED_OUT ... synthetic_fault=true`; danach kann die Planung fortgesetzt werden.
+- Gleichzeitige, stale oder inkonsistente Ereignisse werden blockiert. Im `--self-test` wird das Verbot einer Bestätigung im selben Tick geprüft.
+- **Keine Spielanbindung oder Anti-Cheat-Umgehung.** Für jegliche von Jagex genehmigte Integration sind schriftlich begrenzter Funktionsumfang, benannte Testkonten, Clientfreigabe, Abgleich mit Jagex und eine zugehörige Account-Allowlist erforderlich. Keine Methode kann eine Sperre allein technisch ausschließen.
+
+Technische Prüfung: `--self-test`, Live-Simulationslog und Windows-CI.
