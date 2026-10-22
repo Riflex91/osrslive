@@ -1,15 +1,42 @@
-# OSRS Live Diagnostics
+# OSRS Live Diagnostics 0.3.0 (Windows single EXE)
 
-Standalone Java diagnostics application for Windows. No RuneLite runtime dependency.
+**Diagnose-App, kein spielbarer OSRS-Client und kein Bot.** Eine Verbindung zu offiziellen Jagex-Servern ist nicht implementiert. Diese Version benötigt weder RuneLite noch Java.
 
-**Important:** This is a diagnostic simulator, not an authorized Jagex/OSRS game client. It does not authenticate to or automate the official game.
+## Einmalige Installation
 
-## Releases and updates
+1. GitHub Releases öffnen: https://github.com/Riflex91/osrslive/releases/latest
+2. **Nur `OSRS-Live-Diagnostics.exe`** herunterladen, z.B. nach `C:\Users\<Nutzer>\Desktop\OSRS-Live-Diagnostics.exe`.
+3. Doppelklicken. Die Windows-x64-Version enthält ihre .NET-Laufzeit selbst. Kein Installationsordner mit mehreren Dateien erforderlich.
+4. Beim Start wird automatisch nach Updates gesucht. Verfügbare Updates werden heruntergeladen, SHA-256 geprüft, installiert und selbst gestartet. Bei fehlendem Internet startet die lokale Version weiter.
+5. `Simulation starten`, Renderer schalten, `Log kopieren` und das Protokoll einfügen. Alternativ JSON-/ZIP-Export.
 
-The Windows application checks [update-manifest.properties](update-manifest.properties) on each start. A new release is downloaded from GitHub, verified using SHA-256, self-tested, backed up, and installed while the program is not running. Existing logs remain untouched. On download failure, the installed version keeps working.
+Windows-Sicherheitswarnungen für unsignierte EXEs können auftreten. Einen Hinweis nur nach Prüfung der Release-Quelle akzeptieren; perspektivisch Authenticode-Signatur ergänzen.
 
-The `source/osrslive-src.zip` archive contains the complete source code and Windows launcher scripts. The GitHub Actions workflow builds the JAR, runs automated checks, publishes a downloadable Windows ZIP and JAR as a release, then updates the manifest.
+## Auto-Update-Ablauf
 
-Install Java 17+ and run `START-OSRS-Diagnostics.cmd` from the extracted Windows ZIP. `Log kopieren` copies the current diagnostics directly to clipboard.
+- Quelle: `https://raw.githubusercontent.com/Riflex91/osrslive/main/update-exe.properties`
+- Version, genau erlaubte Release-URL und SHA-256 werden validiert.
+- Nur eine **neuere** semantische Version wird verarbeitet.
+- Download mit Größenbegrenzung nach `%LOCALAPPDATA%\OSRSLiveDiagnostics\updates\...`.
+- SHA-256 des Downloads wird vor und beim Anwenden nochmals geprüft.
+- Eine temporäre Kopie der laufenden EXE wartet auf Prozessende, ersetzt dann die installierte EXE, startet sie neu und belässt bei Erfolg `*.previous` als Rückfallebene.
+- Bei Updatefehler: aktuelle EXE weiterverwenden, Diagnose unter `%LOCALAPPDATA%\OSRSLiveDiagnostics\startup.log`.
+- Im **Installationspaket** wird eine einzelne EXE ausgeliefert; beim Update können temporäre Helper-/Sicherungsdateien entstehen.
 
-Official RuneLite integration has been removed from the default client. Its old 'bridge' was only a loopback receiver for external diagnostic events; it never connected to Jagex.
+**Sicherheitsgrenze:** Der SHA-256-Hash im selben GitHub-Repository schützt vor kaputten/unpassenden Downloads, nicht gegen Übernahme des Repositorys oder GitHub-Releasekanals. Signaturprüfung mit unabhängiger Vertrauenswurzel ist für spätere Releases vorgesehen. Die EXE ist derzeit nicht signiert.
+
+## Entwickler
+
+Windows SDK: .NET 10. Projekt: `native/OSRSLiveDiagnostics.csproj`.
+
+```powershell
+dotnet build native/OSRSLiveDiagnostics.csproj -c Release -r win-x64
+dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release -- --self-test
+dotnet publish native/OSRSLiveDiagnostics.csproj -c Release -r win-x64 -o publish
+```
+
+CI kompiliert auf `windows-latest`, führt einen Selbsttest aus, verlangt genau eine EXE und erstellt anschließend ein GitHub Release. Erst nach dem Release wird `update-exe.properties` aktualisiert. Der alte Java-Updatekanal `update-manifest.properties` bleibt separat.
+
+## Analyse anderer Bots
+
+Siehe [technische Vergleichsanalyse](docs/OSRS-BOT-ARCHITEKTUR-ANALYSE-2026-10-22.md) mit Quellenbelegen, Architekturbeschreibungen, Qualitätsmerkmalen, Unsicherheiten und Roadmap.
