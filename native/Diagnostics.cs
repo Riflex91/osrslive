@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version = "0.3.1";
+    internal const string Version = "0.4.0";
     private const int Capacity = 10000;
     private readonly object sync = new();
     private readonly List<LogEvent> entries = new();
@@ -125,15 +125,53 @@ internal sealed class LocalSimulation : IDisposable
     private System.Threading.Timer? timer;
     private readonly Random random = new(1103);
     private int ticks, x=3200,y=3200;
+    private int agentEnabled, agentInventory, agentHealth=100, tickBusy;
+    private OfflineAgent planner = new();
     internal bool Running => timer!=null;
+    internal bool AgentEnabled => Volatile.Read(ref agentEnabled)!=0;
     internal LocalSimulation(Diagnostics diagnostics) => this.diagnostics=diagnostics;
+    internal void SetAgentEnabled(bool enabled)
+    {
+        if(enabled && !Running) throw new InvalidOperationException("Start simulation first.");
+        if(enabled) {planner=new OfflineAgent();agentInventory=0;agentHealth=100;}
+        Volatile.Write(ref agentEnabled,enabled?1:0);
+        diagnostics.Add(Severity.INFO,"OFFLINE_AGENT",enabled?"ENABLED":"DISABLED",
+            "Nur lokaler Simulator; keine Spielaktionen oder Netzwerkverbindung");
+    }
+    private void AgentTick(int n)
+    {
+        // Decision and effect verification operate exclusively on in-memory simulated state.
+        if(n%23==0) agentHealth=15;
+        var before=new AgentSnapshot(n,DateTimeOffset.UtcNow,AgentSource.Simulation,agentHealth,agentInventory,28);
+        var decision=planner.Plan(before,DateTimeOffset.UtcNow);
+        if(decision.Phase==ActionPhase.Blocked)
+        {
+            diagnostics.Add(Severity.WARN,"OFFLINE_AGENT","PLAN_BLOCKED",
+                $"id={decision.Id} tick={n} reason={decision.Reason}");
+            return;
+        }
+        diagnostics.Add(Severity.DEBUG,"OFFLINE_AGENT","ACTION_PLANNED",
+            $"id={decision.Id} tick={n} action={decision.Action} reason={decision.Reason}");
+        var after=OfflineAgent.Simulate(decision,before);
+        var outcome=OfflineAgent.Confirm(decision,before,after);
+        agentHealth=after.Hitpoints;agentInventory=after.InventoryUsed;
+        diagnostics.Add(outcome.Phase==ActionPhase.Confirmed?Severity.INFO:Severity.ERROR,
+            "OFFLINE_AGENT",outcome.Phase==ActionPhase.Confirmed?"ACTION_CONFIRMED":"ACTION_FAILED",
+            $"id={outcome.Id} action={decision.Action} reason={outcome.Reason} hp={agentHealth} inventory={agentInventory}/28");
+    }
     internal void Start()
     {
         if(timer != null) return;
-        ticks=0; diagnostics.SetMode("SIMULATION (keine OSRS-Verbindung)");
+        ticks=0; planner=new OfflineAgent();agentInventory=0;agentHealth=100;
+        diagnostics.SetMode("SIMULATION (keine OSRS-Verbindung)");
         diagnostics.Add(Severity.INFO,"SIMULATOR","START","Lokaler Testmodus");
         timer = new System.Threading.Timer(_ =>
         {
+            if(Interlocked.Exchange(ref tickBusy,1)!=0)
+            {
+                diagnostics.Add(Severity.WARN,"SIMULATOR","TICK_REENTRY","Vorheriger Simulationstick noch aktiv");
+                return;
+            }
             try
             {
                 var n=Interlocked.Increment(ref ticks);
@@ -142,8 +180,10 @@ internal sealed class LocalSimulation : IDisposable
                 if(n%7==0) diagnostics.Add(Severity.INFO,"SIMULATOR","NPC_SPAWNED","npc_id=301 near=player");
                 if(n%11==0) diagnostics.Add(Severity.INFO,"SIMULATOR","INVENTORY_CHANGED",$"slots_used={Math.Min(28,n/11)}");
                 if(n%19==0) diagnostics.Add(Severity.WARN,"SIMULATOR","SIMULATED_DELAY","Künstliche Warnung für Testzwecke; keine reale Verzögerung");
+                if(AgentEnabled) AgentTick(n);
             }
             catch(Exception ex) {diagnostics.Add(Severity.ERROR,"SIMULATOR","TICK_FAILED",ex.GetType().Name);}
+            finally { Volatile.Write(ref tickBusy,0); }
         },null,0,600);
     }
     internal void Stop()
