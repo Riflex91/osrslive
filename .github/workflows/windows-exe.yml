@@ -38,6 +38,11 @@ jobs:
         run: |
           dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --self-test
           if ($LASTEXITCODE -ne 0) { throw "Self-test failed: $LASTEXITCODE" }
+      - name: Mining/GE scenario suite
+        shell: pwsh
+        run: |
+          dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --scenario-tests
+          if ($LASTEXITCODE -ne 0) { throw "Scenario suite failed: $LASTEXITCODE" }
       - name: Publish single self-contained EXE
         shell: pwsh
         run: |
