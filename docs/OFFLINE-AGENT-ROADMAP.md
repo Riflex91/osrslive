@@ -53,3 +53,11 @@ und https://legal.jagex.com/docs/rules/macro-and-client-features-not-permitted
 - Aktionsergebnisse werden erst in einem **späteren Tick** bestätigt; gleiche-Tick-Erfolge sind unzulässig.
 - Eine deterministische Fehler-Injektion verwirft jede 17. Aktion und erzwingt einen klar klassifizierten Timeout mit anschließender Wiederaufnahme.
 - Reale Jagex-Verbindung bleibt technisch nicht implementiert. Kein technisches Versprechen einer undetektierbaren Ausführung oder ausbleibenden Kontosperre.
+
+
+## Revision v0.4.2 – Pointer-Modell (ohne Betriebssystemeingaben)
+- Die GUI enthält ein getrenntes **virtuelles** Mausbewegungslabor mit deterministischen, glatten Kurven.
+- Pointerzustand und Bewegungsmetrik sind von der Offline-Agenten-Engine vollständig entkoppelt.
+- Die Interaktion mit dem Windows-Systemcursor, anderen Programmen oder offiziellen OSRS-Servern ist ausdrücklich **nicht** implementiert.
+- Reproduzierbarkeitstests prüfen Endpunkte, Monotonie, Kurvenform und begrenzte Parameter.
+- Aussagen zur Nichterkennung oder Bannfreiheit können aus diesen Tests nicht abgeleitet werden.

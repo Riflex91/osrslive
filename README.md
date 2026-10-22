@@ -76,3 +76,12 @@ Siehe [Offline-Agent-Architektur](docs/OFFLINE-AGENT-ROADMAP.md) und die [Bot-Ve
 - **Keine Spielanbindung oder Anti-Cheat-Umgehung.** Für jegliche von Jagex genehmigte Integration sind schriftlich begrenzter Funktionsumfang, benannte Testkonten, Clientfreigabe, Abgleich mit Jagex und eine zugehörige Account-Allowlist erforderlich. Keine Methode kann eine Sperre allein technisch ausschließen.
 
 Technische Prüfung: `--self-test`, Live-Simulationslog und Windows-CI.
+
+
+## v0.4.2 – Virtuelles Mausbewegungslabor
+- **Maus-Demo** erzeugt eine visuelle virtuelle Bewegung **ausschließlich innerhalb der Programmvorschau**. Sie bewegt weder den Windows-Systemcursor noch steuert sie Old School RuneScape.
+- Minimum-Jerk-Kurven, variierende Seitenauslenkung und gemessene Geschwindigkeit werden deterministisch aus einem Seed erzeugt. Damit lässt sich ein Bewegungsmodell reproduzierbar testen.
+- `MOTION_START` und `MOTION_COMPLETE` erfassen Soll-/Ist-Dauer, virtuelle Pixelstrecke, Spitzen­geschwindigkeit und Sampleanzahl im **Log kopieren**-Export.
+- Bei **Renderer AUS** läuft die virtuelle Animation zeitlich weiter, ohne sichtbare Linien zu zeichnen.
+- Die bestehenden Offline-Agenten- und Update-Funktionen bleiben erhalten.
+- Schriftlich vereinbarte Sanktionsfreistellungen für freigegebene Accounts und ein technischer Ansprechpartner bei Jagex sind eine deutlich zuverlässigere Grundlage als eine Behauptung vollständiger Anti-Cheat-Unsichtbarkeit.

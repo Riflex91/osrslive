@@ -38,12 +38,18 @@ internal sealed class MainWindow : Form
     private readonly LocalSimulation sim;
     private readonly Label header=new(), stats=new(), footer=new();
     private Button simButton=new(), renderButton=new(), agentButton=new();
+    private Button pointerButton=new();
     private readonly TextBox log=new(), search=new();
     private readonly ComboBox filter=new();
     private readonly CheckBox pause=new();
     private readonly Panel preview=new();
     private readonly System.Windows.Forms.Timer refreshTimer=new(){Interval=250};
     private readonly System.Windows.Forms.Timer metricsTimer=new(){Interval=5000};
+    private readonly System.Windows.Forms.Timer pointerTimer=new(){Interval=16};
+    private readonly Stopwatch pointerClock=new();
+    private PointerTrajectory? pointerTrace;
+    private int pointerRuns;
+
     private volatile bool refreshNeeded=true;
     private readonly Stopwatch eventClock=Stopwatch.StartNew();
     private TimeSpan lastPerformanceElapsed=TimeSpan.Zero;
@@ -62,6 +68,19 @@ internal sealed class MainWindow : Form
         core.Add(Severity.INFO,"CORE","PRIVACY","Keine Zugangsdaten oder Tokens im Export");
         if(Updater.TakeLastOutcome() is string outcome)
             core.Add(Severity.INFO,"UPDATER","PREVIOUS_UPDATE",outcome);
+        pointerTimer.Tick+=(_,_)=>
+        {
+            if(pointerTrace is null){pointerTimer.Stop();return;}
+            if(core.Rendering)preview.Invalidate();
+            if(pointerClock.ElapsedMilliseconds>=pointerTrace.DurationMs)
+            {
+                pointerTimer.Stop();
+                core.Add(Severity.INFO,"VIRTUAL_POINTER","MOTION_COMPLETE",
+                    $"virtual_only=true actual_elapsed_ms={pointerClock.ElapsedMilliseconds} "+
+                    $"distance_px={pointerTrace.LengthPx.ToString("0.0",CultureInfo.InvariantCulture)} "+
+                    $"peak_speed_px_s={pointerTrace.PeakSpeedPxPerSecond.ToString("0.0",CultureInfo.InvariantCulture)} samples={pointerTrace.Points.Count}");
+            }
+        };
         refreshTimer.Tick+=(_,_)=>{if(refreshNeeded){refreshNeeded=false;UpdateView();}};
         refreshTimer.Start();
         metricsTimer.Tick+=(_,_)=>
@@ -101,7 +120,7 @@ internal sealed class MainWindow : Form
             else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
                 "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
         };
-        FormClosing+=(_,_)=>{sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();};
+        FormClosing+=(_,_)=>{sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();pointerTimer.Stop();};
     }
     private Button Button(string label,Action action)
     {
@@ -126,7 +145,8 @@ internal sealed class MainWindow : Form
         simButton=Button("Simulation starten",ToggleSim);
         agentButton=Button("Offline-Agent: AUS",ToggleAgent);
         renderButton=Button("Grafik ausschalten",ToggleRender);
-        actionBar.Controls.AddRange(new Control[]{simButton,agentButton,renderButton,
+        pointerButton=Button("Maus-Demo",RunVirtualPointer);
+        actionBar.Controls.AddRange(new Control[]{simButton,agentButton,renderButton,pointerButton,
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
         outer.Controls.Add(actionBar,0,2);
@@ -139,9 +159,23 @@ internal sealed class MainWindow : Form
         {
             e.Graphics.Clear(preview.BackColor);
             var title=core.Rendering?"LOKALE GRAFIKVORSCHAU":"RENDERER AUS";
-            TextRenderer.DrawText(e.Graphics,title,new Font("Segoe UI",18,FontStyle.Bold),new Point(24,32),Color.FromArgb(29,56,91));
-            TextRenderer.DrawText(e.Graphics,"Simulation / kein OSRS-Rendering · Ereignisverarbeitung unabhängig",Font,
-                new Point(26,76),Color.FromArgb(70,90,114));
+            using var font=new Font("Segoe UI",18,FontStyle.Bold);
+            TextRenderer.DrawText(e.Graphics,title,font,new Point(24,23),Color.FromArgb(29,56,91));
+            TextRenderer.DrawText(e.Graphics,"Nur lokale Vorschau: keine OS-Mauseingabe oder OSRS-Verbindung",Font,
+                new Point(26,70),Color.FromArgb(70,90,114));
+            if(core.Rendering && pointerTrace is not null)
+            {
+                e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var elapsed=Math.Min(pointerTrace.DurationMs,(int)pointerClock.ElapsedMilliseconds);
+                var shown=pointerTrace.Points.Where(p=>p.OffsetMs<=elapsed).ToArray();
+                if(shown.Length<1)shown=new[]{pointerTrace.Points[0]};
+                using var tracePen=new Pen(Color.FromArgb(47,117,181),2);
+                if(shown.Length>=2)e.Graphics.DrawLines(tracePen,shown.Select(p=>new PointF(p.X,p.Y)).ToArray());
+                var last=shown[^1];
+                e.Graphics.FillEllipse(Brushes.DarkOrange,last.X-4,last.Y-4,8,8);
+                var goal=pointerTrace.Points[^1];
+                e.Graphics.DrawEllipse(Pens.DarkGreen,goal.X-7,goal.Y-7,14,14);
+            }
         };
         content.Controls.Add(preview,0,0);
         var filters=new FlowLayoutPanel {Dock=DockStyle.Fill};
@@ -177,6 +211,19 @@ internal sealed class MainWindow : Form
         }
         sim.SetAgentEnabled(!sim.AgentEnabled);
         agentButton.Text=sim.AgentEnabled?"Offline-Agent: AN":"Offline-Agent: AUS";
+    }
+    private void RunVirtualPointer()
+    {
+        if(pointerTimer.Enabled)return;
+        var start=new PointF(30,119);
+        var goal=new PointF(Math.Max(120,preview.ClientSize.Width-30),119);
+        // A standalone, measurable motion inside the preview only. No Windows cursor movement.
+        pointerTrace=PointerMotion.Generate(start,goal,760+(pointerRuns%3)*90,3401+pointerRuns++);
+        pointerClock.Restart();
+        core.Add(Severity.INFO,"VIRTUAL_POINTER","MOTION_START",
+            $"virtual_only=true duration_ms={pointerTrace.DurationMs} samples={pointerTrace.Points.Count} "+
+            $"start=({start.X:0},{start.Y:0}) target=({goal.X:0},{goal.Y:0})");
+        pointerTimer.Start();
     }
     private void ToggleRender()
     {
@@ -246,9 +293,10 @@ internal static class SelfTest
             try {Updater.ParseManifest(manifest.Replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","notahash"));throw new Exception("Hash accepted");}
             catch(FormatException){}
             OfflineAgentTests.Run();
+            PointerMotionTests.Run();
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: offline agent, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: offline agent, virtual pointer, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }
