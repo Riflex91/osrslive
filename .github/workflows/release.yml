@@ -25,7 +25,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Extract source
-        run: unzip -q source/osrslive-src.zip -d .
+        run: unzip -oq source/osrslive-src.zip -d .
       - name: Compile Java 17 target
         run: |
           mkdir -p build/classes
