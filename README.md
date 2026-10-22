@@ -51,3 +51,18 @@ Siehe [technische Vergleichsanalyse](docs/OSRS-BOT-ARCHITEKTUR-ANALYSE-2026-10-2
 - Kontrollierter Update-Test: 0.3.0 lokal starten, nach Manifest-Upgrade auf 0.3.1 muss die 0.3.1-Version neu starten und `PREVIOUS_UPDATE` melden. Bei Fehlschlag: `%LOCALAPPDATA%\\OSRSLiveDiagnostics\\startup.log` pruefen.
 
 Diese Anwendung ist weiterhin ausschliesslich ein Diagnose-/Simulationsclient, kein Jagex-Client.
+
+## v0.4.0 – Offline-Agentenkern aus der Bot-Vergleichsanalyse
+
+- **Offline-Agent: AN/AUS** startet eine isolierte autonome Demo **im Simulator**.
+- `AgentSnapshot` enthält eine eindeutige Tick-ID, Herkunft, Zeitstempel, Health und Inventarfüllung.
+- `OfflineAgent.Plan` ist ein deterministischer, priorisierter Planner: Gesundheit → Bank → Sammeln.
+- `ActionPhase` unterscheidet `Blocked`, `Planned`, `Confirmed` und `Failed`.
+- `OfflineAgent.Confirm` meldet Erfolg **nur nach beobachteter Zustandsänderung**.
+- Alte, fehlerhafte, nicht monotone und externe Snapshots werden blockiert.
+- Ausführungen sind technisch auf rein lokale Simulation begrenzt; Replay erlaubt nur Planung.
+- **Log kopieren** erfasst `ACTION_PLANNED`, `ACTION_CONFIRMED` und mögliche Fehler.
+- Selbsttests prüfen Prioritäten, Banking, Regeneration, State-Effect-Confirmation, Datenfrische und harte Quellgrenzen.
+- Kein OSRS-Login, keine Verbindung zu Jagex, kein Input-Sender und keine Erkennungsumgehung.
+
+Siehe [Offline-Agent-Architektur](docs/OFFLINE-AGENT-ROADMAP.md) und die [Bot-Vergleichsanalyse](docs/OSRS-BOT-ARCHITEKTUR-ANALYSE-2026-10-22.md).

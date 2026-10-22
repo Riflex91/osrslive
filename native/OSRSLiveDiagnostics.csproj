@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.3.1</Version>
+    <Version>0.4.0</Version>
     <AssemblyName>OSRS-Live-Diagnostics</AssemblyName>
     <ApplicationTitle>OSRS Live Diagnostics</ApplicationTitle>
     <PublishSingleFile>true</PublishSingleFile>

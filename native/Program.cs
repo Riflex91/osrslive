@@ -37,7 +37,7 @@ internal sealed class MainWindow : Form
     private readonly Diagnostics core=new();
     private readonly LocalSimulation sim;
     private readonly Label header=new(), stats=new(), footer=new();
-    private Button simButton=new(), renderButton=new();
+    private Button simButton=new(), renderButton=new(), agentButton=new();
     private readonly TextBox log=new(), search=new();
     private readonly ComboBox filter=new();
     private readonly CheckBox pause=new();
@@ -124,8 +124,9 @@ internal sealed class MainWindow : Form
         outer.Controls.Add(stats,0,1);
         var actionBar=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,AutoScroll=true};
         simButton=Button("Simulation starten",ToggleSim);
+        agentButton=Button("Offline-Agent: AUS",ToggleAgent);
         renderButton=Button("Grafik ausschalten",ToggleRender);
-        actionBar.Controls.AddRange(new Control[]{simButton,renderButton,
+        actionBar.Controls.AddRange(new Control[]{simButton,agentButton,renderButton,
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
         outer.Controls.Add(actionBar,0,2);
@@ -165,6 +166,16 @@ internal sealed class MainWindow : Form
     {
         if(sim.Running)sim.Stop();else sim.Start();
         simButton.Text=sim.Running?"Simulation stoppen":"Simulation starten";
+    }
+    private void ToggleAgent()
+    {
+        if(!sim.Running && !sim.AgentEnabled)
+        {
+            sim.Start();
+            simButton.Text="Simulation stoppen";
+        }
+        sim.SetAgentEnabled(!sim.AgentEnabled);
+        agentButton.Text=sim.AgentEnabled?"Offline-Agent: AN":"Offline-Agent: AUS";
     }
     private void ToggleRender()
     {
@@ -233,9 +244,10 @@ internal static class SelfTest
             catch(FormatException){}
             try {Updater.ParseManifest(manifest.Replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","notahash"));throw new Exception("Hash accepted");}
             catch(FormatException){}
+            OfflineAgentTests.Run();
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: offline agent, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }
