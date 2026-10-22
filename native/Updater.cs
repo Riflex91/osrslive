@@ -15,6 +15,28 @@ internal static class Updater
     { Timeout = TimeSpan.FromSeconds(14) };
     private static readonly string Base = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSLiveDiagnostics");
     internal static readonly string StartupLog = Path.Combine(Base,"startup.log");
+    private static readonly string OutcomePath = Path.Combine(Base,"last-update.status");
+    private static void RecordOutcome(string code)
+    {
+        try { Directory.CreateDirectory(Base); File.WriteAllText(OutcomePath,code); }
+        catch { /* Reporting must not prevent a completed update. */ }
+    }
+    internal static string? TakeLastOutcome()
+    {
+        try
+        {
+            if(!File.Exists(OutcomePath)) return null;
+            string code=File.ReadAllText(OutcomePath).Trim();
+            File.Delete(OutcomePath);
+            return code switch
+            {
+                "APPLIED" => "Letztes Update installiert und neue EXE gestartet.",
+                "RESTART_FAILED" => "Neustart nach Update fehlgeschlagen; Rollback versucht.",
+                _ => "Unbekannter Updatestatus."
+            };
+        }
+        catch { return null; }
+    }
     private static void Log(string s)
     {
         try {Directory.CreateDirectory(Base);File.AppendAllText(StartupLog,$"{DateTime.Now:O} {s}\n");} catch { /* app startup must not depend on log writes */ }
@@ -101,7 +123,7 @@ internal static class Updater
         catch(Exception e)
         {
             Log("Update check/install failed: "+e.GetType().Name+" "+e.Message);
-            status("Updateprüfung nicht möglich; lokale Version läuft weiter.");
+            status($"Updateprüfung fehlgeschlagen ({e.GetType().Name}); lokale Version läuft weiter.");
             return false;
         }
     }
@@ -126,6 +148,7 @@ internal static class Updater
             }
             try
             {
+                RecordOutcome("APPLIED");
                 Process.Start(new ProcessStartInfo(original){UseShellExecute=true,WorkingDirectory=Path.GetDirectoryName(original)!});
                 Log("Update installed and relaunched successfully");
                 // The backup is retained until the next successful startup for manual rollback.
@@ -135,6 +158,8 @@ internal static class Updater
             {
                 // Restart failure: restore old known-good version.
                 File.Delete(original);File.Move(backup,original);
+                RecordOutcome("RESTART_FAILED");
+                try {Process.Start(new ProcessStartInfo(original){UseShellExecute=true,WorkingDirectory=Path.GetDirectoryName(original)!});} catch {}
                 throw;
             }
         }

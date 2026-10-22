@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Drawing;
 using System.IO.Compression;
 using System.Text;
@@ -45,6 +46,8 @@ internal sealed class MainWindow : Form
     private readonly System.Windows.Forms.Timer metricsTimer=new(){Interval=5000};
     private volatile bool refreshNeeded=true;
     private readonly Stopwatch eventClock=Stopwatch.StartNew();
+    private TimeSpan lastPerformanceElapsed=TimeSpan.Zero;
+    private TimeSpan lastCpuTime=Process.GetCurrentProcess().TotalProcessorTime;
     internal MainWindow()
     {
         sim=new LocalSimulation(core);
@@ -57,12 +60,29 @@ internal sealed class MainWindow : Form
         InitializeUI();
         core.Add(Severity.INFO,"CORE","STARTED",$"Version {Diagnostics.Version} | Standalone Windows EXE, keine Jagex-Verbindung");
         core.Add(Severity.INFO,"CORE","PRIVACY","Keine Zugangsdaten oder Tokens im Export");
+        if(Updater.TakeLastOutcome() is string outcome)
+            core.Add(Severity.INFO,"UPDATER","PREVIOUS_UPDATE",outcome);
         refreshTimer.Tick+=(_,_)=>{if(refreshNeeded){refreshNeeded=false;UpdateView();}};
         refreshTimer.Start();
         metricsTimer.Tick+=(_,_)=>
         {
-            var p=Process.GetCurrentProcess();
-            core.Add(Severity.DEBUG,"RUNTIME","PERF_SAMPLE",$"working_set_mib={p.WorkingSet64/1024/1024} threads={p.Threads.Count} uptime_s={eventClock.Elapsed.TotalSeconds:0}");
+            using var p=Process.GetCurrentProcess();
+            var now=eventClock.Elapsed;
+            var cpuNow=p.TotalProcessorTime;
+            var intervalMs=Math.Max(1d,(now-lastPerformanceElapsed).TotalMilliseconds);
+            var cpuPct=Math.Clamp((cpuNow-lastCpuTime).TotalMilliseconds*100d/
+                (intervalMs*Math.Max(1,Environment.ProcessorCount)),0,100);
+            var timerDelayMs=Math.Max(0d,intervalMs-metricsTimer.Interval);
+            lastCpuTime=cpuNow;
+            lastPerformanceElapsed=now;
+            core.Add(Severity.DEBUG,"RUNTIME","PERF_SAMPLE",
+                $"working_set_mib={p.WorkingSet64/1024/1024} threads={p.Threads.Count} "+
+                $"cpu_pct={cpuPct.ToString("0.0",CultureInfo.InvariantCulture)} "+
+                $"ui_timer_lag_ms={timerDelayMs.ToString("0",CultureInfo.InvariantCulture)} "+
+                $"uptime_s={now.TotalSeconds:0}");
+            if(timerDelayMs>1000)
+                core.Add(Severity.WARN,"RUNTIME","UI_TIMER_DELAY",
+                    $"UI-Timer mehr als 1000 ms verspätet: {timerDelayMs:0} ms");
         };
         metricsTimer.Start();
         Shown+=async (_,_)=>
@@ -70,13 +90,16 @@ internal sealed class MainWindow : Form
             core.Add(Severity.INFO,"UPDATER","CHECK_START","Automatische GitHub-Updateprüfung");
             var changed=await Updater.CheckAndUpdateAsync(msg=>
             {
+                core.Add(Severity.INFO,"UPDATER","STATUS",msg);
                 if(!IsDisposed && IsHandleCreated) BeginInvoke(()=>footer.Text=msg);
             });
             if(changed)
             {
+                core.Add(Severity.INFO,"UPDATER","RESTART_REQUESTED","Verifiziertes Update; starte Hilfsprozess.");
                 Close();
             }
-            else core.Add(Severity.INFO,"UPDATER","CHECK_DONE","Lokale Version aktiv; Prüfung abgeschlossen");
+            else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
+                "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
         };
         FormClosing+=(_,_)=>{sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();};
     }
@@ -203,9 +226,9 @@ internal static class SelfTest
             for(int i=1;i<=3;i++){log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","tick="+i);Thread.Sleep(4);}
             if(log.Stats().Ticks!=3||log.TickStats().Count!=2)throw new Exception("Tick test");
             if(!log.Report().Contains("Tick-Abstände") || !log.Json().Contains("simulationOnly"))throw new Exception("Export test");
-            const string manifest="version=0.3.1\nexeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.3.1/OSRS-Live-Diagnostics.exe\nexeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+            const string manifest="version=0.3.2\nexeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.3.2/OSRS-Live-Diagnostics.exe\nexeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             var info=Updater.ParseManifest(manifest);
-            if(info.Version.ToString()!="0.3.1")throw new Exception("Version parse");
+            if(info.Version.ToString()!="0.3.2")throw new Exception("Version parse");
             try {Updater.ParseManifest(manifest.Replace("github.com","evil.example"));throw new Exception("Host accepted");}
             catch(FormatException){}
             try {Updater.ParseManifest(manifest.Replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","notahash"));throw new Exception("Hash accepted");}
