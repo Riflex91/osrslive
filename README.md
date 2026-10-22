@@ -76,3 +76,7 @@ Siehe [Offline-Agent-Architektur](docs/OFFLINE-AGENT-ROADMAP.md) und die [Bot-Ve
 - **Keine Spielanbindung oder Anti-Cheat-Umgehung.** Für jegliche von Jagex genehmigte Integration sind schriftlich begrenzter Funktionsumfang, benannte Testkonten, Clientfreigabe, Abgleich mit Jagex und eine zugehörige Account-Allowlist erforderlich. Keine Methode kann eine Sperre allein technisch ausschließen.
 
 Technische Prüfung: `--self-test`, Live-Simulationslog und Windows-CI.
+
+## v0.4.2 – Mining → GE: reproduzierbare Offline-Szenarien
+
+Die Schaltfläche **Mining → GE testen** führt fünf isolierte Testwelten mit Erzabbau, virtuellem Inventar, BFS-Navigation, GE-Verkauf, blockierten Wegen und abgewiesenen Angeboten aus. Kein echter Spielclient und keine Jagex-Verbindung. CLI: `--scenario-tests`. Siehe [Testdokumentation](docs/MINING-GE-SIMULATION-2026-10-22.md).

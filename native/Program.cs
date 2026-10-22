@@ -13,6 +13,7 @@ internal static class Program
     {
         if(args.Length>0 && args[0]=="--apply-update") return Updater.Apply(args);
         if(args.Length>0 && args[0]=="--self-test") return SelfTest.Run();
+        if(args.Length>0 && args[0]=="--scenario-tests") return SelfTest.RunScenarios();
         ApplicationConfiguration.Initialize();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_,e)=>
@@ -127,6 +128,7 @@ internal sealed class MainWindow : Form
         agentButton=Button("Offline-Agent: AUS",ToggleAgent);
         renderButton=Button("Grafik ausschalten",ToggleRender);
         actionBar.Controls.AddRange(new Control[]{simButton,agentButton,renderButton,
+            Button("Mining → GE testen",RunMiningGe),
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
         outer.Controls.Add(actionBar,0,2);
@@ -178,6 +180,34 @@ internal sealed class MainWindow : Form
         sim.SetAgentEnabled(!sim.AgentEnabled);
         agentButton.Text=sim.AgentEnabled?"Offline-Agent: AN":"Offline-Agent: AUS";
     }
+    private void RunMiningGe()
+    {
+        try
+        {
+            core.Add(Severity.INFO,"MINING_GE","SUITE_START",
+                "Fuenf deterministische Offline-Szenarien; keine Spielverbindung.");
+            foreach(var outcome in MiningScenario.Verify())
+            {
+                core.Add(Severity.INFO,"MINING_GE","SCENARIO_RESULT",outcome.Summary);
+                foreach(var ev in outcome.Trace)
+                {
+                    if(ev.Code is "ORE_MINED" or "MOVE" or "ROCK_WAIT")continue;
+                    core.Add(ev.Code is "ROUTE_ABORT" or "OFFER_REJECTED" ?
+                        Severity.WARN:Severity.INFO,"MINING_GE",ev.Code,
+                        $"scenario={outcome.Name} tick={ev.Tick} {ev.Detail}");
+                }
+            }
+            core.Add(Severity.INFO,"MINING_GE","SUITE_PASS",
+                "5 Offline-Szenarien bestanden; Erzbuchhaltung, Verkauf und Navigation verifiziert.");
+            footer.Text="Mining → GE: Offline-Szenarien bestanden. Log kopieren.";
+        }
+        catch(Exception ex)
+        {
+            core.Add(Severity.ERROR,"MINING_GE","SUITE_FAILED",
+                ex.GetType().Name+": "+ex.Message);
+            footer.Text="Offline-Simulation fehlgeschlagen. Log kopieren.";
+        }
+    }
     private void ToggleRender()
     {
         core.SetRendering(!core.Rendering);
@@ -227,6 +257,21 @@ internal sealed class MainWindow : Form
 
 internal static class SelfTest
 {
+    internal static int RunScenarios()
+    {
+        try
+        {
+            foreach(var r in MiningScenario.Verify())
+                Console.WriteLine("SCENARIO "+r.Summary);
+            Console.WriteLine("SCENARIO SUITE PASS (5 synthetic environments)");
+            return 0;
+        }
+        catch(Exception e)
+        {
+            Console.Error.WriteLine("SCENARIO SUITE FAIL "+e);
+            return 1;
+        }
+    }
     internal static int Run()
     {
         try
@@ -246,9 +291,10 @@ internal static class SelfTest
             try {Updater.ParseManifest(manifest.Replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","notahash"));throw new Exception("Hash accepted");}
             catch(FormatException){}
             OfflineAgentTests.Run();
+            if(RunScenarios()!=0)throw new Exception("Mining/GE scenario suite failed");
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: offline agent, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }
