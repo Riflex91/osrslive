@@ -166,6 +166,7 @@ internal sealed class MainWindow : Form
     {
         if(sim.Running)sim.Stop();else sim.Start();
         simButton.Text=sim.Running?"Simulation stoppen":"Simulation starten";
+        if(!sim.Running)agentButton.Text="Offline-Agent: AUS";
     }
     private void ToggleAgent()
     {

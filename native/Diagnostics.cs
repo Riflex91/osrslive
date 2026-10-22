@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version = "0.4.0";
+    internal const string Version = "0.4.1";
     private const int Capacity = 10000;
     private readonly object sync = new();
     private readonly List<LogEvent> entries = new();
@@ -122,77 +122,158 @@ internal sealed class Diagnostics
 internal sealed class LocalSimulation : IDisposable
 {
     private readonly Diagnostics diagnostics;
+    private readonly object sync=new();
     private System.Threading.Timer? timer;
-    private readonly Random random = new(1103);
-    private int ticks, x=3200,y=3200;
-    private int agentEnabled, agentInventory, agentHealth=100, tickBusy;
-    private OfflineAgent planner = new();
-    internal bool Running => timer!=null;
-    internal bool AgentEnabled => Volatile.Read(ref agentEnabled)!=0;
-    internal LocalSimulation(Diagnostics diagnostics) => this.diagnostics=diagnostics;
+    private readonly Random random=new(1103);
+    private int ticks,x=3200,y=3200,tickBusy;
+    // World simulation is the single source of truth: no separate agent inventory.
+    private int inventoryUsed,hitpoints=100;
+    private bool agentEnabled;
+    private OfflineAgent planner=new();
+    private AgentPlan? pending;
+    private AgentSnapshot? pendingBefore;
+
+    internal bool Running {get {lock(sync)return timer!=null;}}
+    internal bool AgentEnabled {get {lock(sync)return agentEnabled;}}
+    internal LocalSimulation(Diagnostics diagnostics)=>this.diagnostics=diagnostics;
+
     internal void SetAgentEnabled(bool enabled)
     {
-        if(enabled && !Running) throw new InvalidOperationException("Start simulation first.");
-        if(enabled) {planner=new OfflineAgent();agentInventory=0;agentHealth=100;}
-        Volatile.Write(ref agentEnabled,enabled?1:0);
-        diagnostics.Add(Severity.INFO,"OFFLINE_AGENT",enabled?"ENABLED":"DISABLED",
-            "Nur lokaler Simulator; keine Spielaktionen oder Netzwerkverbindung");
-    }
-    private void AgentTick(int n)
-    {
-        // Decision and effect verification operate exclusively on in-memory simulated state.
-        if(n%23==0) agentHealth=15;
-        var before=new AgentSnapshot(n,DateTimeOffset.UtcNow,AgentSource.Simulation,agentHealth,agentInventory,28);
-        var decision=planner.Plan(before,DateTimeOffset.UtcNow);
-        if(decision.Phase==ActionPhase.Blocked)
+        lock(sync)
         {
-            diagnostics.Add(Severity.WARN,"OFFLINE_AGENT","PLAN_BLOCKED",
-                $"id={decision.Id} tick={n} reason={decision.Reason}");
-            return;
+            if(enabled && timer==null)throw new InvalidOperationException("Start simulation first.");
+            if(enabled)
+            {
+                planner=new OfflineAgent();
+                pending=null;pendingBefore=null;
+                // Preserve real simulation inventory; only reset planner state.
+            }
+            else {pending=null;pendingBefore=null;}
+            agentEnabled=enabled;
         }
-        diagnostics.Add(Severity.DEBUG,"OFFLINE_AGENT","ACTION_PLANNED",
-            $"id={decision.Id} tick={n} action={decision.Action} reason={decision.Reason}");
-        var after=OfflineAgent.Simulate(decision,before);
-        var outcome=OfflineAgent.Confirm(decision,before,after);
-        agentHealth=after.Hitpoints;agentInventory=after.InventoryUsed;
+        diagnostics.Add(Severity.INFO,"OFFLINE_AGENT",enabled?"ENABLED":"DISABLED",
+            "Nur lokaler Simulator; kein OSRS-Zugriff. Eine gemeinsame Weltzustandsquelle.");
+    }
+
+    private AgentSnapshot Observe(int tick)=>
+        new(tick,DateTimeOffset.UtcNow,AgentSource.Simulation,hitpoints,inventoryUsed,28);
+
+    // Simulated environment resolves an action only on a later game tick.
+    // Every 17th action is intentionally dropped to exercise timeout recovery.
+    private bool ResolvePending(int tick)
+    {
+        if(pending is null || pendingBefore is null)return true;
+        if(tick<=pending.Tick)return false;
+        var plan=pending;
+        var before=pendingBefore;
+        if(plan.Id%17==0)
+        {
+            if(tick-plan.Tick<3)
+            {
+                diagnostics.Add(Severity.DEBUG,"OFFLINE_AGENT","ACTION_PENDING",
+                    $"id={plan.Id} tick={tick} simulated_ack_drop=true");
+                return false;
+            }
+            diagnostics.Add(Severity.WARN,"OFFLINE_AGENT","ACTION_TIMED_OUT",
+                $"id={plan.Id} action={plan.Action} synthetic_fault=true no_state_change");
+            pending=null;pendingBefore=null;
+            return true;
+        }
+        var simulated=OfflineAgent.Simulate(plan,before);
+        bool inventoryChanged=inventoryUsed!=simulated.InventoryUsed;
+        bool healthChanged=hitpoints!=simulated.Hitpoints;
+        inventoryUsed=simulated.InventoryUsed;
+        hitpoints=simulated.Hitpoints;
+        var outcome=OfflineAgent.Confirm(plan,before,Observe(tick));
         diagnostics.Add(outcome.Phase==ActionPhase.Confirmed?Severity.INFO:Severity.ERROR,
             "OFFLINE_AGENT",outcome.Phase==ActionPhase.Confirmed?"ACTION_CONFIRMED":"ACTION_FAILED",
-            $"id={outcome.Id} action={decision.Action} reason={outcome.Reason} hp={agentHealth} inventory={agentInventory}/28");
+            $"id={outcome.Id} planned_tick={plan.Tick} confirmed_tick={tick} action={plan.Action} reason={outcome.Reason} hp={hitpoints} inventory={inventoryUsed}/28");
+        if(inventoryChanged)
+            diagnostics.Add(Severity.INFO,"SIMULATOR","INVENTORY_CHANGED",
+                $"slots_used={inventoryUsed} capacity=28 source=SHARED_WORLD");
+        if(healthChanged)
+            diagnostics.Add(Severity.INFO,"SIMULATOR","HEALTH_CHANGED",
+                $"hp={hitpoints} source=SHARED_WORLD");
+        pending=null;pendingBefore=null;
+        return true;
     }
-    internal void Start()
+
+    private void AgentTick(int tick)
     {
-        if(timer != null) return;
-        ticks=0; planner=new OfflineAgent();agentInventory=0;agentHealth=100;
-        diagnostics.SetMode("SIMULATION (keine OSRS-Verbindung)");
-        diagnostics.Add(Severity.INFO,"SIMULATOR","START","Lokaler Testmodus");
-        timer = new System.Threading.Timer(_ =>
+        lock(sync)
         {
-            if(Interlocked.Exchange(ref tickBusy,1)!=0)
+            if(!agentEnabled)return;
+            if(!ResolvePending(tick))return;
+            if(tick%23==0)
             {
-                diagnostics.Add(Severity.WARN,"SIMULATOR","TICK_REENTRY","Vorheriger Simulationstick noch aktiv");
+                hitpoints=15;
+                diagnostics.Add(Severity.INFO,"SIMULATOR","HEALTH_CHANGED",
+                    $"hp={hitpoints} reason=SYNTHETIC_DAMAGE source=SHARED_WORLD");
+            }
+            var snapshot=Observe(tick);
+            var decision=planner.Plan(snapshot,DateTimeOffset.UtcNow);
+            if(decision.Phase==ActionPhase.Blocked)
+            {
+                diagnostics.Add(Severity.WARN,"OFFLINE_AGENT","PLAN_BLOCKED",
+                    $"id={decision.Id} tick={tick} reason={decision.Reason}");
                 return;
             }
-            try
-            {
-                var n=Interlocked.Increment(ref ticks);
-                x+=random.Next(-1,2);y+=random.Next(-1,2);
-                diagnostics.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK",$"tick={n} x={x} y={y} plane=0");
-                if(n%7==0) diagnostics.Add(Severity.INFO,"SIMULATOR","NPC_SPAWNED","npc_id=301 near=player");
-                if(n%11==0) diagnostics.Add(Severity.INFO,"SIMULATOR","INVENTORY_CHANGED",$"slots_used={Math.Min(28,n/11)}");
-                if(n%19==0) diagnostics.Add(Severity.WARN,"SIMULATOR","SIMULATED_DELAY","Künstliche Warnung für Testzwecke; keine reale Verzögerung");
-                if(AgentEnabled) AgentTick(n);
-            }
-            catch(Exception ex) {diagnostics.Add(Severity.ERROR,"SIMULATOR","TICK_FAILED",ex.GetType().Name);}
-            finally { Volatile.Write(ref tickBusy,0); }
-        },null,0,600);
+            pending=decision;pendingBefore=snapshot;
+            diagnostics.Add(Severity.DEBUG,"OFFLINE_AGENT","ACTION_PLANNED",
+                $"id={decision.Id} requested_tick={tick} action={decision.Action} reason={decision.Reason} hp={hitpoints} inventory={inventoryUsed}/28");
+        }
     }
+
+    internal void Start()
+    {
+        lock(sync)
+        {
+            if(timer!=null)return;
+            ticks=0;x=3200;y=3200;tickBusy=0;
+            hitpoints=100;inventoryUsed=0;agentEnabled=false;
+            pending=null;pendingBefore=null;planner=new OfflineAgent();
+            diagnostics.SetMode("SIMULATION (keine OSRS-Verbindung)");
+            diagnostics.Add(Severity.INFO,"SIMULATOR","START","Lokaler Testmodus; ein gemeinsamer Inventarzustand");
+            timer=new System.Threading.Timer(_=>
+            {
+                if(Interlocked.Exchange(ref tickBusy,1)!=0)
+                {
+                    diagnostics.Add(Severity.WARN,"SIMULATOR","TICK_REENTRY","Simulierter Tick noch aktiv");
+                    return;
+                }
+                try
+                {
+                    var tick=Interlocked.Increment(ref ticks);
+                    x+=random.Next(-1,2);y+=random.Next(-1,2);
+                    diagnostics.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK",
+                        $"tick={tick} x={x} y={y} plane=0");
+                    if(tick%7==0) diagnostics.Add(Severity.INFO,"SIMULATOR","NPC_SPAWNED","npc_id=301 near=player");
+                    if(tick%19==0) diagnostics.Add(Severity.WARN,"SIMULATOR","SIMULATED_DELAY",
+                        "Künstliche Warnung für Testzwecke; keine reale Verzögerung");
+                    AgentTick(tick);
+                }
+                catch(Exception ex)
+                {
+                    diagnostics.Add(Severity.ERROR,"SIMULATOR","TICK_FAILED",ex.GetType().Name);
+                }
+                finally {Volatile.Write(ref tickBusy,0);}
+            },null,0,600);
+        }
+    }
+
     internal void Stop()
     {
-        var previous=Interlocked.Exchange(ref timer,null);
-        if(previous == null) return;
+        System.Threading.Timer? previous;
+        lock(sync)
+        {
+            previous=timer;
+            if(previous==null)return;
+            timer=null;agentEnabled=false;pending=null;pendingBefore=null;
+        }
         previous.Dispose();
         diagnostics.SetMode("NICHT VERBUNDEN");
         diagnostics.Add(Severity.INFO,"SIMULATOR","STOP","Testmodus angehalten");
     }
+
     public void Dispose()=>Stop();
 }

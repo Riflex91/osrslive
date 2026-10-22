@@ -64,7 +64,8 @@ internal sealed class OfflineAgent
     {
         if(plan.Phase != ActionPhase.Planned || before.Source != AgentSource.Simulation ||
            after.Source != AgentSource.Simulation || plan.Tick != before.Tick ||
-           after.Tick != before.Tick || after.InventoryCapacity != before.InventoryCapacity)
+           after.Tick <= before.Tick || after.Tick > before.Tick + 3 ||
+           after.InventoryCapacity != before.InventoryCapacity)
             return new AgentOutcome(plan.Id,ActionPhase.Failed,"INVALID_CONFIRMATION",after);
 
         bool observed = plan.Action switch
@@ -95,14 +96,16 @@ internal static class OfflineAgentTests
         var gather=planner.Plan(S(1,100,0),t);
         Expect(gather.Action==AgentAction.Collect && gather.Phase==ActionPhase.Planned,"collect");
         var after=OfflineAgent.Simulate(gather,S(1,100,0));
-        Expect(OfflineAgent.Confirm(gather,S(1,100,0),after).Phase==ActionPhase.Confirmed,"confirm collect");
-        Expect(OfflineAgent.Confirm(gather,S(1,100,0),S(1,100,0)).Phase==ActionPhase.Failed,"must observe effect");
+        Expect(OfflineAgent.Confirm(gather,S(1,100,0),after with { Tick=2 }).Phase==ActionPhase.Confirmed,"confirm collect after a later tick");
+        Expect(OfflineAgent.Confirm(gather,S(1,100,0),S(2,100,0)).Phase==ActionPhase.Failed,"must observe effect");
+        Expect(OfflineAgent.Confirm(gather,S(1,100,0),S(5,100,1)).Phase==ActionPhase.Failed,"late confirmation");
+        Expect(OfflineAgent.Confirm(gather,S(1,100,0),S(1,100,1)).Phase==ActionPhase.Failed,"no same tick confirmation");
         var bank=planner.Plan(S(2,100,28),t);
         Expect(bank.Action==AgentAction.Bank,"bank priority");
-        Expect(OfflineAgent.Confirm(bank,S(2,100,28),OfflineAgent.Simulate(bank,S(2,100,28))).Phase==ActionPhase.Confirmed,"bank confirmation");
+        Expect(OfflineAgent.Confirm(bank,S(2,100,28),OfflineAgent.Simulate(bank,S(2,100,28)) with { Tick=3 }).Phase==ActionPhase.Confirmed,"bank confirmation");
         var heal=planner.Plan(S(3,10,28),t);
         Expect(heal.Action==AgentAction.Recover,"safety priority");
-        Expect(OfflineAgent.Confirm(heal,S(3,10,28),OfflineAgent.Simulate(heal,S(3,10,28))).Phase==ActionPhase.Confirmed,"recover confirmation");
+        Expect(OfflineAgent.Confirm(heal,S(3,10,28),OfflineAgent.Simulate(heal,S(3,10,28)) with { Tick=4 }).Phase==ActionPhase.Confirmed,"recover confirmation");
         Expect(planner.Plan(S(3,100,0),t).Phase==ActionPhase.Blocked,"duplicate tick");
         Expect(planner.Plan(S(4,100,0,AgentSource.External),t).Phase==ActionPhase.Blocked,"external blocked");
         Expect(planner.Plan(S(4,100,0) with { CapturedUtc=t.AddSeconds(-5) },t).Phase==ActionPhase.Blocked,"stale blocked");
