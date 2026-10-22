@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: osrslive-windows-exe-release
+  group: osrslive-windows-exe-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
