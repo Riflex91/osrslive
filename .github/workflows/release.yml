@@ -1,0 +1,71 @@
+name: Build and publish Windows client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "source/osrslive-src.zip"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: osrslive-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Extract source
+        run: unzip -q source/osrslive-src.zip -d .
+      - name: Compile Java 17 target
+        run: |
+          mkdir -p build/classes
+          find src/main/java -name '*.java' > /tmp/java-sources.txt
+          javac --release 17 -encoding UTF-8 -d build/classes @/tmp/java-sources.txt
+          jar --create --file OSRS-Diagnostics-Client.jar --main-class de.osrs.diag.DiagnosticsApp -C build/classes .
+      - name: Verify
+        run: java -Djava.awt.headless=true -jar OSRS-Diagnostics-Client.jar --self-test
+      - name: Package for Windows
+        run: |
+          VERSION="$(tr -d '\r\n' < VERSION.txt)"
+          test "$VERSION" = "0.2.0" || { echo "Unexpected source version: $VERSION"; exit 1; }
+          mkdir -p release/OSRS-Live-Diagnostics
+          cp OSRS-Diagnostics-Client.jar START-OSRS-Diagnostics.cmd UPDATE-OSRS-Diagnostics.ps1 FIND-JAVA.ps1 COPY-STARTUP-LOG.cmd BUILD.ps1 README.md VERSION.txt release/OSRS-Live-Diagnostics/
+          (cd release && zip -qr "OSRS-Live-Diagnostics-v$VERSION-Windows.zip" OSRS-Live-Diagnostics)
+          cp OSRS-Diagnostics-Client.jar release/OSRS-Diagnostics-Client.jar
+          sha256sum release/OSRS-Diagnostics-Client.jar
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(tr -d '\r\n' < VERSION.txt)"
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" release/OSRS-Diagnostics-Client.jar "release/OSRS-Live-Diagnostics-v$VERSION-Windows.zip" --clobber
+          else
+            gh release create "v$VERSION" release/OSRS-Diagnostics-Client.jar "release/OSRS-Live-Diagnostics-v$VERSION-Windows.zip" --title "OSRS Live Diagnostics v$VERSION" --notes "Standalone diagnostics application; no RuneLite required. This is not an official game client."
+          fi
+      - name: Publish manifest only after release
+        run: |
+          VERSION="$(tr -d '\r\n' < VERSION.txt)"
+          SHA="$(sha256sum release/OSRS-Diagnostics-Client.jar | awk '{print $1}')"
+          {
+            echo "version=$VERSION"
+            echo "jarUrl=https://github.com/Riflex91/osrslive/releases/download/v$VERSION/OSRS-Diagnostics-Client.jar"
+            echo "jarSha256=$SHA"
+          } > update-manifest.properties
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add update-manifest.properties
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish verified update manifest v$VERSION [skip ci]"
+            git push
+          fi
