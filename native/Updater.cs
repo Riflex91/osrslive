@@ -91,7 +91,7 @@ internal static class Updater
                 psi.ArgumentList.Add(original);
                 psi.ArgumentList.Add(newExe);
                 psi.ArgumentList.Add(update.Sha256);
-                Process.Start(psi) ?? throw new InvalidOperationException("Cannot start update helper");
+                _ = Process.Start(psi) ?? throw new InvalidOperationException("Cannot start update helper");
                 status("Update verifiziert. Anwendung wird neu gestartet ...");
                 Log("Verified updater helper started");
                 return true;

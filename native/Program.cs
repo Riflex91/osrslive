@@ -43,7 +43,7 @@ internal sealed class MainWindow : Form
     private readonly Panel preview=new();
     private readonly System.Windows.Forms.Timer refreshTimer=new(){Interval=250};
     private readonly System.Windows.Forms.Timer metricsTimer=new(){Interval=5000};
-    private bool refreshNeeded=true, shuttingDown;
+    private volatile bool refreshNeeded=true;
     private readonly Stopwatch eventClock=Stopwatch.StartNew();
     internal MainWindow()
     {
@@ -74,7 +74,6 @@ internal sealed class MainWindow : Form
             });
             if(changed)
             {
-                shuttingDown=true;
                 Close();
             }
             else core.Add(Severity.INFO,"UPDATER","CHECK_DONE","Lokale Version aktiv; Prüfung abgeschlossen");
