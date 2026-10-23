@@ -38,7 +38,8 @@ internal sealed class MainWindow : Form
     private readonly Diagnostics core=new();
     private readonly LocalSimulation sim;
     private readonly Label header=new(), stats=new(), footer=new();
-    private Button simButton=new(), renderButton=new(), agentButton=new();
+    private Button simButton=new(), renderButton=new(), agentButton=new(), campaignButton=new();
+    private bool campaignRunning;
     private readonly TextBox log=new(), search=new();
     private readonly ComboBox filter=new();
     private readonly CheckBox pause=new();
@@ -127,8 +128,9 @@ internal sealed class MainWindow : Form
         simButton=Button("Simulation starten",ToggleSim);
         agentButton=Button("Offline-Agent: AUS",ToggleAgent);
         renderButton=Button("Grafik ausschalten",ToggleRender);
+        campaignButton=Button("Strategie-Langzeittest",RunCampaign);
         actionBar.Controls.AddRange(new Control[]{simButton,agentButton,renderButton,
-            Button("Mining → GE testen",RunMiningGe),
+            campaignButton,Button("Mining → GE testen",RunMiningGe),
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
         outer.Controls.Add(actionBar,0,2);
@@ -201,6 +203,38 @@ internal sealed class MainWindow : Form
                 $"activity={option.Id} score={option.Score} skill={option.Skill} "+
                 $"xp_per_hour={option.XpPerHour} gp_per_hour={option.NetGpPerHour} "+
                 "hypothetical_values=true no_game_execution=true");
+    }
+    private async void RunCampaign()
+    {
+        if(campaignRunning)return;
+        campaignRunning=true;campaignButton.Enabled=false;
+        core.Add(Severity.INFO,"CAMPAIGN","START",
+            "Offline-Langzeittest: nur fiktive Skills und GP, keine Spielverbindung.");
+        try
+        {
+            var outcome=await Task.Run(()=>
+            {
+                var path=OfflineCampaign.CheckpointPath;
+                bool wasSaved=File.Exists(path);
+                var before=OfflineCampaign.LoadOrCreate(path);
+                var after=OfflineCampaign.RunBatch(before,OfflineCampaign.BatchSize);
+                OfflineCampaign.Save(path,after);
+                return (before,after,wasSaved);
+            });
+            core.Add(Severity.INFO,"CAMPAIGN",outcome.wasSaved?"RESUMED":"CREATED",
+                $"initial_step={outcome.before.Steps} initial_gp={outcome.before.Coins} source=SYNTHETIC_FIXTURE");
+            core.Add(Severity.INFO,"CAMPAIGN","CHECKPOINT_SAVED",
+                $"steps={outcome.after.Steps} total_level={outcome.after.Levels.Values.Sum()} "+
+                $"synthetic_gp={outcome.after.Coins} "+
+                $"activity={outcome.after.LastActivity} simulated_only=true");
+            footer.Text="Strategie-Checkpoint gespeichert (nur Offline-Testdaten).";
+        }
+        catch(Exception ex)
+        {
+            core.Add(Severity.ERROR,"CAMPAIGN","FAILED",ex.GetType().Name+": "+ex.Message);
+            footer.Text="Strategie-Langzeittest fehlgeschlagen; Checkpoint erhalten.";
+        }
+        finally {campaignRunning=false;campaignButton.Enabled=true;}
     }
     private void RunMiningGe()
     {
@@ -314,10 +348,11 @@ internal static class SelfTest
             catch(FormatException){}
             OfflineAgentTests.Run();
             GoalPlannerTests.Run();
+            OfflineCampaignTests.Run();
             if(RunScenarios()!=0)throw new Exception("Mining/GE scenario suite failed");
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: long-term strategy, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }

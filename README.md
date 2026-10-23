@@ -89,3 +89,13 @@ Die Schaltfläche **Mining → GE testen** führt fünf isolierte Testwelten mit
 - Im Offline-Agent-Log stehen beispielhafte Ranglisten mit `synthetic_fixture=true`, **keine** echten XP-, Markt- oder Kontowerte.
 - Der Planner ist eine Entscheidungskomponente, **noch kein OSRS-Live-Client oder selbstspielender Account**.
 - Siehe [Strategie und Botvergleich](docs/OSRS-AUTONOMY-AND-WEALTH-PLAN-2026-10-23.md).
+
+
+## v0.5.1 – Persistente Offline-Strategiekampagne
+
+- Neuer Button **Strategie-Langzeittest**: führt jeweils 120 synthetische Strategie-Schritte aus, speichert eine Prüfungsversion mit Skillständen, fiktiven Münzen, Anzahl der Schritte und zuletzt gewählter Aktivität.
+- Beim nächsten Klick wird der geprüfte Checkpoint wiederhergestellt und deterministisch fortgesetzt.
+- Speicherung unter `%LOCALAPPDATA%\\OSRSLiveDiagnostics\\offline-campaign-synthetic.json` per temporärer Datei und Dateiaustausch. Fehlerhafte Dateien werden nicht überschrieben.
+- `CAMPAIGN CREATED/RESUMED/CHECKPOINT_SAVED` erscheinen beim Logexport, mit klar gekennzeichneten fiktiven Zahlen.
+- Selbsttests prüfen Progression, 24-Skill-Abdeckung, Geldreserve, deterministische Fortsetzung, beschädigte Dateien und Verhalten nach sämtlichen 99er-Leveln.
+- **Kein reales OSRS-Gameplay**: Der Langzeittest verändert weder Accounts noch Bank/GE und enthält keine Zugangsdaten.
