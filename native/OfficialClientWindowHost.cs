@@ -104,6 +104,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
             FindRunningClients().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId):
             FindRunningLauncherWindows().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId);
         if(window.Handle==IntPtr.Zero||!IsWindow(window.Handle)||!valid)return false;
+        var formerLauncher=CurrentKind==OfficialWindowKind.Launcher?attached:IntPtr.Zero;
         Detach();
         var hwnd=window.Handle;
         originalParent=GetParent(hwnd);
@@ -121,6 +122,9 @@ internal sealed class OfficialClientWindowHost : IDisposable
             CurrentKind=window.Kind;
             Resize();
             ShowWindow(hwnd,5);
+            if(window.Kind==OfficialWindowKind.Game &&
+               formerLauncher!=IntPtr.Zero && IsWindow(formerLauncher))
+                ShowWindow(formerLauncher,6); // Hide original launcher after "Play Now"
             diagnostics.SetMode(window.Kind==OfficialWindowKind.Game?
                 "OFFIZIELLES OSRS (SPIELFENSTER EINGEBETTET)":
                 "OFFIZIELLER JAGEX LAUNCHER (ANMELDUNG EINGEBETTET)");

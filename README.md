@@ -1,27 +1,35 @@
 # OSRS Play 0.8.0 – Echter offizieller Client im OSRS-Play-Fenster
 
-**Neu:** Der Reiter **„Offizielles OSRS (echtes Spiel)“** kann das
-*unveränderte Spielfenster* der über den Jagex Launcher gestarteten
-`osclient.exe` innerhalb des OSRS-Play-Hauptfensters darstellen.
+**Neu:** Der Reiter **„Offizielles OSRS (echtes Spiel)“** führt den
+sichtbaren Jagex-Launcher-Login und anschließend das echte `osclient.exe`-
+Spiel in **einem gemeinsamen OSRS-Play-Spielbereich** zusammen. Beide
+Fenster stammen aus unveränderter, offiziell installierter Jagex-Software.
 
-## Echte Anmeldung und Spielwelt
-1. Auf **Jagex Login** klicken. OSRS Play startet den **installierten**
-   offiziellen Jagex Launcher. Falls er fehlt, kann die offizielle
-   Installationsseite geöffnet werden.
-2. Anmeldung und Account-/Client-Auswahl **im Jagex Launcher** durchführen.
-   Dort **Official Client / Play Now** wählen. Jagex selbst behandelt
-   Passwort, MFA, Launcher-SSO und Sessiontoken. **Niemals Zugangsdaten
-   in OSRS Play eingeben.**
-3. Zu OSRS Play zurückkehren und **Client einbetten** anklicken.
-   Es werden ausschließlich Fenster des laufenden offiziellen
-   Prozesses `osclient.exe` berücksichtigt. Bei mehreren Prozessen
-   den gewünschten auswählen.
-4. Die tatsächliche offizielle Spielwelt sollte nun im Reiter sichtbar
-   sein. Mit der Maus können die vorhandenen **Original-Spielcontrols**
-   bedient werden. Login, Netzwerkverkehr und Spieldaten bleiben in der
-   unveränderten offiziellen Software.
-5. **Client freigeben** stellt das ursprüngliche Windows-Fenster wieder
-   her, ohne es zu beenden oder vom Jagex-Account abzumelden.
+## Anmeldung und Spiel im OSRS-Play-Fenster
+1. Den offiziellen **Jagex Launcher** und den **Official OSRS Client**
+   installiert haben. Es wird **keine** RuneLite-/HDOS-Erweiterung gebraucht.
+2. Auf **Anmeldung starten** klicken. OSRS Play öffnet den unveränderten,
+   installierten Jagex Launcher und **bettet dessen Windows-Fenster in den
+   Reiter `Offizielles OSRS` ein**, sobald es erscheint.
+3. Im **eingebetteten originalen Launcher** den Jagex Account anmelden,
+   Charakter und **Official Client** auswählen und `Play Now` wählen.
+   **Nur Jagex selbst** sieht Zugangsdaten, MFA und Sitzungstokens.
+4. OSRS Play erkennt das gestartete `osclient.exe`-Fenster und zeigt dieses
+   automatisch **im selben Reiter** an; das zuvor eingebettete Launcher-
+   Fenster wird wieder freigegeben und minimiert.
+5. Im echten OSRS-Client können die normalen Mausklicks verwendet werden.
+   **Fenster freigeben** stellt die ursprüngliche Windows-Einbettung wieder
+   her, ohne das offizielle Spiel oder den Jagex Launcher zu beenden.
+6. Falls die Erkennung fehlschlägt, **Login/Spiel verbinden** wählen;
+   bei mehreren Fenstern den gewünschten Prozess ausdrücklich auswählen.
+
+**Authentifizierungseinschränkung:** Der Jagex Launcher kann zur
+Web-/MFA-Anmeldung einen gesonderten Browser, Systemdialog oder ein
+Sicherheitsfenster verwenden. Diese Fenster werden aus Sicherheitsgründen
+**nicht abgefangen oder künstlich in einen eingebetteten Browser umgeleitet**.
+In diesem Fall kann ein Teil der Anmeldung außerhalb von OSRS Play
+stattfinden. Eine vollständig einfenstrige Anmeldung kann daher noch
+nicht garantiert werden.
 
 ### Technische und funktionale Grenzen
 - Dies ist **Windows-Fenster-Einbettung (SetParent)**, keine Kopie des
