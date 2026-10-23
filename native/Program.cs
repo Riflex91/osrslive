@@ -86,6 +86,7 @@ internal sealed class MainWindow : Form
         Font=new Font("Segoe UI",9);
         BackColor=Color.FromArgb(245,247,250);
         InitializeUI();
+        mini.SetPaused(true);
         officialHost=new OfficialClientWindowHost(officialSurface,core);
         RefreshGameControls();
         core.Add(Severity.INFO,"OFFICIAL_CLIENT","HOST_READY",
@@ -218,6 +219,7 @@ internal sealed class MainWindow : Form
     private void RefreshGameControls()
     {
         bool sandbox=gameTabs.SelectedTab==sandboxPage;
+        mini.SetPaused(!sandbox);
         botButton.Enabled=sandbox;
         botButton.Text=sandbox?(mini.BotRunning?"Bot stoppen":"Bot starten"):
             "Live-Agent: nicht verbunden";

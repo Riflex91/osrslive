@@ -249,7 +249,7 @@ internal sealed class MiniWorldClient : IDisposable
     private readonly object gate=new();
     private MiniWorldFrame? state;
     private Point? manual;
-    private bool botRunning;
+    private bool botRunning,paused;
     private string connection="CONNECTING";
     internal MiniWorldFrame? Snapshot {get {lock(gate)return state;}}
     internal string Connection {get {lock(gate)return connection;}}
@@ -275,6 +275,23 @@ internal sealed class MiniWorldClient : IDisposable
             "server_authorized="+enable.ToString().ToLowerInvariant()+
             " mode=LOCAL_WORLD no_official_osrs_connection=true");
     }
+    internal void SetPaused(bool pause)
+    {
+        lock(gate)
+        {
+            if(paused==pause)return;
+            paused=pause;
+            if(pause)
+            {
+                botRunning=false;
+                manual=null;
+                server.AllowBot(false);
+            }
+        }
+        log.Add(Severity.INFO,"MINI_WORLD",pause?"PAUSED":"RESUMED",
+            "view=SANDBOX automatic_actions_disabled="+pause.ToString().ToLowerInvariant()+
+            " official_client_independent=true");
+    }
     internal void MoveManually(Point destination)
     {
         lock(gate)
@@ -292,6 +309,14 @@ internal sealed class MiniWorldClient : IDisposable
         {
             try
             {
+                bool isPaused;
+                lock(gate)isPaused=paused;
+                if(isPaused)
+                {
+                    await Task.Delay(250,token);
+                    nextDeadlineMs=clock.ElapsedMilliseconds;
+                    continue;
+                }
                 MiniWorldRequest request;
                 MiniWorldFrame? before;
                 lock(gate)
