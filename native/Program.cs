@@ -67,6 +67,7 @@ internal sealed class MainWindow : Form
     private OfficialClientWindowHost officialHost=null!;
     private Button launcherButton=new(),attachButton=new(),detachButton=new();
     private bool autoHostOfficial;
+    private bool startupLoginAttempted;
     private long lastHostPollMs;
     private readonly System.Windows.Forms.Timer refreshTimer=new(){Interval=250};
     private readonly System.Windows.Forms.Timer metricsTimer=new(){Interval=5000};
@@ -132,19 +133,36 @@ internal sealed class MainWindow : Form
         metricsTimer.Start();
         Shown+=async (_,_)=>
         {
-            core.Add(Severity.INFO,"UPDATER","CHECK_START","Automatische GitHub-Updateprüfung");
-            var changed=await Updater.CheckAndUpdateAsync(msg=>
+            // Finish auto-update first. Never launch the Jagex login in a
+            // process that is about to close for an update/restart.
+            bool restarting=false;
+            try
             {
-                core.Add(Severity.INFO,"UPDATER","STATUS",msg);
-                if(!IsDisposed && IsHandleCreated) BeginInvoke(()=>footer.Text=msg);
-            });
-            if(changed)
-            {
-                core.Add(Severity.INFO,"UPDATER","RESTART_REQUESTED","Verifiziertes Update; starte Hilfsprozess.");
-                Close();
+                core.Add(Severity.INFO,"UPDATER","CHECK_START","Automatische GitHub-Updateprüfung");
+                var changed=await Updater.CheckAndUpdateAsync(msg=>
+                {
+                    core.Add(Severity.INFO,"UPDATER","STATUS",msg);
+                    if(!IsDisposed && IsHandleCreated)BeginInvoke(()=>footer.Text=msg);
+                });
+                if(changed)
+                {
+                    restarting=true;
+                    core.Add(Severity.INFO,"UPDATER","RESTART_REQUESTED",
+                        "Verifiziertes Update; starte Hilfsprozess.");
+                    Close();
+                }
+                else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
+                    "Keine Neustartanforderung; danach Jagex Login automatisch starten.");
             }
-            else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
-                "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
+            catch(Exception ex)
+            {
+                core.Add(Severity.WARN,"UPDATER","CHECK_FAILED",
+                    "reason="+ex.GetType().Name+" auto_login_still_enabled=true");
+            }
+            finally
+            {
+                if(!restarting && !IsDisposed)StartOfficialOnStartup();
+            }
         };
         FormClosing+=(_,_)=>{accountReadCancel.Cancel();pingCancel.Cancel();
             officialHost?.Dispose();metricsTimer.Stop();refreshTimer.Stop();
@@ -218,6 +236,68 @@ internal sealed class MainWindow : Form
                 "Originaler Jagex Launcher eingebettet. Hier anmelden und Play Now wählen.":
                 "Echtes OSRS-Spiel eingebettet. Live-Bot derzeit nicht verfügbar.":
             "Anmeldung starten: offizieller Jagex Launcher und Spiel im selben Fenster.";
+    }
+    private void StartOfficialOnStartup()
+    {
+        if(startupLoginAttempted || IsDisposed)return;
+        startupLoginAttempted=true;
+        autoHostOfficial=true;
+        try
+        {
+            var gameWindows=OfficialClientWindowHost.FindRunningClients();
+            var launcherWindows=OfficialClientWindowHost.FindRunningLauncherWindows();
+            var action=OfficialStartupPolicy.Decide(
+                officialHost.Attached,gameWindows.Count,launcherWindows.Count);
+            core.Add(Severity.INFO,"OFFICIAL_CLIENT","AUTO_LOGIN_START",
+                $"action={action} official_games={gameWindows.Count} "+
+                $"launcher_windows={launcherWindows.Count} "+
+                "credentials_managed_by_jagex=true");
+            switch(action)
+            {
+                case OfficialStartupAction.KeepAttached:
+                    core.Add(Severity.INFO,"OFFICIAL_CLIENT","AUTO_EXISTING_ATTACHED",
+                        "official_window_preserved=true");
+                    break;
+                case OfficialStartupAction.AttachExisting:
+                    if(!TryHostOfficialWindows(false))
+                    {
+                        core.Add(Severity.WARN,"OFFICIAL_CLIENT","AUTO_ATTACH_FAILED",
+                            "official_process_found=true user_can_choose_window_manually=true");
+                        footer.Text="Jagex-Fenster erkannt, automatische Einbettung fehlgeschlagen. "+
+                            "Bitte 'Login/Spiel verbinden' wählen.";
+                    }
+                    break;
+                case OfficialStartupAction.AskUserToChoose:
+                    core.Add(Severity.INFO,"OFFICIAL_CLIENT","AUTO_SELECTION_REQUIRED",
+                        "multiple_official_windows=true duplicate_launcher_prevented=true");
+                    footer.Text="Mehrere offizielle OSRS-/Jagex-Fenster gefunden. "+
+                        "Bitte 'Login/Spiel verbinden' wählen.";
+                    break;
+                case OfficialStartupAction.StartLauncher:
+                    if(OfficialClientWindowHost.TryOpenJagexLauncher())
+                    {
+                        core.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_START_REQUESTED",
+                            "trigger=AUTOMATIC_STARTUP credentials_managed_by_jagex=true");
+                        footer.Text="Jagex Launcher wird automatisch geöffnet und hier eingebettet …";
+                        TryHostOfficialWindows(false);
+                    }
+                    else
+                    {
+                        core.Add(Severity.WARN,"OFFICIAL_CLIENT","LAUNCHER_NOT_FOUND",
+                            "trigger=AUTOMATIC_STARTUP official_installation_required=true");
+                        footer.Text="Jagex Launcher nicht gefunden. Bitte installieren "+
+                            "oder auf 'Anmeldung starten' klicken.";
+                    }
+                    break;
+            }
+        }
+        catch(Exception ex)
+        {
+            core.Add(Severity.ERROR,"OFFICIAL_CLIENT","AUTO_LOGIN_FAILED",
+                "reason="+ex.GetType().Name+" manual_login_button_available=true");
+            footer.Text="Automatischer Jagex-Start fehlgeschlagen. "+
+                "Bitte 'Anmeldung starten' versuchen.";
+        }
     }
     private void OpenJagexLogin()
     {
@@ -548,11 +628,12 @@ internal static class SelfTest
             OfficialF2PWorldTests.Run();
             PublicOsrsHiscoresTests.Run();
             OfficialClientWindowHostTests.Run();
+            OfficialStartupPolicyTests.Run();
             if(OfficialGameSessionGate.Readiness(null)!="OFFICIAL_PROTOCOL_ADAPTER_MISSING")
                 throw new Exception("Missing official adapter incorrectly accepted");
             d.Clear();
             if(d.Stats().Events!=1)throw new Exception("Clear failed");
-            Console.WriteLine("LIVE ONLY PASS: official host, Jagex login handoff, F2P, public skills, privacy, updater, no offline sessions");
+            Console.WriteLine("LIVE ONLY PASS: automatic Jagex login startup, official host, game handoff, F2P, public skills, privacy, updater, no offline sessions");
             return 0;
         }
         catch(Exception e)
