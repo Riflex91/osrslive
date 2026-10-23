@@ -1,3 +1,44 @@
+# OSRS Play v0.7.0 – eigener Mini-Client
+
+OSRS Play ist eine eigenständige, selbstenthaltende Windows-EXE.
+Keine RuneLite-/HDOS-Abhängigkeit und kein Plugin.
+
+**Funktionsfähig in v0.7.0:** Eigene 2D-Spielwelt, eine Spielfigur,
+Erzadern, Kollisionsprüfung, eigener TCP-Spielserver (nur 127.0.0.1),
+Mining-XP, Erz-Inventar und Gold. Mit **Bot starten** navigiert der Agent
+autonom zu Erzadern, baut Erz ab, läuft bei vollem Inventar zum blauen
+Verkaufsplatz und verkauft das Erz. Der Server verarbeitet Aktionen und
+liefert den maßgeblichen Zustand zurück. **Bot stoppen** sperrt neue
+automatische Befehle serverseitig. Wenn der Bot gestoppt ist, kann die
+Figur per Klick auf die Karte manuell bewegt werden. Die grafische Anzeige
+lässt sich unabhängig von der Botverarbeitung deaktivieren.
+
+**Nicht implementiert:** Verbindung, Login oder Spielaktionen auf echten
+OSRS-/Jagex-Servern. Der enthaltene Server ist ein eigens entwickelter
+lokaler Testsandbox-Server, **kein kompatibler OSRS-Server**. Gold und XP
+existieren nur in dieser Sandbox. Kein echtes Konto wird verändert;
+kein Jagex-Login oder Anti-Cheat-Bypass ist enthalten.
+
+Der bisherige Langzeit-Strategietest, die Mining-/GE-Szenariotests,
+Diagnose-Exporte und der automatische Updater bleiben verfügbar.
+
+## Test
+1. EXE starten; die Welt sollte angezeigt werden.
+2. **Bot starten**; Spielfigur und Inventar beobachten.
+3. Gold sollte nach einem vollständigen Mining- und Verkaufszyklus
+   auf dem lokalen Spielserver ansteigen.
+4. **Bot stoppen**; kein neuer automatischer Befehl darf ausgeführt werden.
+5. Mit Linksklick auf eine freie Kachel manuell bewegen.
+6. Grafik ausschalten und weiterlaufen lassen.
+7. Log kopieren und die Einträge `MINI_WORLD ORE_MINED`,
+   `MINI_WORLD ORE_SOLD` und `MINI_BOT STOPPED` prüfen.
+
+Für offizielle Server fehlen eine ausdrückliche, technische Freigabe
+sowie eine legitime Authentifizierungs- und Protokollspezifikation.
+Die selbst entwickelte Sandbox-Schnittstelle ist als austauschbarer
+Transport mit beobachtbaren, überprüften Spielaktionen aufgebaut.
+
+--- 
 # OSRS Play 0.6.0 – integrierter Bot mit Start/Stop
 
 **OSRS Play** ist der neue Name des bisherigen OSRS Live Diagnostics-Clients. Neu sind eine zentrale Schaltfläche **Bot starten / Bot stoppen**, ein sichtbarer Botstatus und ein Lebenszyklus-Test für den integrierten Agenten.

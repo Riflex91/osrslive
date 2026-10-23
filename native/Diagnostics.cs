@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version = "0.6.1";
+    internal const string Version = "0.7.0";
     private const int Capacity = 10000;
     private readonly object sync = new();
     private readonly List<LogEvent> entries = new();
@@ -84,13 +84,14 @@ internal sealed class Diagnostics
         LogEvent? previous=null;
         foreach(var item in Snapshot())
         {
-            if(item.Source=="SIMULATOR" && item.Event is "START" or "STOP")
+            if(item.Source is "SIMULATOR" or "MINI_WORLD" && item.Event is "START" or "STOP")
             {
                 previous=null;
                 continue;
             }
-            if(item.Event!="GAME_TICK" || item.Source!="SIMULATOR")continue;
-            if(previous is not null && item.MonotonicTicks>previous.MonotonicTicks)
+            if(item.Event!="GAME_TICK" || item.Source is not ("SIMULATOR" or "MINI_WORLD"))continue;
+            if(previous is not null && previous.Source==item.Source &&
+               item.MonotonicTicks>previous.MonotonicTicks)
             {
                 values.Add((item.MonotonicTicks-previous.MonotonicTicks)*1000d/Stopwatch.Frequency);
             }
@@ -111,7 +112,7 @@ internal sealed class Diagnostics
         sb.AppendLine($"Puffer-Überlauf: {s.Dropped} | RAM: {proc.WorkingSet64/1024/1024} MiB | Threads: {proc.Threads.Count}");
         sb.AppendLine($"Tick-Abstände (monoton): Ø {t.AverageMs:0.##} ms, Max {t.MaxMs:0.##} ms, Intervalle {t.Count}");
         sb.AppendLine($"Künstliche Simulatorwarnungen: {simWarnings}; gemeldete andere Warnungen: {s.Warnings-simWarnings}");
-        sb.AppendLine("Keine RuneLite- oder Jagex-Verbindung; Daten stammen nur aus dem lokalen Simulator.");
+        sb.AppendLine("Eigenständiger Client mit lokalem TCP-Testserver; keine Verbindung zu offiziellen Jagex-Servern.");
         sb.AppendLine("--- LOG ---");
         foreach(var entry in events.TakeLast(1800))
         {
