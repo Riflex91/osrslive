@@ -38,11 +38,6 @@ jobs:
         run: |
           dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --self-test
           if ($LASTEXITCODE -ne 0) { throw "Self-test failed: $LASTEXITCODE" }
-      - name: Mining/GE scenario suite
-        shell: pwsh
-        run: |
-          dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --scenario-tests
-          if ($LASTEXITCODE -ne 0) { throw "Scenario suite failed: $LASTEXITCODE" }
       - name: Publish single self-contained EXE
         shell: pwsh
         run: |
@@ -75,7 +70,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag (Single EXE)" --notes "OSRS Play, self-contained Windows x64 EXE, integrated offline bot Start/Stop, automatic updates. The legacy-named download is an identical compatibility asset. No OSRS live connection."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag (LIVE ONLY)" --notes "Live-only shell for original Jagex Launcher and official osclient.exe. Synthetic game server, offline bot and campaign removed. Live bot remains disabled until genuine world-state and action adapters exist. The legacy-named asset serves only auto-update compatibility."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
