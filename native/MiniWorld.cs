@@ -361,14 +361,14 @@ internal static class MiniWorldTests
         var blocked=Execute(server.Key,"move",5,4,true);
         Require(!blocked.Accepted && blocked.Status=="BOT_STOPPED","fail closed when stopped");
         server.AllowBot(true);
-        MiniWorldFrame frame=initial.Frame!;
+        MiniWorldFrame frame=initial.Frame ?? throw new Exception("Initial frame missing");
         bool sold=false;
         for(int n=0;n<180;n++)
         {
             var action=MiniWorldPlanner.Decide(server.Key,frame);
             var response=Execute(server.Key,action.Action,action.X,action.Y,true);
             Require(response.Accepted && response.Frame is not null,"server reply");
-            frame=response.Frame;
+            frame=response.Frame!;
             if(response.Status=="ORE_SOLD"){sold=true;break;}
         }
         Require(sold && frame.Coins>1000 && frame.MiningXp>=210 && frame.Ore==0,

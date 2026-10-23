@@ -8,9 +8,17 @@ namespace OSRSLiveDiagnostics;
 // Purpose-built minimalist 2D client viewport, not screen capture or RuneLite.
 internal sealed class MiniWorldCanvas : Control
 {
+        [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<MiniWorldFrame?>? Current {get;set;}
+        [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Func<string>? Connection {get;set;}
+        [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal Action<Point>? TileSelected {get;set;}
+        [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal bool DrawWorld {get;set;}=true;
     internal MiniWorldCanvas()
     {
