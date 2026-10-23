@@ -18,17 +18,22 @@ internal sealed record OfficialClientWindow(
 
 internal sealed class OfficialClientWindowHost : IDisposable
 {
-    private const int GWL_STYLE=-16;
+    private const int GWL_STYLE=-16,GWL_EXSTYLE=-20;
     private const long WS_CHILD=0x40000000,WS_POPUP=unchecked((long)0x80000000),
-        WS_CAPTION=0x00C00000,WS_THICKFRAME=0x00040000;
+        WS_CAPTION=0x00C00000,WS_THICKFRAME=0x00040000,
+        WS_EX_APPWINDOW=0x00040000;
     private const uint SWP_NOZORDER=0x0004,SWP_NOACTIVATE=0x0010,SWP_FRAMECHANGED=0x0020;
     private readonly Control panel;
     private readonly Diagnostics diagnostics;
     private IntPtr attached,originalParent;
-    private long originalStyle;
+    private long originalStyle,originalExStyle;
     private Rectangle originalBounds;
+    private Size lastHostedSize=Size.Empty;
     internal OfficialWindowKind? CurrentKind {get;private set;}
-    internal bool Attached => attached!=IntPtr.Zero&&IsWindow(attached);
+    // The game remains our child even though it disappears from EnumWindows
+    // top-level enumeration. Don't infer that it has exited from that list.
+    internal bool Attached => attached!=IntPtr.Zero && IsWindow(attached) &&
+        GetParent(attached)==panel.Handle;
     internal OfficialClientWindowHost(Control panel,Diagnostics diagnostics)
     {
         this.panel=panel;
@@ -109,17 +114,22 @@ internal sealed class OfficialClientWindowHost : IDisposable
         var hwnd=window.Handle;
         originalParent=GetParent(hwnd);
         originalStyle=GetWindowLongPtr(hwnd,GWL_STYLE).ToInt64();
+        originalExStyle=GetWindowLongPtr(hwnd,GWL_EXSTYLE).ToInt64();
         GetWindowRect(hwnd,out var bounds);
         originalBounds=Rectangle.FromLTRB(bounds.Left,bounds.Top,bounds.Right,bounds.Bottom);
         long embedded=(originalStyle&~(WS_POPUP|WS_CAPTION|WS_THICKFRAME))|WS_CHILD;
         try
         {
             SetWindowLongPtr(hwnd,GWL_STYLE,new IntPtr(embedded));
+            // Strip independent taskbar-window hint WHILE EMBEDDED only.
+            // Restore original flags when the official client is detached.
+            SetWindowLongPtr(hwnd,GWL_EXSTYLE,new IntPtr(originalExStyle&~WS_EX_APPWINDOW));
             SetParent(hwnd,panel.Handle);
             if(GetParent(hwnd)!=panel.Handle)
                 throw new InvalidOperationException("Windows denied cross-process window hosting.");
             attached=hwnd;
             CurrentKind=window.Kind;
+            lastHostedSize=Size.Empty;
             Resize();
             ShowWindow(hwnd,5);
             if(window.Kind==OfficialWindowKind.Game &&
@@ -140,9 +150,10 @@ internal sealed class OfficialClientWindowHost : IDisposable
             {
                 SetParent(hwnd,originalParent);
                 SetWindowLongPtr(hwnd,GWL_STYLE,new IntPtr(originalStyle));
+                SetWindowLongPtr(hwnd,GWL_EXSTYLE,new IntPtr(originalExStyle));
                 RestoreBounds(hwnd);
             }
-            attached=IntPtr.Zero;CurrentKind=null;
+            attached=IntPtr.Zero;CurrentKind=null;lastHostedSize=Size.Empty;
             diagnostics.Add(Severity.WARN,"OFFICIAL_CLIENT","WINDOW_ATTACH_FAILED",
                 $"kind={window.Kind} reason=WIN32_PARENTING_REJECTED "+
                 "external_app_remains_open=true");
@@ -152,9 +163,14 @@ internal sealed class OfficialClientWindowHost : IDisposable
     internal void Resize()
     {
         if(!Attached)return;
-        SetWindowPos(attached,IntPtr.Zero,0,0,
-            Math.Max(1,panel.ClientSize.Width),Math.Max(1,panel.ClientSize.Height),
-            SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
+        var desired=new Size(Math.Max(1,panel.ClientSize.Width),
+            Math.Max(1,panel.ClientSize.Height));
+        // Avoid unnecessarily resizing a GPU-accelerated foreign HWND each
+        // UI refresh. Only act when the hosting panel actually changes size.
+        if(desired==lastHostedSize)return;
+        if(SetWindowPos(attached,IntPtr.Zero,0,0,desired.Width,desired.Height,
+            SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED))
+            lastHostedSize=desired;
     }
     private void RestoreBounds(IntPtr hwnd)
     {
@@ -169,10 +185,12 @@ internal sealed class OfficialClientWindowHost : IDisposable
         attached=IntPtr.Zero;
         var previousKind=CurrentKind;
         CurrentKind=null;
+        lastHostedSize=Size.Empty;
         if(IsWindow(hwnd))
         {
             SetParent(hwnd,originalParent);
             SetWindowLongPtr(hwnd,GWL_STYLE,new IntPtr(originalStyle));
+            SetWindowLongPtr(hwnd,GWL_EXSTYLE,new IntPtr(originalExStyle));
             RestoreBounds(hwnd);
             ShowWindow(hwnd,5);
         }
@@ -215,6 +233,7 @@ internal static class OfficialClientWindowHostTests
            OfficialClientWindowHost.SupportedLauncherProcessName("msedge") ||
            OfficialClientWindowHost.SupportedLauncherProcessName("osclient"))
             throw new Exception("Only official launcher and game processes may be hosted.");
-        Console.WriteLine("OFFICIAL WINDOW HOST PASS: trusted launcher/game process filters, no browser interception");
+        OfficialWindowTransitionTests.Run();
+        Console.WriteLine("OFFICIAL WINDOW HOST PASS: process filter, exclusive embedded HWND, original styles restored");
     }
 }

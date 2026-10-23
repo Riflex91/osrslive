@@ -1,3 +1,46 @@
+# OSRS Play 0.8.1 – stabiles offizielles OSRS-Spielfenster
+
+**Windows-Fenstereinbettung ohne Änderungen an Jagex-Software.**
+Diese Version korrigiert den mit dem echten v0.8.0-Windows-Log
+reproduzierten Fehler, bei dem die Oberfläche alle ~1,2 Sekunden zwischen
+Jagex Launcher und offiziellem `osclient.exe` hin und her wechselte.
+
+- Sobald die echte `osclient.exe` in OSRS Play eingebettet ist, bleibt
+  **genau dieses Fenster** der aktive Host, solange sein Fenster-Handle
+  existiert und weiterhin unter OSRS Play hängt. Es wird nicht mehr
+  nach normalen Desktopfenstern zurückgesucht, nur weil ein eingebettetes
+  Fenster nicht länger als unabhängiges Hauptfenster auftaucht.
+- Übergang **Jagex Launcher → offizielles Spiel** bleibt möglich;
+  Rücksprung zum Launcher nur, wenn kein originales Spiel mehr gehostet wird.
+- Die Windows-Stile des eingebetteten Spiels entfernen vorübergehend
+  die unabhängige `WS_EX_APPWINDOW`-Markierung, damit möglichst kein
+  zweites Spielelement in der Taskleiste erscheint. Beim Freigeben oder
+  Schließen von OSRS Play werden Original-Parent, Fensterstile,
+  Taskleistenmarkierung und ursprüngliche Position wiederhergestellt.
+- Keine Wiederholung unnötiger Win32-Resize-Aufrufe jedes Mal, wenn die
+  UI aktualisiert wird. Neue Einbettung sowie echtes Größenänderungs-
+  ereignis lösen weiterhin ein Resize aus.
+- Der Original-Jagex Launcher und `osclient.exe` werden **nicht gepatcht**,
+  verändert, injiziert oder durch selbstgebaute Spielprogramme ersetzt.
+- **Start/Stop** und autonome Mining-/Gold-Aktionen gelten weiterhin
+  ausschließlich für die separate lokale Sandbox. Es gibt noch keinen
+  zertifizierten Game-State-/Aktionsadapter zum echten OSRS.
+
+**Test auf Windows:** OSRS Play starten, "Anmeldung starten" drücken,
+im offiziellen Jagex Launcher anmelden, "Play Now" wählen. Nach dem
+Wechsel zum OSRS-Fenster 30 Sekunden beobachten. Im Log darf nun nach
+`OFFICIAL_CLIENT GAME_WINDOW_READY` keine wiederholte Folge
+`WINDOW_DETACHED kind=Game` / `WINDOW_ATTACHED kind=Launcher` auftreten.
+Danach "Fenster freigeben" verwenden und prüfen, dass der originale
+offizielle Client wieder als unabhängiges Windows-Fenster nutzbar ist.
+
+**Einschränkung:** Cross-Process-Fensterhosting über `SetParent` kann
+auf bestimmten Windows-DPI-/GPU-Konfigurationen scheitern; Jagex-Dialoge
+zur Konto-/MFA-Bestätigung können weiterhin extern erscheinen. Ob die
+Fensterintegration auf deinem konkreten PC fehlerfrei bleibt, kann erst
+der neue Praxistest beweisen.
+
+---
 # OSRS Play 0.8.0 – Echter offizieller Client im OSRS-Play-Fenster
 
 **Neu:** Der Reiter **„Offizielles OSRS (echtes Spiel)“** führt den
