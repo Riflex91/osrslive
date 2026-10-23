@@ -51,6 +51,25 @@ internal sealed class MainWindow : Form
     private readonly ComboBox filter=new();
     private readonly CheckBox pause=new();
     private readonly MiniWorldCanvas preview=new();
+    private readonly TabControl gameTabs=new(){Dock=DockStyle.Fill};
+    private readonly TabPage officialPage=new("Offizielles OSRS (echtes Spiel)");
+    private readonly TabPage sandboxPage=new("Lokale Testwelt");
+    private readonly Panel officialSurface=new(){Dock=DockStyle.Fill,BackColor=Color.FromArgb(17,24,39)};
+    private readonly Label officialHint=new()
+    {
+        Dock=DockStyle.Fill,ForeColor=Color.WhiteSmoke,BackColor=Color.FromArgb(17,24,39),
+        TextAlign=ContentAlignment.MiddleCenter,Font=new Font("Segoe UI",11),
+        Text="OSRS PLAY: LOGIN UND SPIEL IN EINEM FENSTER\n\n"+
+            "1. 'Anmeldung starten' öffnet den offiziellen Jagex Launcher hier.\n"+
+            "2. Hier beim offiziellen Jagex Launcher anmelden und Official Client wählen.\n"+
+            "3. 'Play Now' startet das echte Spiel; OSRS Play übernimmt dessen Fenster.\n\n"+
+            "Eventuell separat geöffnete Sicherheits-/Browserfenster gehören Jagex.\n"+
+            "Der Live-Bot ist noch nicht mit dem offiziellen Spiel verbunden."
+    };
+    private OfficialClientWindowHost officialHost=null!;
+    private Button launcherButton=new(),attachButton=new(),detachButton=new();
+    private bool autoHostOfficial;
+    private long lastHostPollMs;
     private readonly System.Windows.Forms.Timer refreshTimer=new(){Interval=250};
     private readonly System.Windows.Forms.Timer metricsTimer=new(){Interval=5000};
     private volatile bool refreshNeeded=true;
@@ -69,13 +88,27 @@ internal sealed class MainWindow : Form
         Font=new Font("Segoe UI",9);
         BackColor=Color.FromArgb(245,247,250);
         InitializeUI();
+        mini.SetPaused(true);
+        officialHost=new OfficialClientWindowHost(officialSurface,core);
+        RefreshGameControls();
+        core.Add(Severity.INFO,"OFFICIAL_CLIENT","HOST_READY",
+            "official_osclient_window_supported=true authentication=JAGEX_LAUNCHER "+
+            "live_bot_adapter=false sandbox_is_separate=true");
         core.Add(Severity.INFO,"CORE","STARTED",$"Version {Diagnostics.Version} | Standalone Windows EXE, keine Jagex-Verbindung");
         core.Add(Severity.INFO,"CORE","PRIVACY","Keine Zugangsdaten oder Tokens im Export");
         if(Updater.TakeLastOutcome() is string outcome)
             core.Add(Severity.INFO,"UPDATER","PREVIOUS_UPDATE",outcome);
         refreshTimer.Tick+=(_,_)=>
         {
-            if(core.Rendering)preview.Invalidate();
+            if(autoHostOfficial && gameTabs.SelectedTab==officialPage &&
+               eventClock.ElapsedMilliseconds-lastHostPollMs>1100)
+            {
+                lastHostPollMs=eventClock.ElapsedMilliseconds;
+                TryHostOfficialWindows(false);
+            }
+            if(core.Rendering && gameTabs.SelectedTab==sandboxPage)preview.Invalidate();
+            if(officialHost is not null && officialPage is not null && officialHost.Attached)
+                officialHost.Resize();
             if(refreshNeeded){refreshNeeded=false;UpdateView();}
         };
         refreshTimer.Start();
@@ -116,7 +149,7 @@ internal sealed class MainWindow : Form
             else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
                 "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
         };
-        FormClosing+=(_,_)=>{accountReadCancel.Cancel();pingCancel.Cancel();mini.Dispose();bot.Dispose();sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();pingCancel.Dispose();accountReadCancel.Dispose();};
+        FormClosing+=(_,_)=>{accountReadCancel.Cancel();pingCancel.Cancel();officialHost?.Dispose();mini.Dispose();bot.Dispose();sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();pingCancel.Dispose();accountReadCancel.Dispose();};
     }
     private Button Button(string label,Action action)
     {
@@ -132,7 +165,7 @@ internal sealed class MainWindow : Form
         outer.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute,35));
         Controls.Add(outer);
-        header.Text=$"OSRS PLAY  ·  {Diagnostics.Version}  ·  eigenständiger Mini-Client";
+        header.Text=$"OSRS PLAY  ·  {Diagnostics.Version}  ·  offizieller Client + Testumgebung";
         header.Font=new Font("Segoe UI",14,FontStyle.Bold);header.Dock=DockStyle.Fill;
         outer.Controls.Add(header,0,0);
         stats.Dock=DockStyle.Fill; stats.Font=new Font("Segoe UI",10);
@@ -144,7 +177,11 @@ internal sealed class MainWindow : Form
         campaignButton=Button("Strategie-Langzeittest",RunCampaign);
         pingButton=Button("F2P-Ping testen",TestF2PWorlds);
         hiscoresButton=Button("Echte OSRS-Skills",ReadPublicHiscores);
-        actionBar.Controls.AddRange(new Control[]{botButton,renderButton,pingButton,hiscoresButton,
+        launcherButton=Button("Anmeldung starten",OpenJagexLogin);
+        attachButton=Button("Login/Spiel verbinden",AttachOfficialClient);
+        detachButton=Button("Fenster freigeben",DetachOfficialClient);
+        actionBar.Controls.AddRange(new Control[]{launcherButton,attachButton,detachButton,
+            botButton,renderButton,pingButton,hiscoresButton,
             campaignButton,Button("Mining → GE testen",RunMiningGe),
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
@@ -162,7 +199,13 @@ internal sealed class MainWindow : Form
             mini.MoveManually(point);
             footer.Text=$"Bewegungsziel {point.X},{point.Y} – lokale Spielwelt.";
         };
-        content.Controls.Add(preview,0,0);
+        gameTabs.TabPages.AddRange(new[]{officialPage,sandboxPage});
+        officialPage.Controls.Add(officialSurface);
+        officialSurface.Controls.Add(officialHint);
+        sandboxPage.Controls.Add(preview);
+        gameTabs.SelectedTab=officialPage;
+        gameTabs.SelectedIndexChanged+=(_,_)=>RefreshGameControls();
+        content.Controls.Add(gameTabs,0,0);
         var filters=new FlowLayoutPanel {Dock=DockStyle.Fill};
         filters.Controls.Add(new Label{Text="Filter:",AutoSize=true,TextAlign=ContentAlignment.MiddleCenter,Padding=new Padding(0,7,0,0)});
         filter.Items.AddRange(new object[]{"ALLE","INFO +","WARN +","NUR FEHLER"});filter.SelectedIndex=0;
@@ -178,11 +221,157 @@ internal sealed class MainWindow : Form
         log.Font=new Font("Consolas",9);
         content.Controls.Add(log,0,2);
         outer.Controls.Add(content,0,3);
-        footer.Text="Eigenständiger Client mit lokalem TCP-Spielserver – kein offizielles OSRS.";
+        footer.Text="Für echte OSRS-Anmeldung: Jagex Login öffnen, Official Client starten und einbetten.";
         footer.Dock=DockStyle.Fill;footer.TextAlign=ContentAlignment.MiddleLeft;outer.Controls.Add(footer,0,4);
+    }
+    private void RefreshGameControls()
+    {
+        bool sandbox=gameTabs.SelectedTab==sandboxPage;
+        mini.SetPaused(!sandbox);
+        botButton.Enabled=sandbox;
+        botButton.Text=sandbox?(mini.BotRunning?"Bot stoppen":"Bot starten"):
+            "Live-Agent: nicht verbunden";
+        renderButton.Enabled=sandbox;
+        if(!sandbox)
+            footer.Text=officialHost is not null && officialHost.Attached?
+                officialHost.CurrentKind==OfficialWindowKind.Launcher?
+                    "Offizieller Jagex Launcher im OSRS-Play-Fenster. Hier anmelden und 'Play Now' wählen.":
+                    "Offizielles OSRS-Spielfenster eingebettet. Live-Bot weiterhin nicht verbunden.":
+                "Auf 'Anmeldung starten' klicken – Launcher und Spiel werden im selben Bereich angezeigt.";
+    }
+    private void OpenJagexLogin()
+    {
+        gameTabs.SelectedTab=officialPage;
+        autoHostOfficial=true;
+        try
+        {
+            // Attaching an existing session takes priority over launching another.
+            if(TryHostOfficialWindows(true))return;
+            bool launched=OfficialClientWindowHost.TryOpenJagexLauncher();
+            if(!launched)
+            {
+                autoHostOfficial=false;
+                var answer=MessageBox.Show(this,
+                    "Der offizielle Jagex Launcher ist nicht installiert oder konnte nicht "+
+                    "gefunden werden. Die offizielle Downloadseite öffnen?",
+                    "Jagex Launcher fehlt",MessageBoxButtons.YesNo,MessageBoxIcon.Information);
+                if(answer==DialogResult.Yes)
+                    Process.Start(new ProcessStartInfo("https://www.jagex.com/en-GB/launcher")
+                        {UseShellExecute=true});
+                return;
+            }
+            core.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_STARTED",
+                "auto_window_host=true credentials_handled_by_jagex=true "+
+                "tokens_never_read=true");
+            footer.Text="Jagex Launcher startet – dessen Fenster wird automatisch hier eingebettet.";
+            TryHostOfficialWindows(false);
+        }
+        catch(Exception ex)
+        {
+            autoHostOfficial=false;
+            core.Add(Severity.ERROR,"OFFICIAL_CLIENT","LAUNCHER_FAILED",ex.GetType().Name);
+            footer.Text="Jagex Launcher konnte nicht gestartet werden; Installation überprüfen.";
+        }
+    }
+    private void AttachOfficialClient()
+    {
+        gameTabs.SelectedTab=officialPage;
+        autoHostOfficial=true;
+        if(!TryHostOfficialWindows(true))
+            footer.Text="Noch kein offizielles Launcher-/Spielfenster sichtbar. Anmeldung starten.";
+    }
+    private bool TryHostOfficialWindows(bool userInitiated)
+    {
+        if(officialHost is null || gameTabs.SelectedTab!=officialPage)return false;
+        // The official client takes priority after the Jagex Launcher starts it.
+        var clients=OfficialClientWindowHost.FindRunningClients();
+        if(clients.Count>0)
+        {
+            if(officialHost.Attached && officialHost.CurrentKind==OfficialWindowKind.Game)
+                return true;
+            var selected=PickOfficialWindow(clients,userInitiated);
+            if(selected is null)return false;
+            if(officialHost.Attach(selected))
+            {
+                officialHint.Visible=false;
+                core.Add(Severity.INFO,"OFFICIAL_CLIENT","GAME_WINDOW_READY",
+                    "window=OFFICIAL_OSRS origin=JAGEX_LAUNCHER "+
+                    "login_status=NOT_VERIFIABLE live_agent=false");
+                RefreshGameControls();
+                return true;
+            }
+            if(userInitiated)footer.Text="Das offizielle Spielfenster ließ sich nicht einbetten (Windows-/DPI-Konflikt).";
+            return false;
+        }
+        if(officialHost.Attached && officialHost.CurrentKind==OfficialWindowKind.Launcher)
+            return true;
+        var launchers=OfficialClientWindowHost.FindRunningLauncherWindows();
+        if(launchers.Count==0)
+        {
+            if(!officialHost.Attached)officialHint.Visible=true;
+            return false;
+        }
+        var launcher=PickOfficialWindow(launchers,userInitiated);
+        if(launcher is null)return false;
+        if(officialHost.Attach(launcher))
+        {
+            officialHint.Visible=false;
+            core.Add(Severity.INFO,"OFFICIAL_CLIENT","LOGIN_WINDOW_READY",
+                "window=JAGEX_LAUNCHER embedded=true "+
+                "oauth_prompts_may_open_external_browser=true "+
+                "credentials_never_accessed_by_osrs_play=true");
+            RefreshGameControls();
+            return true;
+        }
+        if(userInitiated)footer.Text="Jagex Launcher konnte nicht im Fenster eingebettet werden.";
+        return false;
+    }
+    private OfficialClientWindow? PickOfficialWindow(
+        IReadOnlyList<OfficialClientWindow> available,bool userInitiated)
+    {
+        if(available.Count==1)return available[0];
+        if(!userInitiated)
+        {
+            footer.Text="Mehrere offizielle Fenster erkannt. Bitte 'Login/Spiel verbinden' zur Auswahl nutzen.";
+            return null;
+        }
+        using var chooser=new Form
+        {
+            Text="Offizielles Jagex-/OSRS-Fenster wählen",
+            Width=570,Height=200,StartPosition=FormStartPosition.CenterParent,
+            FormBorderStyle=FormBorderStyle.FixedDialog,
+            MinimizeBox=false,MaximizeBox=false
+        };
+        var options=new ComboBox{Left=14,Top=18,Width=530,
+            DropDownStyle=ComboBoxStyle.DropDownList};
+        foreach(var w in available)
+            options.Items.Add($"PID {w.ProcessId} – {w.Title}");
+        options.SelectedIndex=0;
+        var accept=new Button{Text="Einbetten",Left=420,Top=70,Width=120,
+            DialogResult=DialogResult.OK};
+        chooser.Controls.AddRange(new Control[]{options,accept});
+        chooser.AcceptButton=accept;
+        return chooser.ShowDialog(this)==DialogResult.OK?
+            available[options.SelectedIndex]:null;
+    }
+    private void DetachOfficialClient()
+    {
+        autoHostOfficial=false;
+        officialHost.Detach();
+        officialHint.Visible=true;
+        core.Add(Severity.INFO,"OFFICIAL_CLIENT","DETACH_REQUESTED",
+            "official_process_remains_running=true credentials_not_handled=true");
+        RefreshGameControls();
     }
     private void ToggleBot()
     {
+        if(gameTabs.SelectedTab!=sandboxPage)
+        {
+            core.Add(Severity.WARN,"OFFICIAL_CLIENT","LIVE_AGENT_UNAVAILABLE",
+                "reason=verified_game_state_and_authorized_input_adapter_missing");
+            footer.Text="Live-Agent noch nicht verfügbar: Es fehlen echte Spielzustands- und Aktionsschnittstellen.";
+            return;
+        }
         try
         {
             bool started=!mini.BotRunning;
@@ -427,11 +616,21 @@ internal sealed class MainWindow : Form
     private void UpdateView()
     {
         var s=core.Stats();var p=Process.GetCurrentProcess();
-        var world=mini.Snapshot;
-        stats.Text=$"Bot: {(mini.BotRunning?"LÄUFT":"GESTOPPT")} | Server: {mini.Connection}"+
-            $" | Tick: {world?.Tick??0} | Erz: {world?.Ore??0}/{world?.Capacity??6}"+
-            $" | XP: {world?.MiningXp??0} | GP: {world?.Coins??0}"+
-            $" | Fehler: {s.Errors} | RAM: {p.WorkingSet64/1024/1024} MiB";
+        if(gameTabs.SelectedTab==officialPage)
+            stats.Text=$"Offizielle Ansicht: {(officialHost.Attached?
+                (officialHost.CurrentKind==OfficialWindowKind.Launcher?
+                    "JAGEX-ANMELDUNG":"OSRS-SPIEL"):
+                "NICHT VERBUNDEN")}"+
+                " | Authentifizierung: durch Jagex | Live-Agent: NICHT VERFÜGBAR"+
+                $" | Fehler: {s.Errors} | RAM: {p.WorkingSet64/1024/1024} MiB";
+        else
+        {
+            var world=mini.Snapshot;
+            stats.Text=$"Sandbox-Bot: {(mini.BotRunning?"LÄUFT":"GESTOPPT")} | Server: {mini.Connection}"+
+                $" | Tick: {world?.Tick??0} | Erz: {world?.Ore??0}/{world?.Capacity??6}"+
+                $" | XP: {world?.MiningXp??0} | GP: {world?.Coins??0}"+
+                $" | Fehler: {s.Errors} | RAM: {p.WorkingSet64/1024/1024} MiB";
+        }
         if(pause.Checked)return;
         var events=core.Snapshot().TakeLast(2000).AsEnumerable();
         if(filter.SelectedIndex==1)events=events.Where(e=>e.Level>=Severity.INFO);
@@ -491,12 +690,13 @@ internal static class SelfTest
             OfficialF2PWorldTests.Run();
             PublicOsrsHiscoresTests.Run();
             MiniWorldActionAuditTests.Run();
+            OfficialClientWindowHostTests.Run();
             GoalPlannerTests.Run();
             OfflineCampaignTests.Run();
             if(RunScenarios()!=0)throw new Exception("Mining/GE scenario suite failed");
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: real public OSRS skill data contract, authenticated-session gate, monotonic action audit, official F2P world list and TCP ping filters, own TCP client, navigation, mining, selling, server stop, session-aware timing, OSRS Play bot Start/Stop, long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: real osclient.exe window host, launcher-owned login, real public OSRS skill data contract, authenticated-session gate, monotonic action audit, official F2P world list and TCP ping filters, own TCP client, navigation, mining, selling, server stop, session-aware timing, OSRS Play bot Start/Stop, long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }
