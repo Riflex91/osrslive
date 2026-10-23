@@ -13,7 +13,11 @@ internal static class Program
     {
         if(args.Length>0 && args[0]=="--apply-update") return Updater.Apply(args);
         if(args.Length>0 && args[0]=="--self-test") return SelfTest.Run();
-        if(args.Length>0 && args[0]=="--scenario-tests") return SelfTest.RunScenarios();
+        if(args.Length>0 && args[0]=="--scenario-tests")
+        {
+            Console.Error.WriteLine("OFFLINE_SESSIONS_REMOVED");
+            return 2;
+        }
         ApplicationConfiguration.Initialize();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_,e)=>
@@ -36,24 +40,18 @@ internal static class Program
 internal sealed class MainWindow : Form
 {
     private readonly Diagnostics core=new();
-    private readonly LocalSimulation sim;
-    private readonly BotController bot;
-    private readonly MiniWorldClient mini;
     private readonly Label header=new(), stats=new(), footer=new();
-    private Button botButton=new(), renderButton=new(), campaignButton=new(), pingButton=new(), hiscoresButton=new();
+    private Button botButton=new(),pingButton=new(),hiscoresButton=new();
     private readonly CancellationTokenSource accountReadCancel=new();
     private bool accountReadBusy;
     private readonly CancellationTokenSource pingCancel=new();
     private bool pingScanning;
     private string f2pRecommendation="nicht gemessen";
-    private bool campaignRunning;
     private readonly TextBox log=new(), search=new();
     private readonly ComboBox filter=new();
     private readonly CheckBox pause=new();
-    private readonly MiniWorldCanvas preview=new();
     private readonly TabControl gameTabs=new(){Dock=DockStyle.Fill};
     private readonly TabPage officialPage=new("Offizielles OSRS (echtes Spiel)");
-    private readonly TabPage sandboxPage=new("Lokale Testwelt");
     private readonly Panel officialSurface=new(){Dock=DockStyle.Fill,BackColor=Color.FromArgb(17,24,39)};
     private readonly Label officialHint=new()
     {
@@ -78,23 +76,23 @@ internal sealed class MainWindow : Form
     private TimeSpan lastCpuTime=Process.GetCurrentProcess().TotalProcessorTime;
     internal MainWindow()
     {
-        sim=new LocalSimulation(core);
-        bot=new BotController(core,sim);
         core.Changed+=()=>refreshNeeded=true;
-        mini=new MiniWorldClient(core);
         Text=$"OSRS Play v{Diagnostics.Version}";
         Width=1150; Height=800; MinimumSize=new Size(880,650);
         StartPosition=FormStartPosition.CenterScreen;
         Font=new Font("Segoe UI",9);
         BackColor=Color.FromArgb(245,247,250);
         InitializeUI();
-        mini.SetPaused(true);
         officialHost=new OfficialClientWindowHost(officialSurface,core);
         RefreshGameControls();
+        core.SetMode("LIVE ONLY: JAGEX LAUNCHER / OFFIZIELLER OSRS-CLIENT");
+        core.Add(Severity.INFO,"CORE","LIVE_ONLY",
+            "offline_sessions=REMOVED sandbox=REMOVED simulator=REMOVED "+
+            "live_game_adapter=NOT_IMPLEMENTED");
         core.Add(Severity.INFO,"OFFICIAL_CLIENT","HOST_READY",
             "official_osclient_window_supported=true authentication=JAGEX_LAUNCHER "+
-            "live_bot_adapter=false sandbox_is_separate=true");
-        core.Add(Severity.INFO,"CORE","STARTED",$"Version {Diagnostics.Version} | Standalone Windows EXE, keine Jagex-Verbindung");
+            "live_bot_adapter=false no_simulation=true");
+        core.Add(Severity.INFO,"CORE","STARTED",$"Version {Diagnostics.Version} | Live-only host for official Jagex client");
         core.Add(Severity.INFO,"CORE","PRIVACY","Keine Zugangsdaten oder Tokens im Export");
         if(Updater.TakeLastOutcome() is string outcome)
             core.Add(Severity.INFO,"UPDATER","PREVIOUS_UPDATE",outcome);
@@ -106,7 +104,6 @@ internal sealed class MainWindow : Form
                 lastHostPollMs=eventClock.ElapsedMilliseconds;
                 TryHostOfficialWindows(false);
             }
-            if(core.Rendering && gameTabs.SelectedTab==sandboxPage)preview.Invalidate();
             if(officialHost is not null && officialPage is not null && officialHost.Attached)
                 officialHost.Resize();
             if(refreshNeeded){refreshNeeded=false;UpdateView();}
@@ -149,7 +146,9 @@ internal sealed class MainWindow : Form
             else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
                 "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
         };
-        FormClosing+=(_,_)=>{accountReadCancel.Cancel();pingCancel.Cancel();officialHost?.Dispose();mini.Dispose();bot.Dispose();sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();pingCancel.Dispose();accountReadCancel.Dispose();};
+        FormClosing+=(_,_)=>{accountReadCancel.Cancel();pingCancel.Cancel();
+            officialHost?.Dispose();metricsTimer.Stop();refreshTimer.Stop();
+            pingCancel.Dispose();accountReadCancel.Dispose();};
     }
     private Button Button(string label,Action action)
     {
@@ -165,24 +164,21 @@ internal sealed class MainWindow : Form
         outer.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute,35));
         Controls.Add(outer);
-        header.Text=$"OSRS PLAY  ·  {Diagnostics.Version}  ·  offizieller Client + Testumgebung";
+        header.Text=$"OSRS PLAY  ·  {Diagnostics.Version}  ·  LIVE ONLY / OFFIZIELLES OSRS";
         header.Font=new Font("Segoe UI",14,FontStyle.Bold);header.Dock=DockStyle.Fill;
         outer.Controls.Add(header,0,0);
         stats.Dock=DockStyle.Fill; stats.Font=new Font("Segoe UI",10);
         outer.Controls.Add(stats,0,1);
         var actionBar=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,AutoScroll=true};
-        botButton=Button("Bot starten",ToggleBot);
-        botButton.BackColor=Color.FromArgb(218,242,225);
-        renderButton=Button("Grafik ausschalten",ToggleRender);
-        campaignButton=Button("Strategie-Langzeittest",RunCampaign);
+        botButton=Button("Live-Bot: Schnittstelle fehlt",ToggleBot);
+        botButton.Enabled=false;
         pingButton=Button("F2P-Ping testen",TestF2PWorlds);
         hiscoresButton=Button("Echte OSRS-Skills",ReadPublicHiscores);
         launcherButton=Button("Anmeldung starten",OpenJagexLogin);
         attachButton=Button("Login/Spiel verbinden",AttachOfficialClient);
         detachButton=Button("Fenster freigeben",DetachOfficialClient);
         actionBar.Controls.AddRange(new Control[]{launcherButton,attachButton,detachButton,
-            botButton,renderButton,pingButton,hiscoresButton,
-            campaignButton,Button("Mining → GE testen",RunMiningGe),
+            botButton,pingButton,hiscoresButton,
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
         outer.Controls.Add(actionBar,0,2);
@@ -190,21 +186,10 @@ internal sealed class MainWindow : Form
         content.RowStyles.Add(new RowStyle(SizeType.Percent,58));
         content.RowStyles.Add(new RowStyle(SizeType.Absolute,38));
         content.RowStyles.Add(new RowStyle(SizeType.Percent,42));
-        preview.Dock=DockStyle.Fill;
-        preview.Current=()=>mini.Snapshot;
-        preview.Connection=()=>mini.Connection;
-        preview.TileSelected=point=>
-        {
-            if(mini.BotRunning){footer.Text="Manuelle Bewegung nur bei gestopptem Bot.";return;}
-            mini.MoveManually(point);
-            footer.Text=$"Bewegungsziel {point.X},{point.Y} – lokale Spielwelt.";
-        };
-        gameTabs.TabPages.AddRange(new[]{officialPage,sandboxPage});
+        gameTabs.TabPages.Add(officialPage);
         officialPage.Controls.Add(officialSurface);
         officialSurface.Controls.Add(officialHint);
-        sandboxPage.Controls.Add(preview);
         gameTabs.SelectedTab=officialPage;
-        gameTabs.SelectedIndexChanged+=(_,_)=>RefreshGameControls();
         content.Controls.Add(gameTabs,0,0);
         var filters=new FlowLayoutPanel {Dock=DockStyle.Fill};
         filters.Controls.Add(new Label{Text="Filter:",AutoSize=true,TextAlign=ContentAlignment.MiddleCenter,Padding=new Padding(0,7,0,0)});
@@ -221,23 +206,18 @@ internal sealed class MainWindow : Form
         log.Font=new Font("Consolas",9);
         content.Controls.Add(log,0,2);
         outer.Controls.Add(content,0,3);
-        footer.Text="Für echte OSRS-Anmeldung: Jagex Login öffnen, Official Client starten und einbetten.";
+        footer.Text="Live-only: Jagex Launcher und offizielles OSRS. Keine Offline-Sitzungen.";
         footer.Dock=DockStyle.Fill;footer.TextAlign=ContentAlignment.MiddleLeft;outer.Controls.Add(footer,0,4);
     }
     private void RefreshGameControls()
     {
-        bool sandbox=gameTabs.SelectedTab==sandboxPage;
-        mini.SetPaused(!sandbox);
-        botButton.Enabled=sandbox;
-        botButton.Text=sandbox?(mini.BotRunning?"Bot stoppen":"Bot starten"):
-            "Live-Agent: nicht verbunden";
-        renderButton.Enabled=sandbox;
-        if(!sandbox)
-            footer.Text=officialHost is not null && officialHost.Attached?
-                officialHost.CurrentKind==OfficialWindowKind.Launcher?
-                    "Offizieller Jagex Launcher im OSRS-Play-Fenster. Hier anmelden und 'Play Now' wählen.":
-                    "Das echte OSRS-Spielfenster wird ausschließlich im OSRS-Play-Bereich dargestellt. Live-Bot noch nicht verbunden.":
-                "Auf 'Anmeldung starten' klicken – Launcher und Spiel werden im selben Bereich angezeigt.";
+        botButton.Enabled=false;
+        botButton.Text="Live-Bot: Schnittstelle fehlt";
+        footer.Text=officialHost is not null && officialHost.Attached?
+            officialHost.CurrentKind==OfficialWindowKind.Launcher?
+                "Originaler Jagex Launcher eingebettet. Hier anmelden und Play Now wählen.":
+                "Echtes OSRS-Spiel eingebettet. Live-Bot derzeit nicht verfügbar.":
+            "Anmeldung starten: offizieller Jagex Launcher und Spiel im selben Fenster.";
     }
     private void OpenJagexLogin()
     {
@@ -373,29 +353,9 @@ internal sealed class MainWindow : Form
     }
     private void ToggleBot()
     {
-        if(gameTabs.SelectedTab!=sandboxPage)
-        {
-            core.Add(Severity.WARN,"OFFICIAL_CLIENT","LIVE_AGENT_UNAVAILABLE",
-                "reason=verified_game_state_and_authorized_input_adapter_missing");
-            footer.Text="Live-Agent noch nicht verfügbar: Es fehlen echte Spielzustands- und Aktionsschnittstellen.";
-            return;
-        }
-        try
-        {
-            bool started=!mini.BotRunning;
-            mini.SetBot(started);
-            botButton.Text=started?"Bot stoppen":"Bot starten";
-            botButton.BackColor=started?Color.FromArgb(255,226,221):Color.FromArgb(218,242,225);
-            footer.Text=started?
-                "Autonomer Agent läuft in der eigenständigen lokalen Spielwelt.":
-                "Agent gestoppt. Klicke eine Kachel zur manuellen Bewegung.";
-            preview.Invalidate();
-        }
-        catch(Exception ex)
-        {
-            core.Add(Severity.ERROR,"MINI_BOT","CONTROL_FAILED",ex.GetType().Name+": "+ex.Message);
-            footer.Text="Botsteuerung fehlgeschlagen – siehe Log.";
-        }
+        core.Add(Severity.WARN,"OFFICIAL_CLIENT","LIVE_AGENT_UNAVAILABLE",
+            "reason=verified_official_world_state_and_authorized_actions_missing");
+        footer.Text="Live-Bot nicht verfügbar – keine Offline-Ausweichsteuerung.";
     }
     private async void ReadPublicHiscores()
     {
@@ -510,94 +470,6 @@ internal sealed class MainWindow : Form
             if(!IsDisposed)pingButton.Enabled=true;
         }
     }
-    private void LogGoalPlanFixture()
-    {
-        var skills=GoalPlanner.Skills.ToDictionary(s=>s,s=>1,StringComparer.OrdinalIgnoreCase);
-        skills["Mining"]=40;skills["Fishing"]=55;
-        var state=new GoalAccountProfile(skills,100000,20000,true,new HashSet<string>());
-        var now=DateTimeOffset.UtcNow;
-        var activities=new[]
-        {
-            new GoalActivity("example_mining","Mining",15,35000,90000,5000,false,null,true,now),
-            new GoalActivity("example_fishing","Fishing",45,60000,45000,1000,false,null,true,now)
-        };
-        var plan=GoalPlanner.Rank(state,activities,GoalPreference.Balanced,now);
-        core.Add(Severity.INFO,"GOAL_PLANNER","LONG_TERM_GOAL",
-            $"max_total={GoalPlanner.MaxTotalLevel} skill_count={GoalPlanner.Skills.Length} "+
-            "objective=MAX_SKILLS_AND_GP synthetic_fixture=true");
-        foreach(var option in plan.Options.Take(2))
-            core.Add(Severity.INFO,"GOAL_PLANNER","ESTIMATED_ACTIVITY",
-                $"activity={option.Id} score={option.Score} skill={option.Skill} "+
-                $"xp_per_hour={option.XpPerHour} gp_per_hour={option.NetGpPerHour} "+
-                "hypothetical_values=true no_game_execution=true");
-    }
-    private async void RunCampaign()
-    {
-        if(campaignRunning)return;
-        campaignRunning=true;campaignButton.Enabled=false;
-        core.Add(Severity.INFO,"CAMPAIGN","START",
-            "Offline-Langzeittest: nur fiktive Skills und GP, keine Spielverbindung.");
-        try
-        {
-            var outcome=await Task.Run(()=>
-            {
-                var path=OfflineCampaign.CheckpointPath;
-                bool wasSaved=File.Exists(path);
-                var before=OfflineCampaign.LoadOrCreate(path);
-                var after=OfflineCampaign.RunBatch(before,OfflineCampaign.BatchSize);
-                OfflineCampaign.Save(path,after);
-                return (before,after,wasSaved);
-            });
-            core.Add(Severity.INFO,"CAMPAIGN",outcome.wasSaved?"RESUMED":"CREATED",
-                $"initial_step={outcome.before.Steps} initial_gp={outcome.before.Coins} source=SYNTHETIC_FIXTURE");
-            core.Add(Severity.INFO,"CAMPAIGN","CHECKPOINT_SAVED",
-                $"steps={outcome.after.Steps} total_level={outcome.after.Levels.Values.Sum()} "+
-                $"synthetic_gp={outcome.after.Coins} "+
-                $"activity={outcome.after.LastActivity} simulated_only=true");
-            footer.Text="Strategie-Checkpoint gespeichert (nur Offline-Testdaten).";
-        }
-        catch(Exception ex)
-        {
-            core.Add(Severity.ERROR,"CAMPAIGN","FAILED",ex.GetType().Name+": "+ex.Message);
-            footer.Text="Strategie-Langzeittest fehlgeschlagen; Checkpoint erhalten.";
-        }
-        finally {campaignRunning=false;campaignButton.Enabled=true;}
-    }
-    private void RunMiningGe()
-    {
-        try
-        {
-            core.Add(Severity.INFO,"MINING_GE","SUITE_START",
-                "Fuenf deterministische Offline-Szenarien; keine Spielverbindung.");
-            foreach(var outcome in MiningScenario.Verify())
-            {
-                core.Add(Severity.INFO,"MINING_GE","SCENARIO_RESULT",outcome.Summary);
-                foreach(var ev in outcome.Trace)
-                {
-                    if(ev.Code is "ORE_MINED" or "MOVE" or "ROCK_WAIT")continue;
-                    core.Add(ev.Code is "ROUTE_ABORT" or "OFFER_REJECTED" ?
-                        Severity.WARN:Severity.INFO,"MINING_GE",ev.Code,
-                        $"scenario={outcome.Name} tick={ev.Tick} {ev.Detail}");
-                }
-            }
-            core.Add(Severity.INFO,"MINING_GE","SUITE_PASS",
-                "5 Offline-Szenarien bestanden; Erzbuchhaltung, Verkauf und Navigation verifiziert.");
-            footer.Text="Mining → GE: Offline-Szenarien bestanden. Log kopieren.";
-        }
-        catch(Exception ex)
-        {
-            core.Add(Severity.ERROR,"MINING_GE","SUITE_FAILED",
-                ex.GetType().Name+": "+ex.Message);
-            footer.Text="Offline-Simulation fehlgeschlagen. Log kopieren.";
-        }
-    }
-    private void ToggleRender()
-    {
-        core.SetRendering(!core.Rendering);
-        renderButton.Text=core.Rendering?"Grafik ausschalten":"Grafik einschalten";
-        preview.DrawWorld=core.Rendering;
-        preview.Invalidate();
-    }
     private void CopyLog()
     {
         try {var t=core.Report();Clipboard.SetText(t);footer.Text=$"Log kopiert ({t.Length} Zeichen) – Strg + V im Chat.";}
@@ -624,21 +496,11 @@ internal sealed class MainWindow : Form
     private void UpdateView()
     {
         var s=core.Stats();var p=Process.GetCurrentProcess();
-        if(gameTabs.SelectedTab==officialPage)
-            stats.Text=$"Offizielle Ansicht: {(officialHost.Attached?
-                (officialHost.CurrentKind==OfficialWindowKind.Launcher?
-                    "JAGEX-ANMELDUNG":"OSRS-SPIEL"):
-                "NICHT VERBUNDEN")}"+
-                " | Authentifizierung: durch Jagex | Live-Agent: NICHT VERFÜGBAR"+
-                $" | Fehler: {s.Errors} | RAM: {p.WorkingSet64/1024/1024} MiB";
-        else
-        {
-            var world=mini.Snapshot;
-            stats.Text=$"Sandbox-Bot: {(mini.BotRunning?"LÄUFT":"GESTOPPT")} | Server: {mini.Connection}"+
-                $" | Tick: {world?.Tick??0} | Erz: {world?.Ore??0}/{world?.Capacity??6}"+
-                $" | XP: {world?.MiningXp??0} | GP: {world?.Coins??0}"+
-                $" | Fehler: {s.Errors} | RAM: {p.WorkingSet64/1024/1024} MiB";
-        }
+        stats.Text=$"Offizielles OSRS: {(officialHost.Attached?
+            (officialHost.CurrentKind==OfficialWindowKind.Launcher?
+                "JAGEX-ANMELDUNG":"OSRS-SPIEL"):"NICHT EINGEBETTET")}"+
+            " | Live-Agent: NICHT VERFÜGBAR"+
+            $" | Fehler: {s.Errors} | RAM: {p.WorkingSet64/1024/1024} MiB";
         if(pause.Checked)return;
         var events=core.Snapshot().TakeLast(2000).AsEnumerable();
         if(filter.SelectedIndex==1)events=events.Where(e=>e.Level>=Severity.INFO);
@@ -655,57 +517,48 @@ internal sealed class MainWindow : Form
 
 internal static class SelfTest
 {
-    internal static int RunScenarios()
-    {
-        try
-        {
-            foreach(var r in MiningScenario.Verify())
-                Console.WriteLine("SCENARIO "+r.Summary);
-            Console.WriteLine("SCENARIO SUITE PASS (5 synthetic environments)");
-            return 0;
-        }
-        catch(Exception e)
-        {
-            Console.Error.WriteLine("SCENARIO SUITE FAIL "+e);
-            return 1;
-        }
-    }
     internal static int Run()
     {
         try
         {
-            var log=new Diagnostics();
-            log.Add(Severity.INFO,"T","HELLO","password=abc bearer xyz user=test@example.com");
-            var line=log.Snapshot().Single().Line;
-            if(line.Contains("abc")||line.Contains("xyz")||line.Contains("test@example.com"))throw new Exception("Redaction test");
-            for(int i=1;i<=3;i++){log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","tick="+i);Thread.Sleep(4);}
-            if(log.Stats().Ticks!=3||log.TickStats().Count!=2)throw new Exception("Tick test");
-            if(!log.Report().Contains("Tick-Abstände") || !log.Json().Contains("simulationOnly"))throw new Exception("Export test");
-            const string manifest="version=0.3.2\nexeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.3.2/OSRS-Live-Diagnostics.exe\nexeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+            var d=new Diagnostics();
+            d.Add(Severity.INFO,"CORE","PRIVACY",
+                "password=abc bearer xyz user=test@example.com");
+            string log=d.Snapshot().Single().Line;
+            if(log.Contains("password=abc")||log.Contains("bearer xyz")||
+               log.Contains("test@example.com"))
+                throw new Exception("Privacy regression");
+            if(d.Report().Contains("Tick-Abstände") ||
+               d.Json().Contains("simulationOnly"))
+                throw new Exception("Offline diagnostics still present");
+            if(!d.Report().Contains("LIVE ONLY") ||
+               !d.Json().Contains("liveAgentAvailable"))
+                throw new Exception("Live-only export missing status");
+            const string manifest="version=0.8.1\n"+
+                "exeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.8.1/OSRS-Play.exe\n"+
+                "exeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             var info=Updater.ParseManifest(manifest);
-            if(info.Version.ToString()!="0.3.2")throw new Exception("Version parse");
-            var playManifest=manifest.Replace("OSRS-Live-Diagnostics.exe","OSRS-Play.exe");
-            if(Updater.ParseManifest(playManifest).Version!=info.Version)
-                throw new Exception("OSRS Play update URL not recognized");
-            try {Updater.ParseManifest(manifest.Replace("github.com","evil.example"));throw new Exception("Host accepted");}
+            if(info.Version.ToString()!="0.8.1")throw new Exception("Update version");
+            try
+            {
+                Updater.ParseManifest(manifest.Replace("github.com","evil.example"));
+                throw new Exception("Host accepted");
+            }
             catch(FormatException){}
-            try {Updater.ParseManifest(manifest.Replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","notahash"));throw new Exception("Hash accepted");}
-            catch(FormatException){}
-            OfflineAgentTests.Run();
-            SessionMetricsTests.Run();
-            BotControllerTests.Run();
-            MiniWorldTests.Run();
             OfficialF2PWorldTests.Run();
             PublicOsrsHiscoresTests.Run();
-            MiniWorldActionAuditTests.Run();
             OfficialClientWindowHostTests.Run();
-            GoalPlannerTests.Run();
-            OfflineCampaignTests.Run();
-            if(RunScenarios()!=0)throw new Exception("Mining/GE scenario suite failed");
-            log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
-            log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: real osclient.exe window host, launcher-owned login, real public OSRS skill data contract, authenticated-session gate, monotonic action audit, official F2P world list and TCP ping filters, own TCP client, navigation, mining, selling, server stop, session-aware timing, OSRS Play bot Start/Stop, long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            if(OfficialGameSessionGate.Readiness(null)!="OFFICIAL_PROTOCOL_ADAPTER_MISSING")
+                throw new Exception("Missing official adapter incorrectly accepted");
+            d.Clear();
+            if(d.Stats().Events!=1)throw new Exception("Clear failed");
+            Console.WriteLine("LIVE ONLY PASS: official host, Jagex login handoff, F2P, public skills, privacy, updater, no offline sessions");
             return 0;
-        }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
+        }
+        catch(Exception e)
+        {
+            Console.Error.WriteLine("LIVE ONLY FAIL "+e);
+            return 1;
+        }
     }
 }
