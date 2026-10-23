@@ -35,16 +35,12 @@ internal static class PublicOsrsHiscores
         var rows=csv.Replace("\r","").Split('\n',StringSplitOptions.RemoveEmptyEntries);
         if(rows.Length<OrderedSkills.Length+1)
             throw new FormatException("Incomplete OSRS skill response.");
-        int[] ParseRow(string text)
-        {
-            var fields=text.Trim().Split(',');
-            if(fields.Length!=3 || fields.Any(x=>!int.TryParse(x,
-                NumberStyles.Integer,CultureInfo.InvariantCulture,out _)))
-                throw new FormatException("Malformed OSRS highscore row.");
-            return fields.Select(x=>int.Parse(x,CultureInfo.InvariantCulture)).ToArray();
-        }
-        var summary=ParseRow(rows[0]);
-        if(summary[1]<24 || summary[1]>2376)
+        var totalFields=rows[0].Trim().Split(',');
+        if(totalFields.Length!=3 ||
+           !int.TryParse(totalFields[1],NumberStyles.Integer,CultureInfo.InvariantCulture,
+               out int totalLevel))
+            throw new FormatException("Invalid overall OSRS level.");
+        if(totalLevel<24 || totalLevel>2376)
             throw new FormatException("Unexpected total level.");
         var skills=new List<PublicOsrsSkill>(OrderedSkills.Length);
         for(int i=0;i<OrderedSkills.Length;i++)
@@ -58,9 +54,9 @@ internal static class PublicOsrsHiscores
                 throw new FormatException("Invalid OSRS skill row.");
             skills.Add(new(OrderedSkills[i],level,xp,rank));
         }
-        if(skills.Sum(s=>s.Level)!=summary[1])
+        if(skills.Sum(s=>s.Level)!=totalLevel)
             throw new FormatException("Total level disagrees with 24 skills.");
-        return new(name,summary[1],skills,when);
+        return new(name,totalLevel,skills,when);
     }
     internal static async Task<PublicOsrsProfile> FetchAsync(string displayName,CancellationToken ct)
     {
