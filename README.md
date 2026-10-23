@@ -118,3 +118,12 @@ Die Schaltfläche **Mining → GE testen** führt fünf isolierte Testwelten mit
 - `CAMPAIGN CREATED/RESUMED/CHECKPOINT_SAVED` erscheinen beim Logexport, mit klar gekennzeichneten fiktiven Zahlen.
 - Selbsttests prüfen Progression, 24-Skill-Abdeckung, Geldreserve, deterministische Fortsetzung, beschädigte Dateien und Verhalten nach sämtlichen 99er-Leveln.
 - **Kein reales OSRS-Gameplay**: Der Langzeittest verändert weder Accounts noch Bank/GE und enthält keine Zugangsdaten.
+
+
+## v0.6.1 – Korrekte Tickstatistik über mehrere Bot-Starts
+- Sitzungsübergreifende Wartezeiten werden nicht als Tick-Intervall bewertet.
+- Start/Stop und `GAME_TICK` besitzen die Kennung `run_id=N`.
+- Eine offene Aktion wird beim Anhalten als `ACTION_CANCELLED` dokumentiert.
+- Verspätete Tick-Callbacks aus früheren Sitzungen können nach Stop/Restart keine Spielzustände mehr verändern.
+- Der Diagnosetest reproduziert die im Nutzerlog beobachteten 7,465 Sekunden Pause und überprüft ihre korrekte Behandlung.
+- [Auswertung und Testplan](docs/OSRS-PLAY-SESSION-METRICS-2026-10-23.md).
