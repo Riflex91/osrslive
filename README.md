@@ -80,3 +80,12 @@ Technische Prüfung: `--self-test`, Live-Simulationslog und Windows-CI.
 ## v0.4.2 – Mining → GE: reproduzierbare Offline-Szenarien
 
 Die Schaltfläche **Mining → GE testen** führt fünf isolierte Testwelten mit Erzabbau, virtuellem Inventar, BFS-Navigation, GE-Verkauf, blockierten Wegen und abgewiesenen Angeboten aus. Kein echter Spielclient und keine Jagex-Verbindung. CLI: `--scenario-tests`. Siehe [Testdokumentation](docs/MINING-GE-SIMULATION-2026-10-22.md).
+
+
+## v0.5.0 – Autonome Langfristziele: alle Skills + GP (Strategie)
+- Ein Strategiesystem für **24 Skills inklusive Sailing** (2376 maximales Gesamtlevel) und unbeschränktes Langfristziel Goldvermögen.
+- `GoalPlanner` wägt unter `Balanced`, `MaxSkills` und `MaxGold` geschätzte XP/h und Netto-GP/h ab; nach Erreichen aller 99er-Level wird GP zum einzigen Optimierungsziel.
+- Quest-/Freischaltungsbedingungen, Member-Status, Anlaufkosten, Liquiditätsreserve und veraltete Preisangaben werden als harte Gates behandelt.
+- Im Offline-Agent-Log stehen beispielhafte Ranglisten mit `synthetic_fixture=true`, **keine** echten XP-, Markt- oder Kontowerte.
+- Der Planner ist eine Entscheidungskomponente, **noch kein OSRS-Live-Client oder selbstspielender Account**.
+- Siehe [Strategie und Botvergleich](docs/OSRS-AUTONOMY-AND-WEALTH-PLAN-2026-10-23.md).
