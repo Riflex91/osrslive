@@ -133,23 +133,36 @@ internal sealed class MainWindow : Form
         metricsTimer.Start();
         Shown+=async (_,_)=>
         {
-            // Open the actual Jagex authentication UI automatically on first
-            // display. Previous releases only initialized the host and the
-            // updater, so a manual button click was always required.
-            StartOfficialOnStartup();
-            core.Add(Severity.INFO,"UPDATER","CHECK_START","Automatische GitHub-Updateprüfung");
-            var changed=await Updater.CheckAndUpdateAsync(msg=>
+            // Finish auto-update first. Never launch the Jagex login in a
+            // process that is about to close for an update/restart.
+            bool restarting=false;
+            try
             {
-                core.Add(Severity.INFO,"UPDATER","STATUS",msg);
-                if(!IsDisposed && IsHandleCreated) BeginInvoke(()=>footer.Text=msg);
-            });
-            if(changed)
-            {
-                core.Add(Severity.INFO,"UPDATER","RESTART_REQUESTED","Verifiziertes Update; starte Hilfsprozess.");
-                Close();
+                core.Add(Severity.INFO,"UPDATER","CHECK_START","Automatische GitHub-Updateprüfung");
+                var changed=await Updater.CheckAndUpdateAsync(msg=>
+                {
+                    core.Add(Severity.INFO,"UPDATER","STATUS",msg);
+                    if(!IsDisposed && IsHandleCreated)BeginInvoke(()=>footer.Text=msg);
+                });
+                if(changed)
+                {
+                    restarting=true;
+                    core.Add(Severity.INFO,"UPDATER","RESTART_REQUESTED",
+                        "Verifiziertes Update; starte Hilfsprozess.");
+                    Close();
+                }
+                else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
+                    "Keine Neustartanforderung; danach Jagex Login automatisch starten.");
             }
-            else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
-                "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
+            catch(Exception ex)
+            {
+                core.Add(Severity.WARN,"UPDATER","CHECK_FAILED",
+                    "reason="+ex.GetType().Name+" auto_login_still_enabled=true");
+            }
+            finally
+            {
+                if(!restarting && !IsDisposed)StartOfficialOnStartup();
+            }
         };
         FormClosing+=(_,_)=>{accountReadCancel.Cancel();pingCancel.Cancel();
             officialHost?.Dispose();metricsTimer.Stop();refreshTimer.Stop();
