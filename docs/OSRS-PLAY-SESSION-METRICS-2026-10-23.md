@@ -13,7 +13,7 @@
    Pausenzeit wird nicht mehr in Durchschnitt und Maximum eingerechnet.
    Die Gesamtzahl der Game-Ticks bleibt vollständig erhalten.
 2. Simulator-Start, Ende und Ticks tragen eine explizite
-   `session=N`-Markierung.
+   `run_id=N`-Markierung.
 3. Ein offener `AgentPlan` wird bei Stop oder Disable als
    `OFFLINE_AGENT ACTION_CANCELLED` gemeldet und nicht als Erfolg bestätigt.
 4. Session-Generation schützt den Timer gegen verspätete

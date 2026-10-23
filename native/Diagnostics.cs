@@ -254,11 +254,11 @@ internal sealed class LocalSimulation : IDisposable
             ticks=0;x=3200;y=3200;
             hitpoints=100;inventoryUsed=0;agentEnabled=false;
             pending=null;pendingBefore=null;planner=new OfflineAgent();
-            int session=++sessionNumber;
+            int run_id=++sessionNumber;
             long token=++generation;
             diagnostics.SetMode("SIMULATION (keine OSRS-Verbindung)");
             diagnostics.Add(Severity.INFO,"SIMULATOR","START",
-                $"session={session} Lokaler Testmodus; gemeinsamer Inventarzustand");
+                $"run_id={session} Lokaler Testmodus; gemeinsamer Inventarzustand");
             // Schedule only AFTER publishing the Timer field, avoiding a race on tick #1.
             timer=new System.Threading.Timer(_=>
             {
@@ -272,7 +272,7 @@ internal sealed class LocalSimulation : IDisposable
                         int tick=++ticks;
                         x+=random.Next(-1,2);y+=random.Next(-1,2);
                         diagnostics.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK",
-                            $"session={session} tick={tick} x={x} y={y} plane=0");
+                            $"run_id={session} tick={tick} x={x} y={y} plane=0");
                         if(tick%7==0)
                             diagnostics.Add(Severity.INFO,"SIMULATOR","NPC_SPAWNED",
                                 "npc_id=301 near=player");
@@ -305,11 +305,11 @@ internal sealed class LocalSimulation : IDisposable
             if(pending is not null)
                 diagnostics.Add(Severity.INFO,"OFFLINE_AGENT","ACTION_CANCELLED",
                     $"id={pending.Id} action={pending.Action} planned_tick={pending.Tick} "+
-                    $"session={sessionNumber} reason=BOT_STOPPED");
+                    $"run_id={sessionNumber} reason=BOT_STOPPED");
             pending=null;pendingBefore=null;
             diagnostics.SetMode("NICHT VERBUNDEN");
             diagnostics.Add(Severity.INFO,"SIMULATOR","STOP",
-                $"session={sessionNumber} Testmodus angehalten");
+                $"run_id={sessionNumber} Testmodus angehalten");
         }
         previous.Dispose();
     }

@@ -10,16 +10,16 @@ internal static class SessionMetricsTests
     internal static void Run()
     {
         var log=new Diagnostics();
-        log.Add(Severity.INFO,"SIMULATOR","START","session=1");
-        log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","session=1 tick=1");
+        log.Add(Severity.INFO,"SIMULATOR","START","run_id=1");
+        log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","run_id=1 tick=1");
         Thread.Sleep(8);
-        log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","session=1 tick=2");
-        log.Add(Severity.INFO,"SIMULATOR","STOP","session=1");
+        log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","run_id=1 tick=2");
+        log.Add(Severity.INFO,"SIMULATOR","STOP","run_id=1");
         Thread.Sleep(85); // intentional pause must not count toward TickStats
-        log.Add(Severity.INFO,"SIMULATOR","START","session=2");
-        log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","session=2 tick=1");
+        log.Add(Severity.INFO,"SIMULATOR","START","run_id=2");
+        log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","run_id=2 tick=1");
         Thread.Sleep(9);
-        log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","session=2 tick=2");
+        log.Add(Severity.DEBUG,"SIMULATOR","GAME_TICK","run_id=2 tick=2");
         var interval=log.TickStats();
         Ensure(interval.Count==2,"two independent session intervals");
         Ensure(interval.MaxMs<70 && interval.AverageMs<70,
@@ -29,8 +29,16 @@ internal static class SessionMetricsTests
         using var sim=new LocalSimulation(log);
         using var bot=new BotController(log,sim);
         bot.Start();
-        Thread.Sleep(100);
+        // Exercise cancellation of a real pending synthetic action, regardless of
+        // whether the very first timer callback precedes AgentEnabled.
+        for(int i=0;i<40 &&
+            !log.Snapshot().Any(x=>x.Source=="OFFLINE_AGENT"&&x.Event=="ACTION_PLANNED");i++)
+            Thread.Sleep(50);
+        Ensure(log.Snapshot().Any(x=>x.Source=="OFFLINE_AGENT"&&x.Event=="ACTION_PLANNED"),
+            "first planned action never appeared");
         bot.Stop();
+        Ensure(log.Snapshot().Any(x=>x.Source=="OFFLINE_AGENT"&&x.Event=="ACTION_CANCELLED"),
+            "pending action not cancelled at STOP");
         int ticksAtStop=log.Snapshot().Count(x=>x.Source=="SIMULATOR"&&x.Event=="GAME_TICK");
         int confirmationsAtStop=log.Snapshot().Count(x=>x.Source=="OFFLINE_AGENT"&&x.Event=="ACTION_CONFIRMED");
         Thread.Sleep(700);
@@ -44,7 +52,7 @@ internal static class SessionMetricsTests
         bot.Stop();
         var sessionStarts=log.Snapshot().Where(x=>x.Source=="SIMULATOR"&&x.Event=="START").ToArray();
         Ensure(sessionStarts.Length==4,"session start markers");
-        Ensure(sessionStarts[^1].Detail.Contains("session=2"),"new session id");
+        Ensure(sessionStarts[^1].Detail.Contains("run_id=2"),"new session id");
         Console.WriteLine("SESSION METRICS PASS: cross-run exclusion, stop callback barrier, new session");
     }
 }

@@ -122,7 +122,7 @@ Die Schaltfläche **Mining → GE testen** führt fünf isolierte Testwelten mit
 
 ## v0.6.1 – Korrekte Tickstatistik über mehrere Bot-Starts
 - Sitzungsübergreifende Wartezeiten werden nicht als Tick-Intervall bewertet.
-- Start/Stop und `GAME_TICK` besitzen die Kennung `session=N`.
+- Start/Stop und `GAME_TICK` besitzen die Kennung `run_id=N`.
 - Eine offene Aktion wird beim Anhalten als `ACTION_CANCELLED` dokumentiert.
 - Verspätete Tick-Callbacks aus früheren Sitzungen können nach Stop/Restart keine Spielzustände mehr verändern.
 - Der Diagnosetest reproduziert die im Nutzerlog beobachteten 7,465 Sekunden Pause und überprüft ihre korrekte Behandlung.
