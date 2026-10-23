@@ -40,7 +40,10 @@ internal sealed class MainWindow : Form
     private readonly BotController bot;
     private readonly MiniWorldClient mini;
     private readonly Label header=new(), stats=new(), footer=new();
-    private Button botButton=new(), renderButton=new(), campaignButton=new();
+    private Button botButton=new(), renderButton=new(), campaignButton=new(), pingButton=new();
+    private readonly CancellationTokenSource pingCancel=new();
+    private bool pingScanning;
+    private string f2pRecommendation="nicht gemessen";
     private bool campaignRunning;
     private readonly TextBox log=new(), search=new();
     private readonly ComboBox filter=new();
@@ -111,7 +114,7 @@ internal sealed class MainWindow : Form
             else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
                 "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
         };
-        FormClosing+=(_,_)=>{mini.Dispose();bot.Dispose();sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();};
+        FormClosing+=(_,_)=>{pingCancel.Cancel();mini.Dispose();bot.Dispose();sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();pingCancel.Dispose();};
     }
     private Button Button(string label,Action action)
     {
@@ -137,7 +140,8 @@ internal sealed class MainWindow : Form
         botButton.BackColor=Color.FromArgb(218,242,225);
         renderButton=Button("Grafik ausschalten",ToggleRender);
         campaignButton=Button("Strategie-Langzeittest",RunCampaign);
-        actionBar.Controls.AddRange(new Control[]{botButton,renderButton,
+        pingButton=Button("F2P-Ping testen",TestF2PWorlds);
+        actionBar.Controls.AddRange(new Control[]{botButton,renderButton,pingButton,
             campaignButton,Button("Mining → GE testen",RunMiningGe),
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
@@ -191,6 +195,64 @@ internal sealed class MainWindow : Form
         {
             core.Add(Severity.ERROR,"MINI_BOT","CONTROL_FAILED",ex.GetType().Name+": "+ex.Message);
             footer.Text="Botsteuerung fehlgeschlagen – siehe Log.";
+        }
+    }
+    private async void TestF2PWorlds()
+    {
+        if(pingScanning)return;
+        pingScanning=true;
+        pingButton.Enabled=false;
+        footer.Text="Offizielle kostenlose Standardwelten laden und TCP-Ping auf diesem PC messen …";
+        core.Add(Severity.INFO,"F2P_PING","SCAN_START",
+            "source=OFFICIAL_JAGEX_WORLDLIST free_only=true unrestricted_only=true "+
+            "probe=TCP_CONNECT port=43594 no_login=true no_game_packets=true");
+        try
+        {
+            var result=await OfficialF2PWorldScanner.ScanAsync(pingCancel.Token);
+            core.Add(Severity.INFO,"F2P_PING","CATALOG_CHECKED",
+                $"eligible={result.Eligible} reachable={result.Reachable} official_url={result.Source}");
+            if(result.Fastest.Count==0)
+            {
+                f2pRecommendation="keine Welt erreichbar";
+                core.Add(Severity.WARN,"F2P_PING","NO_REACHABLE_WORLDS",
+                    "none_selected=true official_game_login_unavailable=true");
+                footer.Text="Kein F2P-Server erreichbar. Keine Welt wurde gewählt.";
+            }
+            else
+            {
+                var best=result.Fastest[0];
+                f2pRecommendation=$"W{best.World.WorldNumber} {best.Milliseconds:0.0} ms";
+                foreach(var candidate in result.Fastest.Take(5))
+                    core.Add(Severity.INFO,"F2P_PING","CANDIDATE",
+                        $"world={candidate.World.WorldNumber} "+
+                        $"location={candidate.World.Location} "+
+                        $"tcp_latency_ms={candidate.Milliseconds.ToString("0.0",CultureInfo.InvariantCulture)} "+
+                        $"samples={candidate.Samples} free=true general_purpose=true");
+                core.Add(Severity.INFO,"F2P_PING","BEST_WORLD",
+                    $"world={best.World.WorldNumber} "+
+                    $"tcp_latency_ms={best.Milliseconds.ToString("0.0",CultureInfo.InvariantCulture)} "+
+                    "measurement=THIS_WINDOWS_PC connection=PROBE_ONLY "+
+                    "official_login=false auto_game_connection=false");
+                footer.Text=$"F2P-Empfehlung: W{best.World.WorldNumber} "+
+                    $"({best.Milliseconds:0.0} ms TCP); nur Ping, kein OSRS-Login.";
+            }
+            refreshNeeded=true;
+        }
+        catch(OperationCanceledException)
+        {
+            core.Add(Severity.INFO,"F2P_PING","SCAN_CANCELLED","user_or_app_shutdown=true");
+        }
+        catch(Exception ex)
+        {
+            f2pRecommendation="Liste/Messung fehlgeschlagen";
+            core.Add(Severity.WARN,"F2P_PING","SCAN_FAILED",
+                ex.GetType().Name+": "+ex.Message);
+            if(!IsDisposed)footer.Text="F2P-Liste oder Ping-Test fehlgeschlagen. Keine Welt ausgewählt.";
+        }
+        finally
+        {
+            pingScanning=false;
+            if(!IsDisposed)pingButton.Enabled=true;
         }
     }
     private void LogGoalPlanFixture()
@@ -368,12 +430,13 @@ internal static class SelfTest
             SessionMetricsTests.Run();
             BotControllerTests.Run();
             MiniWorldTests.Run();
+            OfficialF2PWorldTests.Run();
             GoalPlannerTests.Run();
             OfflineCampaignTests.Run();
             if(RunScenarios()!=0)throw new Exception("Mining/GE scenario suite failed");
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: own TCP client, navigation, mining, selling, server stop, session-aware timing, OSRS Play bot Start/Stop, long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: official F2P world list and TCP ping filters, own TCP client, navigation, mining, selling, server stop, session-aware timing, OSRS Play bot Start/Stop, long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }

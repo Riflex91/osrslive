@@ -1,4 +1,30 @@
-# OSRS Play v0.7.0 – eigener Mini-Client
+## v0.7.1 – Offizielle F2P-Welten ohne Login prüfen
+
+Die Schaltfläche **F2P-Ping testen** ruft die offizielle
+[OSRS-Weltliste](https://oldschool.runescape.com/slu) über HTTPS ab.
+Es werden **ausschließlich kostenlose, unbeschränkte Standardwelten**
+berücksichtigt: keine Mitgliederwelten, PvP-/Eventwelten und keine Welten
+mit 500/750 Gesamtlevel-Anforderung. Die App prüft von diesem Windows-PC
+die Erreichbarkeit von `oldschool<world-300>.runescape.com:43594`.
+Für die besten acht Kandidaten wird die Verbindungsdauer mehrfach gemessen
+und nach dem Median sortiert. Das Ergebnis erscheint im Fensterfuß und
+im Log als `F2P_PING BEST_WORLD` mit Welt, Region und TCP-Latenz.
+
+Die Messung stellt **nur TCP-Verbindungen** zum Spielport her. Sie sendet
+keine Login-Daten und keine Spielbefehle. Eine erfolgreiche Messung ist
+**keine** laufende Spielsitzung. Der integrierte Bot läuft weiter
+ausschließlich im lokalen Sandbox-Spielserver. Wenn die offizielle Weltliste
+nicht verifiziert werden kann oder keine Welt erreichbar ist, wird **keine
+Welt ausgewählt**. Ohne offizielle Protokoll- und Authentifizierungsschnittstelle
+ist das Spielen auf echten OSRS-Servern noch nicht funktionsfähig.
+
+Hinweis: TCP-Verbindungsdauer misst ein Transport-Latenzsignal, keinen
+verlässlichen In-Game-Tick oder garantierten ICMP-Ping. Weltlisten und
+Latenzen können sich kurzfristig ändern; bei erneutem Start erneut prüfen.
+
+---
+
+# OSRS Play v0.7.1 – eigener Mini-Client mit F2P-Welt-Ping
 
 OSRS Play ist eine eigenständige, selbstenthaltende Windows-EXE.
 Keine RuneLite-/HDOS-Abhängigkeit und kein Plugin.
