@@ -1,3 +1,59 @@
+# OSRS Play 0.8.0 – Echter offizieller Client im OSRS-Play-Fenster
+
+**Neu:** Der Reiter **„Offizielles OSRS (echtes Spiel)“** kann das
+*unveränderte Spielfenster* der über den Jagex Launcher gestarteten
+`osclient.exe` innerhalb des OSRS-Play-Hauptfensters darstellen.
+
+## Echte Anmeldung und Spielwelt
+1. Auf **Jagex Login** klicken. OSRS Play startet den **installierten**
+   offiziellen Jagex Launcher. Falls er fehlt, kann die offizielle
+   Installationsseite geöffnet werden.
+2. Anmeldung und Account-/Client-Auswahl **im Jagex Launcher** durchführen.
+   Dort **Official Client / Play Now** wählen. Jagex selbst behandelt
+   Passwort, MFA, Launcher-SSO und Sessiontoken. **Niemals Zugangsdaten
+   in OSRS Play eingeben.**
+3. Zu OSRS Play zurückkehren und **Client einbetten** anklicken.
+   Es werden ausschließlich Fenster des laufenden offiziellen
+   Prozesses `osclient.exe` berücksichtigt. Bei mehreren Prozessen
+   den gewünschten auswählen.
+4. Die tatsächliche offizielle Spielwelt sollte nun im Reiter sichtbar
+   sein. Mit der Maus können die vorhandenen **Original-Spielcontrols**
+   bedient werden. Login, Netzwerkverkehr und Spieldaten bleiben in der
+   unveränderten offiziellen Software.
+5. **Client freigeben** stellt das ursprüngliche Windows-Fenster wieder
+   her, ohne es zu beenden oder vom Jagex-Account abzumelden.
+
+### Technische und funktionale Grenzen
+- Dies ist **Windows-Fenster-Einbettung (SetParent)**, keine Kopie des
+  Jagex-Spielcodes und keine implementierte eigene OSRS-Clientprotokoll-Engine.
+  Der offizielle, separat installierte Client muss vorhanden sein.
+- Die Anmeldung findet im **originalen Jagex Launcher** statt.
+  Eine eigene Login-Maske, ein Jagex-Account-SSO-Token-Abgriff oder
+  eine Passwortspeicherung in OSRS Play sind **nicht implementiert**.
+- Windows- bzw. GPU-/DPI-Besonderheiten des Jagex-Clients können
+  Cross-Process-Fensterhosting verhindern. Ein gescheitertes Andocken
+  beendet das Spiel nicht. Nach jeder Betriebssystem- oder Spielclient-
+  Aktualisierung muss das Hosting erneut getestet werden.
+- **Live-Agent noch nicht verfügbar:** Der Start/Stop-Button ist bei
+  aktivem Reiter für das echte Spiel deaktiviert. Der bisherige Bot
+  besitzt keine verifizierte Beobachtungs- und Aktionsschnittstelle
+  für den offiziellen C++-Client. Er läuft weiterhin nur im separaten
+  Reiter **„Lokale Testwelt“**. Das Programm behauptet weder echtes
+  automatisches Mining noch erfolgreiche Anti-Cheat-Umgehung.
+- Standardregeln von Jagex untersagen automatisierte Eingaben und
+  nicht genehmigte Spielclientveränderungen. Eine vom Nutzer berichtete
+  individuelle Sondergenehmigung ist nicht extern überprüft. Windows-
+  Einbettung selbst ist keine Bestätigung einer Jagex-Freigabe.
+- Teste zum ersten Mal **auf eigene Verantwortung** und möglichst erst
+  mit einer ausdrücklich freigegebenen Testinstallation.
+
+Quellen:
+- https://oldschool.runescape.wiki/w/Jagex_Launcher
+- https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setparent
+- https://legal.jagex.com/docs/rules/rules-of-runescape
+
+---
+
 ## v0.7.1 – Offizielle F2P-Welten ohne Login prüfen
 
 Die Schaltfläche **F2P-Ping testen** ruft die offizielle
