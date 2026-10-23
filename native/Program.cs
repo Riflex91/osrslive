@@ -236,7 +236,7 @@ internal sealed class MainWindow : Form
             footer.Text=officialHost is not null && officialHost.Attached?
                 officialHost.CurrentKind==OfficialWindowKind.Launcher?
                     "Offizieller Jagex Launcher im OSRS-Play-Fenster. Hier anmelden und 'Play Now' wählen.":
-                    "Offizielles OSRS-Spielfenster eingebettet. Live-Bot weiterhin nicht verbunden.":
+                    "Das echte OSRS-Spielfenster wird ausschließlich im OSRS-Play-Bereich dargestellt. Live-Bot noch nicht verbunden.":
                 "Auf 'Anmeldung starten' klicken – Launcher und Spiel werden im selben Bereich angezeigt.";
     }
     private void OpenJagexLogin()
@@ -283,12 +283,18 @@ internal sealed class MainWindow : Form
     private bool TryHostOfficialWindows(bool userInitiated)
     {
         if(officialHost is null || gameTabs.SelectedTab!=officialPage)return false;
-        // The official client takes priority after the Jagex Launcher starts it.
+        // A parented osclient.exe is no longer a top-level window.
+        // KEEP the existing game rather than alternately reattaching the launcher.
+        var existing=officialHost.Attached?officialHost.CurrentKind:null;
+        if(OfficialWindowTransition.Decide(existing,false,false)==
+           OfficialWindowDecision.KeepGame)
+            return true;
+        // Only enumerate top-level game windows while we are not already
+        // hosting one. The transition from Launcher -> Game is one-way.
         var clients=OfficialClientWindowHost.FindRunningClients();
-        if(clients.Count>0)
+        if(OfficialWindowTransition.Decide(existing,clients.Count>0,false)==
+           OfficialWindowDecision.AttachGame)
         {
-            if(officialHost.Attached && officialHost.CurrentKind==OfficialWindowKind.Game)
-                return true;
             var selected=PickOfficialWindow(clients,userInitiated);
             if(selected is null)return false;
             if(officialHost.Attach(selected))
@@ -303,12 +309,14 @@ internal sealed class MainWindow : Form
             if(userInitiated)footer.Text="Das offizielle Spielfenster ließ sich nicht einbetten (Windows-/DPI-Konflikt).";
             return false;
         }
-        if(officialHost.Attached && officialHost.CurrentKind==OfficialWindowKind.Launcher)
+        if(OfficialWindowTransition.Decide(existing,false,false)==
+           OfficialWindowDecision.KeepLauncher)
             return true;
         var launchers=OfficialClientWindowHost.FindRunningLauncherWindows();
-        if(launchers.Count==0)
+        if(OfficialWindowTransition.Decide(existing,false,launchers.Count>0)!=
+           OfficialWindowDecision.AttachLauncher)
         {
-            if(!officialHost.Attached)officialHint.Visible=true;
+            officialHint.Visible=true;
             return false;
         }
         var launcher=PickOfficialWindow(launchers,userInitiated);
