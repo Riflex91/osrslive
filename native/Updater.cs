@@ -54,7 +54,8 @@ internal static class Updater
             throw new FormatException("Invalid version");
         if(!dict.TryGetValue("exeUrl",out var url) || !Uri.TryCreate(url,UriKind.Absolute,out var uri)
             || uri.Scheme!=Uri.UriSchemeHttps || uri.Host!="github.com"
-            || !uri.AbsolutePath.Equals($"/Riflex91/osrslive/releases/download/v{parsed}/OSRS-Live-Diagnostics.exe",StringComparison.Ordinal)
+            || !(uri.AbsolutePath.Equals($"/Riflex91/osrslive/releases/download/v{parsed}/OSRS-Live-Diagnostics.exe",StringComparison.Ordinal)
+               || uri.AbsolutePath.Equals($"/Riflex91/osrslive/releases/download/v{parsed}/OSRS-Play.exe",StringComparison.Ordinal))
             || uri.UserInfo.Length>0 || uri.Query.Length>0 || uri.Fragment.Length>0)
             throw new FormatException("Untrusted update URL");
         if(!dict.TryGetValue("exeSha256",out var digest) || digest.Length!=64 ||
