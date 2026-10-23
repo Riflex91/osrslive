@@ -254,7 +254,7 @@ internal sealed class LocalSimulation : IDisposable
             ticks=0;x=3200;y=3200;
             hitpoints=100;inventoryUsed=0;agentEnabled=false;
             pending=null;pendingBefore=null;planner=new OfflineAgent();
-            int run_id=++sessionNumber;
+            int session=++sessionNumber;
             long token=++generation;
             diagnostics.SetMode("SIMULATION (keine OSRS-Verbindung)");
             diagnostics.Add(Severity.INFO,"SIMULATOR","START",
