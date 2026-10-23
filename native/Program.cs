@@ -66,6 +66,9 @@ internal sealed class MainWindow : Form
     private readonly System.Windows.Forms.Timer diagnosticsTimer=new(){Interval=10000};
     private readonly Stopwatch uptime=Stopwatch.StartNew();
     private OfficialClientWindowHost windowHost=null!;
+    private readonly OfficialLiveRenderObserver liveObserver=new();
+    private readonly System.Windows.Forms.Timer liveObservationTimer=new(){Interval=2000};
+    private LiveRenderState lastReportedRenderState=LiveRenderState.NoGameWindow;
     private bool followWindows,starting,scanning,stopping;
     private bool loggedBlockedAgent;
     private long lastWindowCheckMs,lastStatusLogMs;
@@ -117,14 +120,18 @@ internal sealed class MainWindow : Form
             }
         };
         uiTimer.Start();
+        liveObservationTimer.Tick+=(_,_)=>ObserveOfficialGame();
+        liveObservationTimer.Start();
         diagnosticsTimer.Tick+=(_,_) =>
         {
             using var p=Process.GetCurrentProcess();
             log.Add(Severity.DEBUG,"RUNTIME","HEALTH",
                 $"osrs_window={(windowHost.Attached?windowHost.CurrentKind.ToString():"none")} "+
+                $"render_state={liveObserver.Last.State} "+
+                $"frame_sample_age_s={(DateTimeOffset.UtcNow-liveObserver.Last.ObservedUtc).TotalSeconds:0.0} "+
                 $"working_set_mib={p.WorkingSet64/1024/1024} "+
                 $"uptime_s={uptime.Elapsed.TotalSeconds:0} "+
-                "agent_actions=DISABLED");
+                "authenticated=false_unverified agent_actions=DISABLED");
             PersistLog();
         };
         diagnosticsTimer.Start();
@@ -133,7 +140,8 @@ internal sealed class MainWindow : Form
         {
             stopping=true;followWindows=false;
             closing.Cancel();uiTimer.Stop();diagnosticsTimer.Stop();
-            windowHost.Dispose();
+            liveObservationTimer.Stop();liveObservationTimer.Dispose();
+            windowHost.Dispose();liveObserver.Reset();
             log.Add(Severity.INFO,"CORE","SHUTDOWN",
                 "jagex_process_not_terminated=true");
             PersistLog();
@@ -213,6 +221,23 @@ internal sealed class MainWindow : Form
         }
     }
 
+    private void ObserveOfficialGame()
+    {
+        if(stopping || !IsHandleCreated)return;
+        var frame=liveObserver.Observe(windowHost.VisibleGameHandle,Handle);
+        if(frame.State!=lastReportedRenderState)
+        {
+            lastReportedRenderState=frame.State;
+            log.Add(Severity.INFO,"OFFICIAL_OBSERVER","RENDER_STATE_CHANGED",
+                $"state={frame.State} pixels_sampled={frame.SampleCells} "+
+                $"variance={frame.LuminanceVariance} changed={frame.ChangedCells} "+
+                "origin=VISIBLE_OSCLIENT_FRAME auth_verified=false "+
+                "world_verified=false screenshot_persisted=false");
+        }
+        // This has no access to the actual authenticated player state,
+        // and must therefore never enable real gameplay automation.
+        changePending=true;
+    }
     private void StartOfficialLauncherIfNeeded()
     {
         if(windowHost.Attached)return;
@@ -269,9 +294,15 @@ internal sealed class MainWindow : Form
                     log.Add(Severity.INFO,"OFFICIAL_CLIENT","GAME_WINDOW_READY",
                         $"pid={chosen.ProcessId} kind=Game official_osrs=true "+
                         "login_state=UNVERIFIED world_selection=NOT_VERIFIED");
+                    liveObserver.Reset();
                     if(!loggedBlockedAgent)
                     {
                         loggedBlockedAgent=true;
+                        log.Add(Severity.INFO,"LIVE_AGENT","AUTO_START_EVALUATED",
+                            "auto_start_requested=true gate="+
+                            LiveAgentStartGate.Evaluate(null)+
+                            " game_window_visible=true "+
+                            "pixel_observation_cannot_verify_login=true");
                         log.Add(Severity.WARN,"LIVE_AGENT","START_BLOCKED",
                             "reason=NO_VERIFIED_OFFICIAL_WORLD_AND_INPUT "+
                             "game_window_visible=true automatic_gameplay=false");
@@ -365,8 +396,11 @@ internal sealed class MainWindow : Form
             windowHost.CurrentKind==OfficialWindowKind.Game?"OSRS-SPIEL SICHTBAR":
             "JAGEX-ANMELDUNG SICHTBAR":
             "WARTE AUF OFFIZIELLEN CLIENT";
-        status.Text=$"{window}  |  {f2pSummary}"+
-            "  |  Bot: NICHT GESTARTET";
+        string render=windowHost.Attached &&
+            windowHost.CurrentKind==OfficialWindowKind.Game?
+            " | Livebild: "+liveObserver.Last.State:"";
+        status.Text=$"{window}{render}  |  {f2pSummary}"+
+            "  |  Login: NICHT VERIFIZIERT | Bot: GESPERRT";
         if(!string.IsNullOrEmpty(footer.Text) &&
            footer.Text.Contains("nicht gefunden",StringComparison.OrdinalIgnoreCase))
         {
@@ -437,6 +471,7 @@ internal static class SelfTest
             OfficialWindowTransitionTests.Run();
             OfficialClientWindowHostTests.Run();
             OfficialStartupPolicyTests.Run();
+            OfficialLiveObserverTests.Run();
             OfficialF2PWorldTests.Run();
             PublicOsrsHiscoresTests.Run();
             const string manifest="version=0.9.1\n"+
@@ -444,7 +479,7 @@ internal static class SelfTest
                 "exeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             if(Updater.ParseManifest(manifest).Version.ToString()!="0.9.1")
                 throw new Exception("Updater parser failed");
-            Console.WriteLine("AUTO LIVE ONLY PASS: no buttons, official game, login ownership, F2P scan, block unverified automation, privacy");
+            Console.WriteLine("AUTO LIVE ONLY PASS: pixel render detection, login ownership, F2P scan, verified bot start gate, no buttons, privacy");
             return 0;
         }
         catch(Exception ex)

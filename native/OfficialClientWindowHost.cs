@@ -30,6 +30,10 @@ internal sealed class OfficialClientWindowHost : IDisposable
     private Rectangle originalBounds;
     private Size lastHostedSize=Size.Empty;
     internal OfficialWindowKind? CurrentKind {get;private set;}
+    // Observation is ONLY allowed on the reparented real osclient.exe window.
+    // This never returns the Jagex login/MFA/launcher HWND.
+    internal IntPtr VisibleGameHandle =>
+        Attached && CurrentKind==OfficialWindowKind.Game?attached:IntPtr.Zero;
     // The game remains our child even though it disappears from EnumWindows
     // top-level enumeration. Don't infer that it has exited from that list.
     internal bool Attached => attached!=IntPtr.Zero && IsWindow(attached) &&
