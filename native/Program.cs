@@ -40,7 +40,9 @@ internal sealed class MainWindow : Form
     private readonly BotController bot;
     private readonly MiniWorldClient mini;
     private readonly Label header=new(), stats=new(), footer=new();
-    private Button botButton=new(), renderButton=new(), campaignButton=new(), pingButton=new();
+    private Button botButton=new(), renderButton=new(), campaignButton=new(), pingButton=new(), hiscoresButton=new();
+    private readonly CancellationTokenSource accountReadCancel=new();
+    private bool accountReadBusy;
     private readonly CancellationTokenSource pingCancel=new();
     private bool pingScanning;
     private string f2pRecommendation="nicht gemessen";
@@ -114,7 +116,7 @@ internal sealed class MainWindow : Form
             else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
                 "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
         };
-        FormClosing+=(_,_)=>{pingCancel.Cancel();mini.Dispose();bot.Dispose();sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();pingCancel.Dispose();};
+        FormClosing+=(_,_)=>{accountReadCancel.Cancel();pingCancel.Cancel();mini.Dispose();bot.Dispose();sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();pingCancel.Dispose();accountReadCancel.Dispose();};
     }
     private Button Button(string label,Action action)
     {
@@ -141,7 +143,8 @@ internal sealed class MainWindow : Form
         renderButton=Button("Grafik ausschalten",ToggleRender);
         campaignButton=Button("Strategie-Langzeittest",RunCampaign);
         pingButton=Button("F2P-Ping testen",TestF2PWorlds);
-        actionBar.Controls.AddRange(new Control[]{botButton,renderButton,pingButton,
+        hiscoresButton=Button("Echte OSRS-Skills",ReadPublicHiscores);
+        actionBar.Controls.AddRange(new Control[]{botButton,renderButton,pingButton,hiscoresButton,
             campaignButton,Button("Mining → GE testen",RunMiningGe),
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
@@ -195,6 +198,61 @@ internal sealed class MainWindow : Form
         {
             core.Add(Severity.ERROR,"MINI_BOT","CONTROL_FAILED",ex.GetType().Name+": "+ex.Message);
             footer.Text="Botsteuerung fehlgeschlagen – siehe Log.";
+        }
+    }
+    private async void ReadPublicHiscores()
+    {
+        if(accountReadBusy)return;
+        using var form=new Form
+        {
+            Text="OSRS Play – öffentliche Skilldaten",Size=new Size(435,185),
+            StartPosition=FormStartPosition.CenterParent,FormBorderStyle=FormBorderStyle.FixedDialog,
+            MinimizeBox=false,MaximizeBox=false
+        };
+        var info=new Label{Left=16,Top=12,Width=390,Height=37,
+            Text="OSRS-Anzeigename (öffentlich) eingeben. Niemals Passwort oder Jagex-Token."};
+        var name=new TextBox{Left=16,Top=54,Width=390,MaxLength=12};
+        var ok=new Button{Text="Skilldaten laden",Left=186,Top=91,Width=125,DialogResult=DialogResult.OK};
+        var cancel=new Button{Text="Abbrechen",Left=316,Top=91,Width=90,DialogResult=DialogResult.Cancel};
+        form.Controls.AddRange(new Control[]{info,name,ok,cancel});
+        form.AcceptButton=ok;form.CancelButton=cancel;
+        if(form.ShowDialog(this)!=DialogResult.OK)return;
+        if(!PublicOsrsHiscores.ValidName(name.Text.Trim()))
+        {
+            footer.Text="Ungültiger OSRS-Anzeigename. Nur Buchstaben, Ziffern, Leerzeichen, - und _.";
+            return;
+        }
+        accountReadBusy=true;
+        hiscoresButton.Enabled=false;
+        core.Add(Severity.INFO,"OFFICIAL_PUBLIC","HISCORES_QUERY",
+            "host=secure.runescape.com source=PUBLIC_HISCORES user_identity_redacted=true "+
+            "public_read_only=true official_game_login=false");
+        try
+        {
+            var profile=await PublicOsrsHiscores.FetchAsync(name.Text.Trim(),accountReadCancel.Token);
+            var mining=profile.Skills.Single(x=>x.Name=="Mining");
+            core.Add(Severity.INFO,"OFFICIAL_PUBLIC","HISCORES_RESULT",
+                $"total_level={profile.TotalLevel} skills={profile.Skills.Count} "+
+                $"mining_level={mining.Level} mining_xp={mining.Experience} "+
+                "origin=JAGEX_PUBLIC_HISCORES authenticated_game_session=false "+
+                "game_input=false public_data_only=true");
+            footer.Text=$"Offizielle öffentliche Skills: Gesamtlevel {profile.TotalLevel}, "+
+                $"Mining {mining.Level} ({mining.Experience} XP). Kein Spiel-Login.";
+        }
+        catch(OperationCanceledException)
+        {
+            core.Add(Severity.INFO,"OFFICIAL_PUBLIC","QUERY_CANCELLED","window_shutdown=true");
+        }
+        catch(Exception ex)
+        {
+            core.Add(Severity.WARN,"OFFICIAL_PUBLIC","QUERY_FAILED",
+                ex.GetType().Name+"; no_live_game_connection=true");
+            if(!IsDisposed)footer.Text="Öffentliche OSRS-Skilldaten konnten nicht gelesen werden.";
+        }
+        finally
+        {
+            accountReadBusy=false;
+            if(!IsDisposed)hiscoresButton.Enabled=true;
         }
     }
     private async void TestF2PWorlds()
@@ -431,12 +489,14 @@ internal static class SelfTest
             BotControllerTests.Run();
             MiniWorldTests.Run();
             OfficialF2PWorldTests.Run();
+            PublicOsrsHiscoresTests.Run();
+            MiniWorldActionAuditTests.Run();
             GoalPlannerTests.Run();
             OfflineCampaignTests.Run();
             if(RunScenarios()!=0)throw new Exception("Mining/GE scenario suite failed");
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: official F2P world list and TCP ping filters, own TCP client, navigation, mining, selling, server stop, session-aware timing, OSRS Play bot Start/Stop, long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: real public OSRS skill data contract, authenticated-session gate, monotonic action audit, official F2P world list and TCP ping filters, own TCP client, navigation, mining, selling, server stop, session-aware timing, OSRS Play bot Start/Stop, long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }
