@@ -93,7 +93,7 @@ internal static class GoalPlannerTests
         Assert(xp.Options[0].Id=="fish","skill ranking");
         var all99=GoalPlanner.Skills.ToDictionary(x=>x,x=>99,StringComparer.OrdinalIgnoreCase);
         Assert(GoalPlanner.Rank(profile with {Levels=all99},activities,GoalPreference.MaxSkills,now)
-            .Options[0].Id=="ore","post-max GP optimization");
+            .Options[0].Id=="level_gate","post-max picks highest eligible GP per hour");
         Assert(GoalPlanner.Rank(profile with {Levels=new Dictionary<string,int>()},
             activities,GoalPreference.Balanced,now).Status=="INVALID_ACCOUNT_STATE","fail closed");
         Assert(GoalPlanner.Skills.Length==24&&GoalPlanner.MaxTotalLevel==2376,"Sailing+2376");
