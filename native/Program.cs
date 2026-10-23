@@ -59,15 +59,17 @@ internal sealed class MainWindow : Form
     {
         Dock=DockStyle.Fill,ForeColor=Color.WhiteSmoke,BackColor=Color.FromArgb(17,24,39),
         TextAlign=ContentAlignment.MiddleCenter,Font=new Font("Segoe UI",11),
-        Text="OFFIZIELLER OSRS-CLIENT\n\n"+
-            "1. 'Jagex Login' öffnet den offiziellen Jagex Launcher.\n"+
-            "2. Dort anmelden und 'Play Now' für den Official Client wählen.\n"+
-            "3. Zurück in OSRS Play 'Client einbetten' anklicken.\n\n"+
-            "Keine Zugangsdaten in OSRS Play eingeben.\n"+
-            "Der Bot steuert diese Live-Sitzung noch nicht."
+        Text="OSRS PLAY: LOGIN UND SPIEL IN EINEM FENSTER\n\n"+
+            "1. 'Anmeldung starten' öffnet den offiziellen Jagex Launcher hier.\n"+
+            "2. Hier beim offiziellen Jagex Launcher anmelden und Official Client wählen.\n"+
+            "3. 'Play Now' startet das echte Spiel; OSRS Play übernimmt dessen Fenster.\n\n"+
+            "Eventuell separat geöffnete Sicherheits-/Browserfenster gehören Jagex.\n"+
+            "Der Live-Bot ist noch nicht mit dem offiziellen Spiel verbunden."
     };
     private OfficialClientWindowHost officialHost=null!;
     private Button launcherButton=new(),attachButton=new(),detachButton=new();
+    private bool autoHostOfficial;
+    private long lastHostPollMs;
     private readonly System.Windows.Forms.Timer refreshTimer=new(){Interval=250};
     private readonly System.Windows.Forms.Timer metricsTimer=new(){Interval=5000};
     private volatile bool refreshNeeded=true;
@@ -98,6 +100,12 @@ internal sealed class MainWindow : Form
             core.Add(Severity.INFO,"UPDATER","PREVIOUS_UPDATE",outcome);
         refreshTimer.Tick+=(_,_)=>
         {
+            if(autoHostOfficial && gameTabs.SelectedTab==officialPage &&
+               eventClock.ElapsedMilliseconds-lastHostPollMs>1100)
+            {
+                lastHostPollMs=eventClock.ElapsedMilliseconds;
+                TryHostOfficialWindows(false);
+            }
             if(core.Rendering && gameTabs.SelectedTab==sandboxPage)preview.Invalidate();
             if(officialHost is not null && officialPage is not null && officialHost.Attached)
                 officialHost.Resize();
@@ -169,9 +177,9 @@ internal sealed class MainWindow : Form
         campaignButton=Button("Strategie-Langzeittest",RunCampaign);
         pingButton=Button("F2P-Ping testen",TestF2PWorlds);
         hiscoresButton=Button("Echte OSRS-Skills",ReadPublicHiscores);
-        launcherButton=Button("Jagex Login",OpenJagexLogin);
-        attachButton=Button("Client einbetten",AttachOfficialClient);
-        detachButton=Button("Client freigeben",DetachOfficialClient);
+        launcherButton=Button("Anmeldung starten",OpenJagexLogin);
+        attachButton=Button("Login/Spiel verbinden",AttachOfficialClient);
+        detachButton=Button("Fenster freigeben",DetachOfficialClient);
         actionBar.Controls.AddRange(new Control[]{launcherButton,attachButton,detachButton,
             botButton,renderButton,pingButton,hiscoresButton,
             campaignButton,Button("Mining → GE testen",RunMiningGe),
@@ -226,82 +234,133 @@ internal sealed class MainWindow : Form
         renderButton.Enabled=sandbox;
         if(!sandbox)
             footer.Text=officialHost is not null && officialHost.Attached?
-                "Echtes OSRS-Spielfenster eingebettet. Login über Jagex; automatische Spielsteuerung noch nicht verfügbar.":
-                "Jagex Launcher starten, dort anmelden und anschließend Official Client einbetten.";
+                officialHost.CurrentKind==OfficialWindowKind.Launcher?
+                    "Offizieller Jagex Launcher im OSRS-Play-Fenster. Hier anmelden und 'Play Now' wählen.":
+                    "Offizielles OSRS-Spielfenster eingebettet. Live-Bot weiterhin nicht verbunden.":
+                "Auf 'Anmeldung starten' klicken – Launcher und Spiel werden im selben Bereich angezeigt.";
     }
     private void OpenJagexLogin()
     {
+        gameTabs.SelectedTab=officialPage;
+        autoHostOfficial=true;
         try
         {
-            bool opened=OfficialClientWindowHost.TryOpenJagexLauncher();
-            if(!opened)
+            // Attaching an existing session takes priority over launching another.
+            if(TryHostOfficialWindows(true))return;
+            bool launched=OfficialClientWindowHost.TryOpenJagexLauncher();
+            if(!launched)
             {
+                autoHostOfficial=false;
                 var answer=MessageBox.Show(this,
-                    "Jagex Launcher wurde an den üblichen Installationsorten nicht gefunden. "+
-                    "Die offizielle Downloadseite im Browser öffnen?",
-                    "Jagex Launcher nicht gefunden",MessageBoxButtons.YesNo,MessageBoxIcon.Information);
+                    "Der offizielle Jagex Launcher ist nicht installiert oder konnte nicht "+
+                    "gefunden werden. Die offizielle Downloadseite öffnen?",
+                    "Jagex Launcher fehlt",MessageBoxButtons.YesNo,MessageBoxIcon.Information);
                 if(answer==DialogResult.Yes)
                     Process.Start(new ProcessStartInfo("https://www.jagex.com/en-GB/launcher")
                         {UseShellExecute=true});
                 return;
             }
-            core.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_OPENED",
-                "login_handled_externally_by_jagex=true no_credentials_in_osrs_play=true");
-            footer.Text="Im Jagex Launcher anmelden, Official Client auswählen und auf Play Now klicken.";
+            core.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_STARTED",
+                "auto_window_host=true credentials_handled_by_jagex=true "+
+                "tokens_never_read=true");
+            footer.Text="Jagex Launcher startet – dessen Fenster wird automatisch hier eingebettet.";
+            TryHostOfficialWindows(false);
         }
         catch(Exception ex)
         {
+            autoHostOfficial=false;
             core.Add(Severity.ERROR,"OFFICIAL_CLIENT","LAUNCHER_FAILED",ex.GetType().Name);
             footer.Text="Jagex Launcher konnte nicht gestartet werden; Installation überprüfen.";
         }
     }
     private void AttachOfficialClient()
     {
-        var available=OfficialClientWindowHost.FindRunningClients();
-        if(available.Count==0)
-        {
-            footer.Text="Kein laufendes offizielles osclient.exe-Fenster gefunden. Im Jagex Launcher erst Play Now anklicken.";
-            core.Add(Severity.INFO,"OFFICIAL_CLIENT","WINDOW_NOT_FOUND",
-                "expected_executable=osclient.exe action=open_official_launcher");
-            return;
-        }
-        OfficialClientWindow chosen=available[0];
-        if(available.Count>1)
-        {
-            using var chooser=new Form
-            {
-                Text="Offiziellen OSRS-Client auswählen",Width=550,Height=205,
-                StartPosition=FormStartPosition.CenterParent,FormBorderStyle=FormBorderStyle.FixedDialog,
-                MinimizeBox=false,MaximizeBox=false
-            };
-            var options=new ComboBox{Left=14,Top=18,Width=505,DropDownStyle=ComboBoxStyle.DropDownList};
-            foreach(var candidate in available)
-                options.Items.Add($"PID {candidate.ProcessId} – {candidate.Title}");
-            options.SelectedIndex=0;
-            var accept=new Button{Text="Einbetten",Left=390,Top=69,Width=128,DialogResult=DialogResult.OK};
-            chooser.Controls.Add(options);chooser.Controls.Add(accept);
-            chooser.AcceptButton=accept;
-            if(chooser.ShowDialog(this)!=DialogResult.OK)return;
-            chosen=available[options.SelectedIndex];
-        }
-        if(!officialHost.Attach(chosen))
-        {
-            footer.Text="Windows-Andocken fehlgeschlagen. Der offizielle Client läuft weiterhin separat.";
-            core.Add(Severity.WARN,"OFFICIAL_CLIENT","ATTACH_FAILED",
-                "possible_dpi_or_window_restriction=true no_auth_interception=true");
-            return;
-        }
         gameTabs.SelectedTab=officialPage;
-        officialHint.Visible=false;
-        footer.Text="Echtes OSRS eingebettet. Login und Spielsitzung gehören weiterhin Jagex.";
-        RefreshGameControls();
+        autoHostOfficial=true;
+        if(!TryHostOfficialWindows(true))
+            footer.Text="Noch kein offizielles Launcher-/Spielfenster sichtbar. Anmeldung starten.";
+    }
+    private bool TryHostOfficialWindows(bool userInitiated)
+    {
+        if(officialHost is null || gameTabs.SelectedTab!=officialPage)return false;
+        // The official client takes priority after the Jagex Launcher starts it.
+        var clients=OfficialClientWindowHost.FindRunningClients();
+        if(clients.Count>0)
+        {
+            if(officialHost.Attached && officialHost.CurrentKind==OfficialWindowKind.Game)
+                return true;
+            var selected=PickOfficialWindow(clients,userInitiated);
+            if(selected is null)return false;
+            if(officialHost.Attach(selected))
+            {
+                officialHint.Visible=false;
+                core.Add(Severity.INFO,"OFFICIAL_CLIENT","GAME_WINDOW_READY",
+                    "window=OFFICIAL_OSRS origin=JAGEX_LAUNCHER "+
+                    "login_status=NOT_VERIFIABLE live_agent=false");
+                RefreshGameControls();
+                return true;
+            }
+            if(userInitiated)footer.Text="Das offizielle Spielfenster ließ sich nicht einbetten (Windows-/DPI-Konflikt).";
+            return false;
+        }
+        if(officialHost.Attached && officialHost.CurrentKind==OfficialWindowKind.Launcher)
+            return true;
+        var launchers=OfficialClientWindowHost.FindRunningLauncherWindows();
+        if(launchers.Count==0)
+        {
+            if(!officialHost.Attached)officialHint.Visible=true;
+            return false;
+        }
+        var launcher=PickOfficialWindow(launchers,userInitiated);
+        if(launcher is null)return false;
+        if(officialHost.Attach(launcher))
+        {
+            officialHint.Visible=false;
+            core.Add(Severity.INFO,"OFFICIAL_CLIENT","LOGIN_WINDOW_READY",
+                "window=JAGEX_LAUNCHER embedded=true "+
+                "oauth_prompts_may_open_external_browser=true "+
+                "credentials_never_accessed_by_osrs_play=true");
+            RefreshGameControls();
+            return true;
+        }
+        if(userInitiated)footer.Text="Jagex Launcher konnte nicht im Fenster eingebettet werden.";
+        return false;
+    }
+    private OfficialClientWindow? PickOfficialWindow(
+        IReadOnlyList<OfficialClientWindow> available,bool userInitiated)
+    {
+        if(available.Count==1)return available[0];
+        if(!userInitiated)
+        {
+            footer.Text="Mehrere offizielle Fenster erkannt. Bitte 'Login/Spiel verbinden' zur Auswahl nutzen.";
+            return null;
+        }
+        using var chooser=new Form
+        {
+            Text="Offizielles Jagex-/OSRS-Fenster wählen",
+            Width=570,Height=200,StartPosition=FormStartPosition.CenterParent,
+            FormBorderStyle=FormBorderStyle.FixedDialog,
+            MinimizeBox=false,MaximizeBox=false
+        };
+        var options=new ComboBox{Left=14,Top=18,Width=530,
+            DropDownStyle=ComboBoxStyle.DropDownList};
+        foreach(var w in available)
+            options.Items.Add($"PID {w.ProcessId} – {w.Title}");
+        options.SelectedIndex=0;
+        var accept=new Button{Text="Einbetten",Left=420,Top=70,Width=120,
+            DialogResult=DialogResult.OK};
+        chooser.Controls.AddRange(new Control[]{options,accept});
+        chooser.AcceptButton=accept;
+        return chooser.ShowDialog(this)==DialogResult.OK?
+            available[options.SelectedIndex]:null;
     }
     private void DetachOfficialClient()
     {
+        autoHostOfficial=false;
         officialHost.Detach();
         officialHint.Visible=true;
         core.Add(Severity.INFO,"OFFICIAL_CLIENT","DETACH_REQUESTED",
-            "official_game_remains_running=true");
+            "official_process_remains_running=true credentials_not_handled=true");
         RefreshGameControls();
     }
     private void ToggleBot()
@@ -558,8 +617,11 @@ internal sealed class MainWindow : Form
     {
         var s=core.Stats();var p=Process.GetCurrentProcess();
         if(gameTabs.SelectedTab==officialPage)
-            stats.Text=$"ECHTES OSRS: {(officialHost.Attached?"EINGEBETTET":"NICHT EINGEBETTET")}"+
-                " | Login: Jagex Launcher | Live-Agent: NICHT VERFÜGBAR"+
+            stats.Text=$"Offizielle Ansicht: {(officialHost.Attached?
+                (officialHost.CurrentKind==OfficialWindowKind.Launcher?
+                    "JAGEX-ANMELDUNG":"OSRS-SPIEL"):
+                "NICHT VERBUNDEN")}"+
+                " | Authentifizierung: durch Jagex | Live-Agent: NICHT VERFÜGBAR"+
                 $" | Fehler: {s.Errors} | RAM: {p.WorkingSet64/1024/1024} MiB";
         else
         {
