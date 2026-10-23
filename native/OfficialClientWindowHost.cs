@@ -12,7 +12,9 @@ namespace OSRSLiveDiagnostics;
 // Hosts the UNMODIFIED official C++ game window, once launched/authenticated
 // through the Jagex Launcher. This is Windows UI composition, NOT OSRS protocol,
 // credential forwarding, game-state instrumentation or game input automation.
-internal sealed record OfficialClientWindow(int ProcessId,IntPtr Handle,string Title);
+internal enum OfficialWindowKind { Launcher, Game }
+internal sealed record OfficialClientWindow(
+    int ProcessId,IntPtr Handle,string Title,OfficialWindowKind Kind);
 
 internal sealed class OfficialClientWindowHost : IDisposable
 {
@@ -25,6 +27,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
     private IntPtr attached,originalParent;
     private long originalStyle;
     private Rectangle originalBounds;
+    internal OfficialWindowKind? CurrentKind {get;private set;}
     internal bool Attached => attached!=IntPtr.Zero&&IsWindow(attached);
     internal OfficialClientWindowHost(Control panel,Diagnostics diagnostics)
     {
@@ -35,8 +38,16 @@ internal sealed class OfficialClientWindowHost : IDisposable
 
     internal static bool SupportedProcessName(string? name)=>
         string.Equals(name,"osclient",StringComparison.OrdinalIgnoreCase);
+    internal static bool SupportedLauncherProcessName(string? name)=>
+        string.Equals(name,"JagexLauncher",StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name,"Jagex Launcher",StringComparison.OrdinalIgnoreCase);
 
-    internal static IReadOnlyList<OfficialClientWindow> FindRunningClients()
+    internal static IReadOnlyList<OfficialClientWindow> FindRunningClients()=>
+        FindRunningWindows(OfficialWindowKind.Game);
+    internal static IReadOnlyList<OfficialClientWindow> FindRunningLauncherWindows()=>
+        FindRunningWindows(OfficialWindowKind.Launcher);
+    private static IReadOnlyList<OfficialClientWindow> FindRunningWindows(
+        OfficialWindowKind kind)
     {
         var matches=new List<OfficialClientWindow>();
         EnumWindows((hwnd,_) =>
@@ -47,12 +58,14 @@ internal sealed class OfficialClientWindowHost : IDisposable
             try
             {
                 using var p=Process.GetProcessById(checked((int)pid));
-                if(!SupportedProcessName(p.ProcessName))return true;
+                if(kind==OfficialWindowKind.Game?
+                    !SupportedProcessName(p.ProcessName):
+                    !SupportedLauncherProcessName(p.ProcessName))return true;
                 int len=GetWindowTextLength(hwnd);
                 if(len<1)return true;
                 var title=new StringBuilder(Math.Min(len+1,260));
                 GetWindowText(hwnd,title,title.Capacity);
-                matches.Add(new(p.Id,hwnd,title.ToString()));
+                matches.Add(new(p.Id,hwnd,title.ToString(),kind));
             }
             catch(ArgumentException){}
             catch(System.ComponentModel.Win32Exception){}
@@ -84,10 +97,14 @@ internal sealed class OfficialClientWindowHost : IDisposable
 
     internal bool Attach(OfficialClientWindow window)
     {
+        if(Attached && attached==window.Handle && CurrentKind==window.Kind)return true;
+        // Verify the target with the actual OS process, never by the window title
+        // alone (which may be controlled by unrelated applications).
+        bool valid=window.Kind==OfficialWindowKind.Game?
+            FindRunningClients().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId):
+            FindRunningLauncherWindows().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId);
+        if(window.Handle==IntPtr.Zero||!IsWindow(window.Handle)||!valid)return false;
         Detach();
-        if(window.Handle==IntPtr.Zero||!IsWindow(window.Handle)||
-           !FindRunningClients().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId))
-            return false;
         var hwnd=window.Handle;
         originalParent=GetParent(hwnd);
         originalStyle=GetWindowLongPtr(hwnd,GWL_STYLE).ToInt64();
@@ -101,11 +118,15 @@ internal sealed class OfficialClientWindowHost : IDisposable
             if(GetParent(hwnd)!=panel.Handle)
                 throw new InvalidOperationException("Windows denied cross-process window hosting.");
             attached=hwnd;
+            CurrentKind=window.Kind;
             Resize();
             ShowWindow(hwnd,5);
-            diagnostics.SetMode("OFFIZIELLER OSRS-CLIENT (FENSTER EINGEBETTET)");
+            diagnostics.SetMode(window.Kind==OfficialWindowKind.Game?
+                "OFFIZIELLES OSRS (SPIELFENSTER EINGEBETTET)":
+                "OFFIZIELLER JAGEX LAUNCHER (ANMELDUNG EINGEBETTET)");
             diagnostics.Add(Severity.INFO,"OFFICIAL_CLIENT","WINDOW_ATTACHED",
-                $"pid={window.ProcessId} native_client=true login=JAGEX_LAUNCHER "+
+                $"pid={window.ProcessId} kind={window.Kind} login=JAGEX_LAUNCHER "+
+                "authenticated_status=NOT_OBSERVABLE "+
                 "game_state_adapter=false automated_input=false");
             return true;
         }
@@ -117,7 +138,10 @@ internal sealed class OfficialClientWindowHost : IDisposable
                 SetWindowLongPtr(hwnd,GWL_STYLE,new IntPtr(originalStyle));
                 RestoreBounds(hwnd);
             }
-            attached=IntPtr.Zero;
+            attached=IntPtr.Zero;CurrentKind=null;
+            diagnostics.Add(Severity.WARN,"OFFICIAL_CLIENT","WINDOW_ATTACH_FAILED",
+                $"kind={window.Kind} reason=WIN32_PARENTING_REJECTED "+
+                "external_app_remains_open=true");
             return false;
         }
     }
@@ -139,6 +163,8 @@ internal sealed class OfficialClientWindowHost : IDisposable
         var hwnd=attached;
         if(hwnd==IntPtr.Zero)return;
         attached=IntPtr.Zero;
+        var previousKind=CurrentKind;
+        CurrentKind=null;
         if(IsWindow(hwnd))
         {
             SetParent(hwnd,originalParent);
@@ -146,9 +172,10 @@ internal sealed class OfficialClientWindowHost : IDisposable
             RestoreBounds(hwnd);
             ShowWindow(hwnd,5);
         }
-        diagnostics.SetMode("EIGENER CLIENT (LOKALE TESTWELT)");
+        diagnostics.SetMode("OFFIZIELLES OSRS (FENSTER GETRENNT)");
         diagnostics.Add(Severity.INFO,"OFFICIAL_CLIENT","WINDOW_DETACHED",
-            "official_game_process_not_terminated=true login_still_owned_by_jagex=true");
+            $"kind={previousKind} official_process_not_terminated=true "+
+            "login_still_owned_by_jagex=true");
     }
     public void Dispose()=>Detach();
 
@@ -178,8 +205,12 @@ internal static class OfficialClientWindowHostTests
            !OfficialClientWindowHost.SupportedProcessName("OSCLIENT") ||
            OfficialClientWindowHost.SupportedProcessName("RuneLite") ||
            OfficialClientWindowHost.SupportedProcessName("JagexLauncher") ||
-           OfficialClientWindowHost.SupportedProcessName("chrome"))
-            throw new Exception("Official client host must accept osclient.exe only.");
-        Console.WriteLine("OFFICIAL WINDOW HOST PASS: process filtering, launcher-owned login, no credentials");
+           !OfficialClientWindowHost.SupportedLauncherProcessName("JagexLauncher") ||
+           !OfficialClientWindowHost.SupportedLauncherProcessName("Jagex Launcher") ||
+           OfficialClientWindowHost.SupportedLauncherProcessName("chrome") ||
+           OfficialClientWindowHost.SupportedLauncherProcessName("msedge") ||
+           OfficialClientWindowHost.SupportedLauncherProcessName("osclient"))
+            throw new Exception("Only official launcher and game processes may be hosted.");
+        Console.WriteLine("OFFICIAL WINDOW HOST PASS: trusted launcher/game process filters, no browser interception");
     }
 }
