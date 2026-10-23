@@ -1,4 +1,23 @@
-# OSRS Live Diagnostics 0.3.0 (Windows single EXE)
+# OSRS Play 0.6.0 – integrierter Bot mit Start/Stop
+
+**OSRS Play** ist der neue Name des bisherigen OSRS Live Diagnostics-Clients. Neu sind eine zentrale Schaltfläche **Bot starten / Bot stoppen**, ein sichtbarer Botstatus und ein Lebenszyklus-Test für den integrierten Agenten.
+
+- Start aktiviert den lokalen `OfflineAgent` einschließlich des Tick-Schedulers, verzögerter Aktionsbestätigungen und Diagnose-Logs.
+- Stop beendet die Simulation und die Agentenplanung; erneutes Starten ist möglich.
+- **Wichtig:** Der Bot führt noch **keine Aktionen in OSRS** aus. Login, Live-Spielzustand, realer Maus- und Tastaturinput fehlen weiterhin.
+- Die bisherigen Mining-/Grand-Exchange-Szenarien, Strategie-Checkpoints und Logexporte bleiben integriert.
+
+## EXE-Name und Update-Kompatibilität
+- Neue Installation: `OSRS-Play.exe` – eine vollständige, selbststartende Windows-Datei.
+- Bestehende `OSRS-Live-Diagnostics.exe`: Automatisches Update erfolgt über die *identische* Legacy-Release-Datei, da der bisherige Updater genau diesen Namen erwartet. Auf deiner Festplatte kann dadurch der alte Name erhalten bleiben, während das Programmfenster **OSRS Play** heißt.
+- Zwei unabhängige Downloadnamen im GitHub-Release dienen ausschließlich der Rückwärtskompatibilität und haben denselben SHA-256-Hash; zum Betrieb brauchst du nur **eine** davon.
+- Der manifestierte alte Assetname bleibt erhalten, damit alte Installationen nicht ausgesperrt werden.
+
+## Test
+1. Bereits installierte EXE erneut starten und den Auto-Updater abschließen lassen.
+2. Im Fenster **OSRS Play** auf **Bot starten** klicken; `BOT STARTED` und Simulations-Ticks prüfen.
+3. Nach einigen Ticks **Bot stoppen** klicken und `BOT STOPPED` kontrollieren.
+4. Erneut starten, stoppen und **Log kopieren**.
 
 **Diagnose-App, kein spielbarer OSRS-Client und kein Bot.** Eine Verbindung zu offiziellen Jagex-Servern ist nicht implementiert. Diese Version benötigt weder RuneLite noch Java.
 

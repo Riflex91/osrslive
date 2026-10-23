@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version = "0.5.1";
+    internal const string Version = "0.6.0";
     private const int Capacity = 10000;
     private readonly object sync = new();
     private readonly List<LogEvent> entries = new();
@@ -90,7 +90,7 @@ internal sealed class Diagnostics
         var s=Stats(); var t=TickStats();
         var events=Snapshot(); var simWarnings=events.Count(e=>e.Level==Severity.WARN&&e.Source=="SIMULATOR");
         var proc=Process.GetCurrentProcess();
-        var sb = new StringBuilder($"OSRS DIAGNOSTICS | {Version}\n");
+        var sb = new StringBuilder($"OSRS PLAY | {Version}\n");
         sb.AppendLine($"Modus: {Mode} | Renderer: {(Rendering ? "AN":"AUS")}");
         sb.AppendLine($"Events: {s.Events} | Ticks: {s.Ticks} | Warnungen: {s.Warnings} | Fehler: {s.Errors} | Externe Events: {s.External}");
         sb.AppendLine($"Puffer-Überlauf: {s.Dropped} | RAM: {proc.WorkingSet64/1024/1024} MiB | Threads: {proc.Threads.Count}");
