@@ -179,6 +179,28 @@ internal sealed class MainWindow : Form
         }
         sim.SetAgentEnabled(!sim.AgentEnabled);
         agentButton.Text=sim.AgentEnabled?"Offline-Agent: AN":"Offline-Agent: AUS";
+        if(sim.AgentEnabled) LogGoalPlanFixture();
+    }
+    private void LogGoalPlanFixture()
+    {
+        var skills=GoalPlanner.Skills.ToDictionary(s=>s,s=>1,StringComparer.OrdinalIgnoreCase);
+        skills["Mining"]=40;skills["Fishing"]=55;
+        var state=new GoalAccountProfile(skills,100000,20000,true,new HashSet<string>());
+        var now=DateTimeOffset.UtcNow;
+        var activities=new[]
+        {
+            new GoalActivity("example_mining","Mining",15,35000,90000,5000,false,null,true,now),
+            new GoalActivity("example_fishing","Fishing",45,60000,45000,1000,false,null,true,now)
+        };
+        var plan=GoalPlanner.Rank(state,activities,GoalPreference.Balanced,now);
+        core.Add(Severity.INFO,"GOAL_PLANNER","LONG_TERM_GOAL",
+            $"max_total={GoalPlanner.MaxTotalLevel} skill_count={GoalPlanner.Skills.Length} "+
+            "objective=MAX_SKILLS_AND_GP synthetic_fixture=true");
+        foreach(var option in plan.Options.Take(2))
+            core.Add(Severity.INFO,"GOAL_PLANNER","ESTIMATED_ACTIVITY",
+                $"activity={option.Id} score={option.Score} skill={option.Skill} "+
+                $"xp_per_hour={option.XpPerHour} gp_per_hour={option.NetGpPerHour} "+
+                "hypothetical_values=true no_game_execution=true");
     }
     private void RunMiningGe()
     {
@@ -291,10 +313,11 @@ internal static class SelfTest
             try {Updater.ParseManifest(manifest.Replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","notahash"));throw new Exception("Hash accepted");}
             catch(FormatException){}
             OfflineAgentTests.Run();
+            GoalPlannerTests.Run();
             if(RunScenarios()!=0)throw new Exception("Mining/GE scenario suite failed");
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: long-term strategy, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }
