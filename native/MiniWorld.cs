@@ -187,7 +187,7 @@ internal static class MiniWorldPlanner
     }
     internal static MiniWorldRequest Decide(string key,MiniWorldFrame frame,Point? manual=null)
     {
-        static MiniWorldRequest Cmd(string key,string action,Point p) =>
+        MiniWorldRequest Cmd(string key,string action,Point p) =>
             new(key,action,p.X,p.Y,manual is null);
         if(manual is not null)
         {
@@ -257,7 +257,8 @@ internal sealed class MiniWorldClient : IDisposable
     {
         this.log=log;
         server=new MiniWorldServer();
-        log.Add(Severity.INFO,"MINI_CLIENT","BOOT",
+        log.SetMode("EIGENER CLIENT (LOKALE TESTWELT)");
+        log.Add(Severity.INFO,"MINI_WORLD","START",
             "own_client=true transport=TCP_LOOPBACK game_server=LOCAL_SANDBOX official_osrs=false");
         polling=Task.Run(Run);
     }
@@ -307,7 +308,12 @@ internal sealed class MiniWorldClient : IDisposable
                     connection=outcome.Accepted?"LOCAL_SANDBOX_CONNECTED":outcome.Status;
                     if(outcome.Frame is not null)state=outcome.Frame;
                 }
-                if(outcome.Accepted && request.Action is "mine" or "sell")
+                if(outcome.Accepted && outcome.Frame is not null)
+                    log.Add(Severity.DEBUG,"MINI_WORLD","GAME_TICK",
+                        $"tick={outcome.Frame.Tick} x={outcome.Frame.X} y={outcome.Frame.Y} "+
+                        $"ore={outcome.Frame.Ore} xp={outcome.Frame.MiningXp} coins={outcome.Frame.Coins} "+
+                        "authoritative=true sandbox_only=true");
+                if(outcome.Accepted && request.Action is ("mine" or "sell"))
                     log.Add(Severity.INFO,"MINI_WORLD",outcome.Status,
                         $"tick={outcome.Frame?.Tick} ore={outcome.Frame?.Ore} xp={outcome.Frame?.MiningXp} "+
                         $"coins={outcome.Frame?.Coins} source=LOCAL_SANDBOX");
@@ -329,6 +335,7 @@ internal sealed class MiniWorldClient : IDisposable
         shutdown.Cancel();
         server.AllowBot(false);
         server.Dispose();
+        log.Add(Severity.INFO,"MINI_WORLD","STOP","world_session_ended=true");
         try{polling.Wait(1200);}catch{}
         shutdown.Dispose();
     }
