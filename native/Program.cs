@@ -17,7 +17,7 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_,e)=>
-            MessageBox.Show(e.Exception.GetType().Name+": "+e.Exception.Message,"OSRS Diagnostics: UI Fehler");
+            MessageBox.Show(e.Exception.GetType().Name+": "+e.Exception.Message,"OSRS Play: UI-Fehler");
         try { Application.Run(new MainWindow()); return 0; }
         catch(Exception e)
         {
@@ -37,8 +37,9 @@ internal sealed class MainWindow : Form
 {
     private readonly Diagnostics core=new();
     private readonly LocalSimulation sim;
+    private readonly BotController bot;
     private readonly Label header=new(), stats=new(), footer=new();
-    private Button simButton=new(), renderButton=new(), agentButton=new(), campaignButton=new();
+    private Button botButton=new(), renderButton=new(), campaignButton=new();
     private bool campaignRunning;
     private readonly TextBox log=new(), search=new();
     private readonly ComboBox filter=new();
@@ -53,8 +54,9 @@ internal sealed class MainWindow : Form
     internal MainWindow()
     {
         sim=new LocalSimulation(core);
+        bot=new BotController(core,sim);
         core.Changed+=()=>refreshNeeded=true;
-        Text=$"OSRS Live Diagnostics v{Diagnostics.Version}";
+        Text=$"OSRS Play v{Diagnostics.Version}";
         Width=1150; Height=760; MinimumSize=new Size(860,600);
         StartPosition=FormStartPosition.CenterScreen;
         Font=new Font("Segoe UI",9);
@@ -103,7 +105,7 @@ internal sealed class MainWindow : Form
             else core.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",
                 "Keine Neustartanforderung; Ergebnis in UPDATER STATUS nachlesen.");
         };
-        FormClosing+=(_,_)=>{sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();};
+        FormClosing+=(_,_)=>{bot.Dispose();sim.Dispose();metricsTimer.Stop();refreshTimer.Stop();};
     }
     private Button Button(string label,Action action)
     {
@@ -119,17 +121,17 @@ internal sealed class MainWindow : Form
         outer.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute,35));
         Controls.Add(outer);
-        header.Text=$"OSRS LIVE DIAGNOSTICS  ·  {Diagnostics.Version}  ·  kein OSRS-Spielclient";
+        header.Text=$"OSRS PLAY  ·  {Diagnostics.Version}  ·  integrierter Offline-Bot";
         header.Font=new Font("Segoe UI",14,FontStyle.Bold);header.Dock=DockStyle.Fill;
         outer.Controls.Add(header,0,0);
         stats.Dock=DockStyle.Fill; stats.Font=new Font("Segoe UI",10);
         outer.Controls.Add(stats,0,1);
         var actionBar=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,AutoScroll=true};
-        simButton=Button("Simulation starten",ToggleSim);
-        agentButton=Button("Offline-Agent: AUS",ToggleAgent);
+        botButton=Button("Bot starten",ToggleBot);
+        botButton.BackColor=Color.FromArgb(218,242,225);
         renderButton=Button("Grafik ausschalten",ToggleRender);
         campaignButton=Button("Strategie-Langzeittest",RunCampaign);
-        actionBar.Controls.AddRange(new Control[]{simButton,agentButton,renderButton,
+        actionBar.Controls.AddRange(new Control[]{botButton,renderButton,
             campaignButton,Button("Mining → GE testen",RunMiningGe),
             Button("Log kopieren",CopyLog),Button("JSON exportieren",()=>Export(false)),
             Button("ZIP exportieren",()=>Export(true)),Button("Puffer leeren",()=>core.Clear())});
@@ -144,7 +146,7 @@ internal sealed class MainWindow : Form
             e.Graphics.Clear(preview.BackColor);
             var title=core.Rendering?"LOKALE GRAFIKVORSCHAU":"RENDERER AUS";
             TextRenderer.DrawText(e.Graphics,title,new Font("Segoe UI",18,FontStyle.Bold),new Point(24,32),Color.FromArgb(29,56,91));
-            TextRenderer.DrawText(e.Graphics,"Simulation / kein OSRS-Rendering · Ereignisverarbeitung unabhängig",Font,
+            TextRenderer.DrawText(e.Graphics,"Offline-Bot im Client: Start / Stop · keine echte Spielsteuerung",Font,
                 new Point(26,76),Color.FromArgb(70,90,114));
         };
         content.Controls.Add(preview,0,0);
@@ -163,25 +165,35 @@ internal sealed class MainWindow : Form
         log.Font=new Font("Consolas",9);
         content.Controls.Add(log,0,2);
         outer.Controls.Add(content,0,3);
-        footer.Text="Eigenständige EXE. Automatische Updateprüfung beim Start. Keine Jagex-Verbindung.";
+        footer.Text="OSRS Play · integrierter Offline-Bot · Auto-Update · keine Jagex-Verbindung.";
         footer.Dock=DockStyle.Fill;footer.TextAlign=ContentAlignment.MiddleLeft;outer.Controls.Add(footer,0,4);
     }
-    private void ToggleSim()
+    private void ToggleBot()
     {
-        if(sim.Running)sim.Stop();else sim.Start();
-        simButton.Text=sim.Running?"Simulation stoppen":"Simulation starten";
-        if(!sim.Running)agentButton.Text="Offline-Agent: AUS";
-    }
-    private void ToggleAgent()
-    {
-        if(!sim.Running && !sim.AgentEnabled)
+        try
         {
-            sim.Start();
-            simButton.Text="Simulation stoppen";
+            if(bot.Running)
+            {
+                bot.Stop();
+                botButton.Text="Bot starten";
+                botButton.BackColor=Color.FromArgb(218,242,225);
+                footer.Text="Bot gestoppt – kein aktiver Simulationslauf.";
+            }
+            else
+            {
+                bot.Start();
+                botButton.Text="Bot stoppen";
+                botButton.BackColor=Color.FromArgb(255,226,221);
+                footer.Text="Offline-Bot aktiv – keine OSRS-Spielsteuerung.";
+                LogGoalPlanFixture();
+            }
         }
-        sim.SetAgentEnabled(!sim.AgentEnabled);
-        agentButton.Text=sim.AgentEnabled?"Offline-Agent: AN":"Offline-Agent: AUS";
-        if(sim.AgentEnabled) LogGoalPlanFixture();
+        catch(Exception ex)
+        {
+            core.Add(Severity.ERROR,"BOT","CONTROL_FAILED",ex.GetType().Name+": "+ex.Message);
+            botButton.Text=bot.Running?"Bot stoppen":"Bot starten";
+            footer.Text="Botsteuerung fehlgeschlagen – Log prüfen.";
+        }
     }
     private void LogGoalPlanFixture()
     {
@@ -296,7 +308,7 @@ internal sealed class MainWindow : Form
     private void UpdateView()
     {
         var s=core.Stats();var p=Process.GetCurrentProcess();
-        stats.Text=$"{core.Mode} | Renderer: {(core.Rendering?"AN":"AUS")} | Events: {s.Events} | Ticks: {s.Ticks} | Fehler: {s.Errors} | Warnungen: {s.Warnings} | RAM: {p.WorkingSet64/1024/1024} MiB";
+        stats.Text=$"Bot: {(bot.Running?"LÄUFT (OFFLINE)":"GESTOPPT")} | {core.Mode} | Renderer: {(core.Rendering?"AN":"AUS")} | Events: {s.Events} | Ticks: {s.Ticks} | Fehler: {s.Errors} | Warnungen: {s.Warnings} | RAM: {p.WorkingSet64/1024/1024} MiB";
         if(pause.Checked)return;
         var events=core.Snapshot().TakeLast(2000).AsEnumerable();
         if(filter.SelectedIndex==1)events=events.Where(e=>e.Level>=Severity.INFO);
@@ -342,17 +354,21 @@ internal static class SelfTest
             const string manifest="version=0.3.2\nexeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.3.2/OSRS-Live-Diagnostics.exe\nexeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             var info=Updater.ParseManifest(manifest);
             if(info.Version.ToString()!="0.3.2")throw new Exception("Version parse");
+            var playManifest=manifest.Replace("OSRS-Live-Diagnostics.exe","OSRS-Play.exe");
+            if(Updater.ParseManifest(playManifest).Version!=info.Version)
+                throw new Exception("OSRS Play update URL not recognized");
             try {Updater.ParseManifest(manifest.Replace("github.com","evil.example"));throw new Exception("Host accepted");}
             catch(FormatException){}
             try {Updater.ParseManifest(manifest.Replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","notahash"));throw new Exception("Hash accepted");}
             catch(FormatException){}
             OfflineAgentTests.Run();
+            BotControllerTests.Run();
             GoalPlannerTests.Run();
             OfflineCampaignTests.Run();
             if(RunScenarios()!=0)throw new Exception("Mining/GE scenario suite failed");
             log.SetRendering(false);if(log.Rendering) throw new Exception("Renderer test");
             log.Clear();if(log.Stats().Ticks!=0)throw new Exception("Clear test");
-            Console.WriteLine("SELFTEST PASS: long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
+            Console.WriteLine("SELFTEST PASS: OSRS Play bot Start/Stop, long-term strategy, campaign persistence, offline agent, mining/GE, redaction, metrics, JSON, report, strict manifest, renderer, clear");
             return 0;
         }catch(Exception ex) {Console.Error.WriteLine("SELFTEST FAIL "+ex);return 1;}
     }
