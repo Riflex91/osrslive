@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -285,23 +286,35 @@ internal sealed class MiniWorldClient : IDisposable
     private async Task Run()
     {
         var token=shutdown.Token;
+        var clock=Stopwatch.StartNew();
+        long nextDeadlineMs=0;
         while(!token.IsCancellationRequested)
         {
             try
             {
                 MiniWorldRequest request;
+                MiniWorldFrame? before;
                 lock(gate)
                 {
-                    var observed=state;
-                    if(observed is null)request=new(server.Key,"observe",0,0,false);
-                    else if(botRunning)request=MiniWorldPlanner.Decide(server.Key,observed);
+                    before=state;
+                    if(before is null)request=new(server.Key,"observe",0,0,false);
+                    else if(botRunning)request=MiniWorldPlanner.Decide(server.Key,before);
                     else if(manual is Point target)
                     {
-                        request=MiniWorldPlanner.Decide(server.Key,observed,target);
-                        if(observed.X==target.X&&observed.Y==target.Y)manual=null;
+                        request=MiniWorldPlanner.Decide(server.Key,before,target);
+                        if(before.X==target.X&&before.Y==target.Y)manual=null;
                     }
                     else request=new(server.Key,"observe",0,0,false);
                 }
+                bool isAction=request.Action is "move" or "mine" or "sell";
+                string source=request.Bot?"MINI_BOT":"MINI_INPUT";
+                if(isAction && before is not null)
+                    log.Add(Severity.DEBUG,source,"ACTION_PLANNED",
+                        $"action={request.Action} prev_tick={before.Tick} "+
+                        $"from={before.X},{before.Y} target={request.X},{request.Y} "+
+                        $"ore={before.Ore}/{before.Capacity} coins={before.Coins} "+
+                        "source=LOCAL_SANDBOX");
+
                 var outcome=await MiniWorldWire.Exchange(server.Port,request,token);
                 lock(gate)
                 {
@@ -313,13 +326,45 @@ internal sealed class MiniWorldClient : IDisposable
                         $"tick={outcome.Frame.Tick} x={outcome.Frame.X} y={outcome.Frame.Y} "+
                         $"ore={outcome.Frame.Ore} xp={outcome.Frame.MiningXp} coins={outcome.Frame.Coins} "+
                         "authoritative=true sandbox_only=true");
-                if(outcome.Accepted && request.Action is ("mine" or "sell"))
-                    log.Add(Severity.INFO,"MINI_WORLD",outcome.Status,
-                        $"tick={outcome.Frame?.Tick} ore={outcome.Frame?.Ore} xp={outcome.Frame?.MiningXp} "+
-                        $"coins={outcome.Frame?.Coins} source=LOCAL_SANDBOX");
+
+                if(isAction && before is not null)
+                {
+                    if(MiniWorldActionAudit.IsConfirmed(request,before,outcome))
+                    {
+                        var after=outcome.Frame!;
+                        log.Add(request.Action=="move"?Severity.DEBUG:Severity.INFO,
+                            source,"ACTION_CONFIRMED",
+                            $"action={request.Action} prev_tick={before.Tick} tick={after.Tick} "+
+                            $"ore_delta={after.Ore-before.Ore} "+
+                            $"xp_delta={after.MiningXp-before.MiningXp} "+
+                            $"gp_delta={after.Coins-before.Coins} "+
+                            "source=SERVER_OBSERVED");
+                        if(outcome.Status is "ORE_MINED" or "ORE_SOLD")
+                            log.Add(Severity.INFO,"MINI_WORLD",outcome.Status,
+                                $"tick={after.Tick} ore={after.Ore} "+
+                                $"xp={after.MiningXp} coins={after.Coins} "+
+                                "source=LOCAL_SANDBOX");
+                    }
+                    else if(outcome.Status=="BOT_STOPPED")
+                    {
+                        log.Add(Severity.INFO,"MINI_BOT","ACTION_CANCELLED",
+                            $"action={request.Action} reason=BOT_STOPPED");
+                    }
+                    else
+                    {
+                        log.Add(Severity.DEBUG,source,"ACTION_NOT_CONFIRMED",
+                            $"action={request.Action} status={outcome.Status} "+
+                            "verified_effect=false");
+                    }
+                }
                 else if(!outcome.Accepted)
-                    log.Add(Severity.WARN,"MINI_WORLD","COMMAND_REJECTED",outcome.Status);
-                await Task.Delay(600,token);
+                    log.Add(Severity.WARN,"MINI_WORLD","COMMAND_REJECTED",
+                        outcome.Status);
+
+                // TCP and processing cost are inside the 600 ms budget.
+                int delayMs=MiniWorldCadence.NextDelay(ref nextDeadlineMs,
+                    clock.ElapsedMilliseconds);
+                if(delayMs>0)await Task.Delay(delayMs,token);
             }
             catch(OperationCanceledException){break;}
             catch(Exception ex)
@@ -327,6 +372,7 @@ internal sealed class MiniWorldClient : IDisposable
                 lock(gate){connection="DISCONNECTED";}
                 log.Add(Severity.WARN,"MINI_WORLD","TRANSPORT_ERROR",ex.GetType().Name);
                 try{await Task.Delay(750,token);}catch(OperationCanceledException){break;}
+                nextDeadlineMs=clock.ElapsedMilliseconds;
             }
         }
     }
