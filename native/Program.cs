@@ -71,7 +71,7 @@ internal sealed class MainWindow : Form
     private LiveRenderState lastReportedRenderState=LiveRenderState.NoGameWindow;
     private bool followWindows,starting,scanning,stopping;
     private bool loggedBlockedAgent;
-    private long lastWindowCheckMs,lastStatusLogMs;
+    private long lastWindowCheckMs;
     private string f2pSummary="F2P-Welt: noch nicht gemessen";
     private int? preferredWorld;
     private bool changePending=true;

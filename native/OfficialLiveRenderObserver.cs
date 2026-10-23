@@ -116,8 +116,6 @@ internal sealed class OfficialLiveRenderObserver
         }
         catch(ExternalException){return Set(LiveRenderState.CaptureUnavailable,timestamp);}
         catch(ArgumentException){return Set(LiveRenderState.CaptureUnavailable,timestamp);}
-        catch(System.ComponentModel.Win32Exception)
-        {return Set(LiveRenderState.CaptureUnavailable,timestamp);}
     }
     internal void Reset()
     {
