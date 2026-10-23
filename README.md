@@ -194,3 +194,11 @@ Die Schaltfläche **Mining → GE testen** führt fünf isolierte Testwelten mit
 - Verspätete Tick-Callbacks aus früheren Sitzungen können nach Stop/Restart keine Spielzustände mehr verändern.
 - Der Diagnosetest reproduziert die im Nutzerlog beobachteten 7,465 Sekunden Pause und überprüft ihre korrekte Behandlung.
 - [Auswertung und Testplan](docs/OSRS-PLAY-SESSION-METRICS-2026-10-23.md).
+
+
+## v0.7.2 – Echte öffentliche OSRS-Daten und sichere Trennung von Spielsitzungen
+- **Echte OSRS-Skills:** OSRS Play kann über die Schaltfläche `Echte OSRS-Skills` nach Eingabe eines öffentlichen Anzeigenamens die tatsächlichen öffentlich verfügbaren Skillwerte über den Jagex-HiScores-Endpunkt `secure.runescape.com/m=hiscore_oldschool/index_lite.ws` lesen. Die 24 Skills einschließlich Sailing und das Gesamtlevel werden geprüft. **Keine** Passwörter, Zugangsdaten oder Anmeldetokens eingeben.
+- **Datenschutz:** Der angegebene Charaktername wird nicht im exportierten Log ausgegeben. Jede Abfrage wird einzeln durch den Nutzer ausgelöst, nicht im Hintergrund wiederholt. Statistiken können auf der HiScores-Seite verzögert erscheinen; sie sind nicht identisch mit einem aktuellen authentifizierten Inventar oder einer Spielsitzung.
+- **Offizielle Live-Session-Grenze:** Das neue `IAuthorizedOfficialGameAdapter`-Interface beschreibt die künftig benötigte authentifizierte Spielverbindung und einen verifizierten Weltzustand. Derzeit ist kein entsprechender Jagex-freigegebener Adapter vorhanden. Die `OfficialGameSessionGate`-Prüfung weist diesen Zustand ausdrücklich als `OFFICIAL_PROTOCOL_ADAPTER_MISSING` aus; ein Ping oder ein öffentlicher Skillabruf darf niemals als erfolgreiches Login gewertet werden.
+- **Lokale Engine:** Der 600-ms-Client-Takt nutzt eine monotone Uhr statt einer festen Zusatzpause. Aktionen werden im Log als `ACTION_PLANNED` / `ACTION_CONFIRMED` / `ACTION_NOT_CONFIRMED` / `ACTION_CANCELLED` protokolliert. Eine Bestätigung erfordert auf dem lokalen Testserver eine tatsächliche passende Änderung von Position, Erz/XP oder GP.
+- Regressionstests prüfen diese Zustands- und Herkunftsgrenzen. **Kein echtes OSRS-Mining oder offizieller Spiel-Login implementiert.**
