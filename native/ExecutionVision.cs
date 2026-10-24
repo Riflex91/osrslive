@@ -9,7 +9,8 @@ internal static class ExecutionVision
     {
         if(image.Size!=DockedWindowLayout.GameSize)return null;
         bool inventoryActive=InventoryTabPolicy.Active(image);
-        var emptyEvidence=inventoryActive?NativeInventoryEmptyReader.Read(image):new bool[28];
+        var emptyResult=inventoryActive?NativeInventoryEmptyReader.Classify(image):null;
+        var emptyEvidence=emptyResult?.Empty??new bool[28];
         var slots=Enumerable.Range(0,28).Select(i=>
         {
             var box=ExecutionUi.InventorySlot(i);
