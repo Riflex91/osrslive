@@ -8,7 +8,8 @@ internal static class ExecutionVision
     internal static ExecutionPixels? Read(Bitmap image,IReadOnlyList<VisualLabel> labels)
     {
         if(image.Size!=DockedWindowLayout.GameSize)return null;
-        var emptyEvidence=NativeInventoryEmptyReader.Read(image);
+        bool inventoryActive=InventoryTabPolicy.Active(image);
+        var emptyEvidence=inventoryActive?NativeInventoryEmptyReader.Read(image):new bool[28];
         var slots=Enumerable.Range(0,28).Select(i=>
         {
             var box=ExecutionUi.InventorySlot(i);
@@ -25,7 +26,8 @@ internal static class ExecutionVision
             navigation=new(HudVision.Png(image,maps[0].Bounds),maps[0].Bounds,
                 hp.Length==1&&int.TryParse(hp[0].Text,out int value)?value:null);
         }
-        return new(slots,Signature(image,new Rectangle(30,50,690,300)),navigation);
+        return new(slots,Signature(image,new Rectangle(30,50,690,300)),navigation,
+            inventoryActive,Signature(image,new Rectangle(746,304,220,265)));
     }
     internal static async Task<IReadOnlyList<VisualLabel>> ReadHealth(Bitmap image,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {
