@@ -28,7 +28,8 @@ internal static class ExecutionVision
                 hp.Length==1&&int.TryParse(hp[0].Text,out int value)?value:null);
         }
         return new(slots,Signature(image,new Rectangle(30,50,690,300)),navigation,
-            inventoryActive,Signature(image,new Rectangle(746,304,220,265)));
+            inventoryActive,Signature(image,new Rectangle(746,304,220,265)),
+            emptyResult?.FirstSlotDiagnostic??"inventory_inactive");
     }
     internal static async Task<IReadOnlyList<VisualLabel>> ReadHealth(Bitmap image,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {
