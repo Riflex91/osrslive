@@ -86,16 +86,21 @@ internal sealed class GameInteractions
     }
     internal async Task OpenInventory(CancellationToken ct)
     {
-        var points=inventoryTab is Point p?new[]{p}:Enumerable.Range(0,7).SelectMany(row=>
-            Enumerable.Range(0,8).Select(col=>new Point(770+col*30,275+row*45)));
+        // The official 1000x600 game has two rows of side-panel tabs.
+        // Inventory (backpack/door icon) is in the BOTTOM row at y~582.
+        // The former 7x8 search stopped at y=545 and could click Equipment or
+        // another top-row tab when broad OCR spuriously returned "Inventory".
+        var points=inventoryTab is Point p?new[]{p}:InventoryTabPolicy.Candidates;
         foreach(var point in points)
         {
-            if(point.X>=995||point.Y>=595)continue;
             await Driver.InputAsync(new(GameInputKind.Hover,At(point)),ct);
-            if(!ExecutionUi.Tooltip(Driver.Current.Labels,"Inventory",point))continue;
-            inventoryTab=point;await Click(At(point),ct);return;
+            if(!InventoryTabPolicy.TooltipVerified(Driver.Current.Labels,point))continue;
+            inventoryTab=point;
+            await Click(At(point),ct);
+            return;
         }
-        inventoryTab=null;throw new RoutineBlockedException("INVENTORY_TAB_NOT_OBSERVED");
+        inventoryTab=null;
+        throw new RoutineBlockedException("INVENTORY_TAB_NOT_VERIFIED");
     }
     internal async Task<InventoryState> Inventory(CancellationToken ct,bool ensureTab=true)
     {
