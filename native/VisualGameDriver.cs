@@ -62,8 +62,20 @@ internal sealed class GameInteractions
     internal Task Escape(CancellationToken ct)=>Driver.InputAsync(new(GameInputKind.Escape,new(1,1,4,4)),ct);
     internal async Task<ContextMenu> OpenMenu(Rectangle box,CancellationToken ct)
     {
+        // Only one directed right-click. Windows Graphics Capture may deliver
+        // an independent frame before OSRS has painted its context menu, so
+        // allow a few bounded observations without inventing a menu or
+        // resending the potentially unsafe click.
         await Driver.InputAsync(new(GameInputKind.RightClick,box),ct);
-        return ExecutionUi.Menu(Driver.Current.Labels)??throw new RoutineBlockedException("CONTEXT_MENU_NOT_READABLE");
+        for(int attempt=0;attempt<4;attempt++)
+        {
+            if(ExecutionUi.Menu(Driver.Current.Labels) is ContextMenu menu)
+                return menu;
+            if(attempt==3)break;
+            await Task.Delay(150,ct);
+            await Driver.ObserveAsync(ct);
+        }
+        throw new RoutineBlockedException("CONTEXT_MENU_NOT_READABLE");
     }
     internal async Task Choose(Rectangle box,string action,CancellationToken ct)
     {
