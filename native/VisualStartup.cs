@@ -149,6 +149,7 @@ internal sealed class VisualStartup:IDisposable
     private int pageActions;
     private string previousAction="";
     private string lastWorldGridDiagnostic="";
+    private string lastSkillOcrDiagnostic="";
     private int? pendingWorldChoice;
     private Rectangle? pendingWorldChoiceBounds;
     private DateTimeOffset pendingWorldChoiceFrame;
@@ -194,7 +195,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";skillsHoverCleared=false;ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";lastSkillOcrDiagnostic="";skillsHoverCleared=false;ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -222,6 +223,7 @@ internal sealed class VisualStartup:IDisposable
         {SetState("CAPTURE_"+backgroundCapture.State);return;}
         observed=ConnectivityWatch.Signal(observed,networkLost);
         Game.Observe(GameScreenReader.Read(observed),DateTimeOffset.UtcNow);
+        DiagnoseSkillOcr(observed);
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
         else if(lastVerifiedHud!=default&&DateTimeOffset.UtcNow-lastVerifiedHud>TimeSpan.FromSeconds(3))
         {Gameplay.Reset();lastVerifiedHud=default;}
@@ -663,6 +665,24 @@ internal sealed class VisualStartup:IDisposable
         pendingEnterBounds=bounds;
         pendingEnterFrame=captured;
         return false;
+    }
+    private void DiagnoseSkillOcr(VisualFrame frame)
+    {
+        var read=Game.LastObservation;
+        if(read?.Stage!=VisibleGameStage.InGame||read.TotalLevel is null)
+        {lastSkillOcrDiagnostic="";return;}
+        if(read.RecognizedSkills==24&&read.Character is not null)
+        {lastSkillOcrDiagnostic="";return;}
+        // Log skill names only, never raw character text or OCR strings.
+        var values=frame.Labels.Where(l=>l.Kind==VisualLabelKind.SkillValue).ToArray();
+        var missing=GameScreenReader.GridSkills.Where(name=>!values.Any(l=>l.Text.StartsWith(name+"=",StringComparison.Ordinal)));
+        int focused=frame.Labels.Count(l=>l.Kind==VisualLabelKind.CharacterPrompt);
+        string diagnostic="missing_skills="+string.Join(",",missing)+
+            " focused_prompt_candidates="+focused+
+            " character_prompt_seen="+(read.Character is not null);
+        if(diagnostic==lastSkillOcrDiagnostic)return;
+        lastSkillOcrDiagnostic=diagnostic;
+        log.Add(Severity.INFO,"GAME_OBSERVER","OCR_GAPS",diagnostic);
     }
     private void DiagnosePostPlay(VisualFrame observed)
     {
