@@ -55,21 +55,44 @@ internal static class GameplayHudOcr
             r.Source.Top+(b.Top-r.Sheet.Top)/r.Scale,Math.Max(1,(int)Math.Ceiling(b.Width/(double)r.Scale)),Math.Max(1,(int)Math.Ceiling(b.Height/(double)r.Scale)));
         // Read the own-character input line on its own. Mixing it into a
         // large contact sheet can make OCR merge its colon/cursor with names.
-        var promptBox=new Rectangle(0,554,260,21);
+        var promptBox=new Rectangle(0,554,340,21);
         using var prompt=Contrast(image,promptBox);
-        using var promptSheet=new Bitmap(promptBox.Width*4+40,promptBox.Height*4+40);
-        using(var graphics=Graphics.FromImage(promptSheet))
+        // Native outlined chat lettering can break under bicubic resampling.
+        // A nearest-neighbour pass is reserved for a prompt that the primary
+        // focused OCR cannot parse. Only a complete name + colon + cursor
+        // becomes identity evidence; arbitrary chat text does not.
+        for(int pass=0;pass<2;pass++)
         {
-            graphics.Clear(Color.White);graphics.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-            graphics.DrawImage(prompt,new Rectangle(20,20,prompt.Width*4,prompt.Height*4));
-        }
-        var promptRead=await VisualStartup.RecognizeRaw(promptSheet,engine);
-        foreach(var line in promptRead.Lines.Where(l=>l.Words.Count>0))
-        {
-            var b=line.Words.Select(w=>Rect(w.BoundingRect)).Aggregate(Rectangle.Union);
-            var mapped=new Rectangle((b.X-20)/4,promptBox.Y+(b.Y-20)/4,Math.Max(1,(int)Math.Ceiling(b.Width/4d)),Math.Max(1,(int)Math.Ceiling(b.Height/4d)));
-            if(mapped.Left<30&&mapped.Top>=554&&mapped.Bottom<=575)
-                found.Add(new(line.Text,mapped));
+            int scale=pass==0?4:6;
+            using var promptSheet=new Bitmap(promptBox.Width*scale+40,promptBox.Height*scale+40);
+            using(var graphics=Graphics.FromImage(promptSheet))
+            {
+                graphics.Clear(Color.White);
+                graphics.InterpolationMode=pass==0?
+                    System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic:
+                    System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                graphics.DrawImage(prompt,new Rectangle(20,20,prompt.Width*scale,prompt.Height*scale));
+            }
+            var read=await VisualStartup.RecognizeRaw(promptSheet,engine);
+            bool parsed=false;
+            foreach(var line in read.Lines.Where(l=>l.Words.Count>0))
+            {
+                var b=line.Words.Select(w=>Rect(w.BoundingRect)).Aggregate(Rectangle.Union);
+                var mapped=new Rectangle((int)Math.Floor((b.X-20)/(double)scale),
+                    promptBox.Y+(int)Math.Floor((b.Y-20)/(double)scale),
+                    Math.Max(1,(int)Math.Ceiling(b.Width/(double)scale)),
+                    Math.Max(1,(int)Math.Ceiling(b.Height/(double)scale)));
+                if(mapped.Left<30&&mapped.Top>=promptBox.Top&&mapped.Bottom<=promptBox.Bottom)
+                {
+                    found.Add(new(line.Text,mapped));
+                    if(GameScreenReader.ParseCharacterPrompt(line.Text) is not null)
+                    {
+                        found.Add(new(line.Text,mapped,VisualLabelKind.CharacterPrompt));
+                        parsed=true;
+                    }
+                }
+            }
+            if(parsed)break;
         }
         return found.Distinct().ToArray();
     }
