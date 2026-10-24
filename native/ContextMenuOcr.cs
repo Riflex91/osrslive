@@ -71,6 +71,11 @@ internal static class ContextMenuOcr
                 Math.Max(0,header.Bounds.Left-18),Math.Max(0,header.Bounds.Top-8),
                 Math.Min(image.Width,header.Bounds.Left+290),
                 Math.Min(image.Height,cancel.Bounds.Bottom+8));
+            // Near the lower/right viewport edge the native menu can flip
+            // above or beside the click, leaving a small gap at its border.
+            // Accept a nearby visible menu, never one elsewhere in the frame.
+            menuBounds.Inflate(24,24);
+            menuBounds.Intersect(new Rectangle(Point.Empty,image.Size));
             if(!menuBounds.Contains(anchor))continue;
             return labels.Where(l=>l.Bounds.Top>=header.Bounds.Top&&
                 l.Bounds.Bottom<=cancel.Bounds.Bottom+2&&
