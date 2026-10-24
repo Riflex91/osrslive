@@ -56,8 +56,29 @@ internal static class WorldGridOcr
             hits.Add(n.ToString());
         }
         var extra=numbers.Where(n=>n.Value.Count==1).Select(n=>new VisualLabel(n.Value[0],crops[n.Key],VisualLabelKind.Number));
-        // Replace coarse numeric readings in cells where the focused pass read
-        // a value, to avoid duplicate top coordinates in a column.
-        return WorldGridReader.Classify(labels.Where(l=>l.Kind!=VisualLabelKind.Number).Concat(extra).ToArray());
+        // The focused pass is best-effort. Earlier versions discarded ALL
+        // coarse numbers even when this pass read only a few digits, making a
+        // previously verified grid disappear and disabling page navigation.
+        return MergeValidated(cells,extra.ToArray(),labels);
+    }
+
+    internal static IReadOnlyList<VisualLabel> MergeValidated(
+        IReadOnlyList<VisualLabel> coarse,IReadOnlyList<VisualLabel> focused,
+        IReadOnlyList<VisualLabel> sourceLabels)
+    {
+        if(coarse.Count==0||focused.Count==0)return coarse;
+        // Ignore duplicate/conflicting readings at an already validated cell.
+        // Extra cells are only admitted after revalidation of the entire
+        // ascending column; no isolated three-digit number authorizes a click.
+        var missing=focused.Where(candidate=>!coarse.Any(existing=>
+            Math.Abs(existing.Bounds.Left-candidate.Bounds.Left)<=12 &&
+            Math.Abs(existing.Bounds.Top-candidate.Bounds.Top)<=12)).ToArray();
+        if(missing.Length==0)return coarse;
+        var candidates=coarse.Select(c=>c with{Kind=VisualLabelKind.Number})
+            .Concat(missing).ToArray();
+        var title=sourceLabels.Where(l=>l.Text.Contains("Select a world",StringComparison.OrdinalIgnoreCase)).ToArray();
+        if(title.Length!=1)return coarse;
+        var verified=WorldGridReader.Classify(title.Concat(candidates).ToArray());
+        return verified.Count>coarse.Count?verified:coarse;
     }
 }
