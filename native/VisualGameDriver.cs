@@ -106,6 +106,25 @@ internal sealed class GameInteractions
     {
         if(ensureTab)await OpenInventory(ct);
         if(Driver.Current.Pixels is null)throw new RoutineBlockedException("UNSUPPORTED_INVENTORY_LAYOUT");
+        // Empty cells do not reliably open context menus in OSRS. Only
+        // independently matching native background pixels (not missing OCR)
+        // may identify an empty slot. Unknown cells still require a readable
+        // actual item menu, or fail closed.
+        var verifiedEmpty=new Dictionary<int,ulong>();
+        var first=Driver.Current;
+        if(first.Pixels!.Slots.Any(slot=>slot.Empty))
+        {
+            await Task.Delay(180,ct);
+            var second=await Driver.ObserveAsync(ct);
+            if(second.CapturedUtc>first.CapturedUtc&&second.Pixels is not null)
+                foreach(var before in first.Pixels.Slots.Where(slot=>slot.Empty))
+                {
+                    var after=second.Pixels.Slots[before.Index];
+                    if(after.Empty&&after.Signature==before.Signature&&
+                        after.Quantity is null)
+                        verifiedEmpty[before.Index]=before.Signature;
+                }
+        }
         var items=new List<InventoryItem>();int empty=0;
         for(int i=0;i<28;i++)
         {
@@ -113,6 +132,12 @@ internal sealed class GameInteractions
             if(cache.TryGetValue(i,out var cached)&&cached.Signature==before.Signature)
             {items.Add(cached);continue;}
             if(emptyCache.TryGetValue(i,out ulong emptyHash)&&emptyHash==before.Signature){empty++;continue;}
+            if(verifiedEmpty.TryGetValue(i,out ulong backgroundHash)&&
+                backgroundHash==before.Signature&&before.Empty)
+            {
+                emptyCache[i]=before.Signature;cache.Remove(i);empty++;
+                continue;
+            }
             var menu=await OpenMenu(before.Bounds,ct);
             var examines=menu.Entries.Where(e=>e.Text.StartsWith("Examine ",StringComparison.OrdinalIgnoreCase)).ToArray();
             if(examines.Length==0&&menu.Entries.Count==1&&menu.Exact("Cancel") is not null)
