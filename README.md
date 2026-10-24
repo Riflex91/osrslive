@@ -1,4 +1,6 @@
-# OSRS Play 1.7.0 – Kampf und automatische Kartennavigation
+# OSRS Play 1.7.1 – Kampf und automatische Kartennavigation
+
+**Neu in 1.7.1:** Der manuelle Aufgabenbutton ist entfernt. Die native HUD-Schrift wird in isolierten, kontrastverstärkten Ausschnitten gelesen; Chat-Schaltflächen werden getrennt von ihren On/Off-Anzeigen verarbeitet. Das behebt die im 1.7.0-Log belegte OCR-Schwachstelle nach dem Spieleinstieg. Die Wirkung im vollständigen Spielablauf wird separat geprüft; unbekannte oder unvollständige Skills geben weiterhin keine Spielaktionen frei. [Analyse und Prüfstand](docs/HUD-ERKENNUNG-1.7.1.md).
 
 **Neu in 1.7.0:** Automatische Minimap-Erkennung und Zuordnung zu öffentlichen Karten, A*-Wegsuche auf Kollisionsdaten, Treppenverbindungen und begrenzte Tür-/Torbehandlung. Keine vom Benutzer aufgezeichneten Wege oder Wegpunkt-Kalibrierung. Die Automatik reist selbst zu eingebauten F2P-Zielen und beschafft Kampfbedarf über Bank/GE. Nahkampf, Fernkampf und Wind Strike gegen Level-1-Hühner prüfen Lebenspunkte, Nahrung, Ausrüstung und tatsächlichen Skill-XP-Zuwachs. [Bedienung, Datenquellen, Tests und verbleibende Grenzen](docs/KAMPF-UND-AUTOMATISCHE-NAVIGATION-1.7.0.md).
 
@@ -63,7 +65,7 @@ Die Ausführer untersuchen Inventarslots über Bildsignaturen, Mengen-OCR und Ko
 
 Die Beschaffungspolicy bevorzugt vorhandene Gegenstände, bindet Angebote an Produkt und fehlende Menge, prüft frische Gesamtkosten und die Münzreserve. Die neue Laufzeit kann ausgewählte Produkte ablegen, Material entnehmen und nach bestätigter leerer Banksuche einen nötigen Gegenstand kaufen. Aktuelle F2P-Preise kommen von der Wiki-Preis-API. Ein dauerhaftes Angebotsjournal verhindert blindes Wiedereinstellen bei Teilfüllung oder Neustart. Ein vollständiger automatischer Vergleich aller Beschaffungswege ist noch nicht angebunden.
 
-**Aufgabe …** pausiert die Automatik und öffnet Einzelaufträge für Training, Herstellung, Kaufen/Verkaufen, Bank, Kampf und Reisen. Nach dem Einreihen **Automatik fortsetzen** wählen. Ohne Einzelauftrag wählt die Automatik selbst eine unterstützte Aktivität und deren Reiseziel. Die benötigten Referenzkarten werden automatisch heruntergeladen und lokal zwischengespeichert. Der Kontotyp ist eine Einstellung, keine automatische Ironman-Erkennung; die anfängliche Münzreserve beträgt 500.
+Die Automatik wählt selbst eine unterstützte Aktivität und deren Reiseziel. Es gibt keinen manuellen Aufgabenbutton mehr. Die benötigten Referenzkarten werden automatisch heruntergeladen und lokal zwischengespeichert. Der Kontotyp ist eine Einstellung, keine automatische Ironman-Erkennung; die anfängliche Münzreserve beträgt 500.
 
 **Noch offen:** Der vollständige Live-Test auf dem offiziellen Client, weitere Kampfziele, Quest-Ausführung, zuverlässiger Umgang mit allen Gefahren sowie Navigation außerhalb des unterstützten F2P-Festlands. Die automatische Kartenlokalisierung ist mit gedrehten/gezoomten Referenzbildern getestet; das ersetzt keinen erfolgreichen Reise- oder Kampflauf im Spiel. Minimiert bleibt die Aufnahme pausiert. Die Anwendung wird weiterhin nicht als fertiger Langzeit-Maxing-Agent ausgegeben.
 

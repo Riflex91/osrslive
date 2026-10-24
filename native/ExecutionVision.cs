@@ -29,10 +29,13 @@ internal static class ExecutionVision
     {
         if(HudVision.Minimap(image) is not Rectangle map)return Array.Empty<VisualLabel>();
         var found=new List<VisualLabel>{new("MINIMAP",map,VisualLabelKind.Minimap)};
-        if(HudVision.HealthNumber(image,map,labels) is not Rectangle b)return found;
+        var detected=HudVision.HealthNumber(image,map,labels);
+        var b=detected??new Rectangle(map.Left-62,map.Top+48,42,28);
+        if(!new Rectangle(Point.Empty,image.Size).Contains(b)||!HudVision.HeartRightOf(image,b))return found;
+        using var contrast=GameplayHudOcr.Contrast(image,b);
         using var crop=new Bitmap(b.Width*4,b.Height*4);
         using(var g=Graphics.FromImage(crop))
-        {g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;g.DrawImage(image,new Rectangle(Point.Empty,crop.Size),b,GraphicsUnit.Pixel);}
+        {g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;g.DrawImage(contrast,new Rectangle(Point.Empty,crop.Size));}
         var ocr=await VisualStartup.RecognizeRaw(crop,engine);
         var words=ocr.Lines.SelectMany(l=>l.Words).Select(w=>w.Text.Trim()).ToArray();
         if(words.Length==1&&Regex.IsMatch(words[0],@"^\d{1,2}$"))found.Add(new(words[0],b,VisualLabelKind.Hitpoints));

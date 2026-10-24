@@ -281,9 +281,8 @@ internal sealed class MainWindow : Form
         layout.Controls.Add(eventLog,0,3);
         footer.Dock=DockStyle.Fill;footer.TextAlign=ContentAlignment.MiddleLeft;
         footer.Text="Live-Agent wartet auf konsistente Skills und sichtbare Interaktionen";
-        var toolbar=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=5,RowCount=1};
+        var toolbar=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=4,RowCount=1};
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -299,14 +298,6 @@ internal sealed class MainWindow : Form
         toolbar.Controls.Add(pauseAutomation,1,0);
         toolbar.Controls.Add(toggleLog,2,0);
         toolbar.Controls.Add(copyLog,3,0);
-        var jobButton=new Button{Text="Aufgabe …",AutoSize=true};
-        jobButton.Click+=(_,_)=>
-        {
-            visualStartup.Paused=true;changePending=true;
-            using var dialog=new AgentJobDialog();
-            if(dialog.ShowDialog(this)==DialogResult.OK)visualStartup.Gameplay.Reset();
-        };
-        toolbar.Controls.Add(jobButton,4,0);
         layout.Controls.Add(toolbar,0,4);
         AdjustLogLayout();
     }

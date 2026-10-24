@@ -369,7 +369,11 @@ internal sealed class VisualStartup:IDisposable
         var focusedWorlds=await WorldGridOcr.Read(bitmap,engine,labels);
         labels.AddRange(focusedWorlds.Count>0?focusedWorlds:WorldGridReader.Classify(labels));
         labels.AddRange(WorldPageReader.Read(bitmap,labels));
-        labels.AddRange(await GameplayHudOcr.Read(bitmap,engine));
+        foreach(var focused in await GameplayHudOcr.Read(bitmap,engine))
+        {
+            labels.RemoveAll(l=>l.Kind==focused.Kind&&l.Text.Equals(focused.Text,StringComparison.OrdinalIgnoreCase)&&l.Bounds.IntersectsWith(focused.Bounds));
+            labels.Add(focused);
+        }
         labels=labels.Distinct().ToList();
         labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
         labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
@@ -492,6 +496,20 @@ internal sealed class VisualStartup:IDisposable
             var quantities=await ExecutionVision.ReadQuantities(inventoryFixture,engine);
             if(!quantities.Any(l=>l.Text=="0=125")||quantities.Any(l=>l.Text.StartsWith("1=")))
                 throw new InvalidOperationException("Exact inventory quantity OCR regression");
+            using var hudFixture=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(hudFixture))
+            using(var font=new Font("Segoe UI",8,FontStyle.Regular))
+            {
+                g.Clear(Color.FromArgb(48,56,35));
+                foreach(var item in new[]{("Public",120),("Private",182),("Trade",368),("Report",430)})
+                    g.DrawString(item.Item1,font,Brushes.White,item.Item2,575);
+                g.DrawString("Example: *",font,Brushes.White,10,550);
+            }
+            var focusedHud=await GameplayHudOcr.Read(hudFixture,engine);
+            var hudObservation=GameScreenReader.Read(new(new(1),new(0,0,1000,600),DateTimeOffset.UtcNow,focusedHud));
+            if(hudObservation.Stage!=VisibleGameStage.InGame||hudObservation.Character!="Example"||hudObservation.Skills is not null)
+                throw new InvalidOperationException("Focused chat controls / character prompt OCR regression: "+hudObservation.Stage+" fixture="+
+                    string.Join(";",focusedHud.Select(l=>l.Text+"@"+l.Bounds)));
             Console.WriteLine("OCR FIXTURE PASS: Windows OCR -> known-screen policy, no capture or input");
             return 0;
         }

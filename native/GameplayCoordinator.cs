@@ -75,13 +75,11 @@ internal sealed class GameplayCoordinator:IDisposable
             action=>Set("INPUT_"+action.ToUpperInvariant()));
         var game=new GameInteractions(driver);
         RoutineResult result;
-        string? queuedId=null;
         int retrySeconds=10;
         try
         {
             Directory.CreateDirectory(directory);
             using var exclusive=new FileStream(Path.Combine(directory,"execution.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
-            var queued=Read<AgentJob?>("job.json",null);queuedId=queued?.Id;
             string hash=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(subject.Character!.ToUpperInvariant())));
             var journal=new TradeJournal(Path.Combine(directory,"pending-trade.json"),hash);
             var combatJournal=new CombatJournal(Path.Combine(directory,"pending-combat.json"),hash);
@@ -90,17 +88,15 @@ internal sealed class GameplayCoordinator:IDisposable
             var training=new TrainingRoutines(game);var bank=new BankRoutine(game);
             if(journal.Pending() is PendingTrade pending)
             {
-                if(queuedId!=pending.Order.Id)queuedId=null;
                 Set("RECONCILING_EXISTING_TRADE");result=await new TradeRoutine(game,journal).Resume(budget.Token);
             }
             else if(combatJournal.Pending() is PendingCombat encounter)
             {
-                if(queuedId!=encounter.Id)queuedId=null;
                 if(uncertain){Set("UNCERTAIN_COMBAT_REQUIRES_REVIEW");return true;}
                 result=await new CombatRoutine(game,combatJournal,atlas,maxHp,Set).Resume(budget.Token);
             }
             else if(uncertain){Set("UNCERTAIN_RESULT_REQUIRES_REVIEW");return true;}
-            else if(queued is null&&Read<SupplyIntent?>("pending-supply.json",null) is SupplyIntent supply)
+            else if(Read<SupplyIntent?>("pending-supply.json",null) is SupplyIntent supply)
             {
                 if(supply.Subject!=hash)throw new RoutineBlockedException("SUPPLY_INTENT_BELONGS_TO_OTHER_CHARACTER");
                 var stock=await game.Inventory(budget.Token);
@@ -108,28 +104,6 @@ internal sealed class GameplayCoordinator:IDisposable
                     result=new(RoutineStatus.Completed,"PENDING_SUPPLY_ALREADY_IN_INVENTORY");
                 else result=await Go(game,atlas,maxHp,"ge",budget.Token)??await Trade(game,journal,supply.Order,settings,budget.Token);
                 if(result.Status==RoutineStatus.Completed)File.Delete(Path.Combine(directory,"pending-supply.json"));
-            }
-            else if(queued is not null)
-            {
-                if(queued.Quantity is <1 or >1000||string.IsNullOrWhiteSpace(queued.Id))throw new RoutineBlockedException("JOB_INVALID");
-                Set("JOB_"+queued.Kind.ToUpperInvariant());
-                string? destination=queued.Kind switch
-                {"train" or "combat"=>queued.Target,"craft"=>CraftStation(queued.Target),"withdraw" or "deposit"=>"bank","buy" or "sell"=>"ge",_=>null};
-                var travel=destination is null?null:await Go(game,atlas,maxHp,destination,budget.Token);
-                result=travel??(queued.Kind switch
-                {
-                    "train" when queued.Quantity==1=>await training.Run(ExecutionCatalog.Training.Single(s=>s.Id==queued.Target),subject.Skills,budget.Token),
-                    "train"=>new(RoutineStatus.Blocked,"TRAINING_JOB_IS_ONE_VERIFIED_STEP"),
-                    "craft"=>await training.Craft(F2PProgression.Recipes.Single(r=>r.Product==queued.Target),queued.Quantity,subject.Skills,budget.Token),
-                    "withdraw"=>await bank.Withdraw(queued.Target,queued.Quantity,budget.Token),
-                    "deposit"=>await bank.Deposit(new HashSet<string>(StringComparer.OrdinalIgnoreCase){queued.Target},budget.Token),
-                    "buy" or "sell"=>await Trade(game,journal,queued,settings,budget.Token),
-                    "combat" when queued.Quantity==1&&settings.CombatEnabled=>
-                        await new CombatRoutine(game,combatJournal,atlas,maxHp,Set).Run(CombatPolicy.Specs.Single(s=>s.Id==queued.Target),queued.Id,subject.Skills,budget.Token),
-                    "travel" when queued.Quantity==1=>await new TravelRoutine(game,atlas,maxHp,Set).Run(queued.Target,budget.Token),
-                    "combat" or "travel"=>new(RoutineStatus.Blocked,"COMBAT_DISABLED_OR_SINGLE_STEP_REQUIRED"),
-                    _=>new(RoutineStatus.Blocked,"UNKNOWN_JOB_KIND")
-                });
             }
             else
             {
@@ -188,11 +162,6 @@ internal sealed class GameplayCoordinator:IDisposable
             Set(result.Status.ToString().ToUpperInvariant()+"_"+result.Reason);
             log.Add(result.Status is RoutineStatus.Blocked or RoutineStatus.UnknownOutcome?Severity.WARN:Severity.INFO,
                 "GAMEPLAY","ROUTINE_RESULT",$"status={result.Status} reason={result.Reason} produced={result.Produced}");
-            if(result.Status==RoutineStatus.Completed&&queuedId is not null)
-            {
-                var stillQueued=Read<AgentJob?>("job.json",null);
-                if(stillQueued?.Id==queuedId)File.Delete(Path.Combine(directory,"job.json"));
-            }
         }
         catch(OperationCanceledException) when(!stopping.IsCancellationRequested)
         {Set("ROUTINE_TIMEOUT_STOPPED");uncertain=true;}
@@ -230,8 +199,6 @@ internal sealed class GameplayCoordinator:IDisposable
         if(result.Status!=RoutineStatus.Completed)return result;
         return null;
     }
-    private static string? CraftStation(string product)=>F2PProgression.Recipes.FirstOrDefault(r=>r.Product==product)?.Station switch
-    {"furnace"=>"furnace","anvil"=>"anvil",_=>null};
     private async Task<RoutineResult> Trade(GameInteractions game,TradeJournal journal,AgentJob job,AgentSettings settings,CancellationToken ct)
     {
         bool sell=job.Kind=="sell";

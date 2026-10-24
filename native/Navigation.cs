@@ -51,14 +51,18 @@ internal static class HudVision
             System.Text.RegularExpressions.Regex.IsMatch(l.Text.Trim(),@"^\d{1,2}$")).OrderBy(l=>l.Bounds.Top).ToArray();
         foreach(var hit in hits)
         {
-            var right=Rectangle.Intersect(new(0,0,1000,600),new(hit.Bounds.Right,hit.Bounds.Top-7,45,hit.Bounds.Height+14));
-            int red=0;
-            for(int y=right.Top;y<right.Bottom;y++)for(int x=right.Left;x<right.Right;x++)
-            {var c=image.GetPixel(x,y);if(c.R>120&&c.R>c.G*1.5&&c.R>c.B*1.5)red++;}
-            if(red<8)continue;
+            if(!HeartRightOf(image,hit.Bounds))continue;
             var bounds=hit.Bounds;bounds.Inflate(2,2);return bounds;
         }
         return null;
+    }
+    internal static bool HeartRightOf(Bitmap image,Rectangle number)
+    {
+        var right=Rectangle.Intersect(new(0,0,image.Width,image.Height),new(number.Right,number.Top-7,45,number.Height+14));
+        int red=0;
+        for(int y=right.Top;y<right.Bottom;y++)for(int x=right.Left;x<right.Right;x++)
+        {var c=image.GetPixel(x,y);if(c.R>120&&c.R>c.G*1.5&&c.R>c.B*1.5)red++;}
+        return red>=8;
     }
 }
 
