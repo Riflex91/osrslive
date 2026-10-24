@@ -86,6 +86,7 @@ internal sealed class MainWindow : Form
     private bool loggedBlockedAgent;
     private long lastWindowCheckMs;
     private DateTimeOffset lastLauncherOpenRequest=DateTimeOffset.MinValue;
+    private DateTimeOffset lastLauncherRestoreRequest=DateTimeOffset.MinValue;
     private DateTimeOffset launcherCloseRequestTime=DateTimeOffset.MinValue;
     private bool launcherCloseRequested,launcherCloseConfirmed,launcherCloseWarningLogged;
     private bool launcherRestoreFailureLogged;
@@ -456,18 +457,22 @@ internal sealed class MainWindow : Form
     private void EnsureLauncherRestored(OfficialClientWindow launcher)
     {
         if(visualStartup.ObserveOnly)return;
-        if(!OfficialClientWindowHost.TryRestoreLauncher(launcher))
+        bool minimized=OfficialClientWindowHost.LauncherIsMinimized(launcher);
+        if(minimized&&DateTimeOffset.UtcNow-lastLauncherRestoreRequest<TimeSpan.FromSeconds(5))return;
+        if(minimized)lastLauncherRestoreRequest=DateTimeOffset.UtcNow;
+        bool success=OfficialClientWindowHost.TryRestoreLauncher(launcher);
+        if(success)
         {
-            if(!launcherRestoreFailureLogged)
-            {
-                launcherRestoreFailureLogged=true;
-                log.Add(Severity.WARN,"OFFICIAL_CLIENT","LAUNCHER_RESTORE_FAILED",
-                    $"pid={launcher.ProcessId} valid_official_window_required=true");
-            }
-            return;
-        }
-        if(!launcherRestoreFailureLogged)
             launcherRestoreFailureLogged=false;
+            if(minimized)log.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_RESTORE_REQUESTED",
+                $"pid={launcher.ProcessId} reason=MINIMIZED accessibility_requires_visible_button=true");
+        }
+        else if(!launcherRestoreFailureLogged)
+        {
+            launcherRestoreFailureLogged=true;
+            log.Add(Severity.WARN,"OFFICIAL_CLIENT","LAUNCHER_RESTORE_FAILED",
+                $"pid={launcher.ProcessId} valid_official_window_required=true");
+        }
     }
 
     private void FollowOfficialWindows()
