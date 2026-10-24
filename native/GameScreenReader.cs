@@ -78,6 +78,9 @@ internal static class GameScreenReader
     }
     internal static SkillGridLayout? LocateSkills(IReadOnlyList<VisualLabel> labels,Size frameSize)
     {
+        // Character Summary also displays "Total Level", but its panel is
+        // NOT a 3x8 skill grid. Never interpret that heading as a skill anchor.
+        if(labels.Any(l=>l.Kind==VisualLabelKind.CharacterSummary))return null;
         var totals=labels.Where(l=>l.Kind==VisualLabelKind.Text&&Total.IsMatch(l.Text)&&
             l.Bounds.Left>frameSize.Width*.5&&l.Bounds.Top>frameSize.Height*.5).ToArray();
         if(totals.Length!=1)return null;
