@@ -106,6 +106,18 @@ internal static class NativeInventoryEmptyReader
         var read=Read(sample);
         if(read[0]||read.Skip(1).Count(x=>x)!=27)
             throw new Exception("Textured native inventory must reject foreground icons but identify 27 blanks");
+        // End-to-end: only the visually selected upper Inventory panel can
+        // surface these blank hints through the ordinary vision pipeline.
+        using(var g=Graphics.FromImage(sample))
+            g.FillRectangle(new SolidBrush(Color.FromArgb(125,31,28)),InventoryTabPolicy.Icon);
+        var vision=ExecutionVision.Read(sample,Array.Empty<VisualLabel>());
+        if(vision is null||!vision.InventoryTabActive||
+            vision.Slots[0].Empty||vision.Slots.Skip(1).Count(slot=>slot.Empty)!=27)
+            throw new Exception("Native inventory emptiness not plumbed through live ExecutionVision");
+        using(var g=Graphics.FromImage(sample))g.FillRectangle(Brushes.Black,InventoryTabPolicy.Icon);
+        var inactive=ExecutionVision.Read(sample,Array.Empty<VisualLabel>());
+        if(inactive is null||inactive.InventoryTabActive||inactive.Slots.Any(slot=>slot.Empty))
+            throw new Exception("Inactive Inventory panel must never present empty slot evidence");
         for(int i=1;i<=20;i++)
         {
             var r=ExecutionUi.InventorySlot(i);
