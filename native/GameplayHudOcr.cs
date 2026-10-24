@@ -63,7 +63,7 @@ internal static class GameplayHudOcr
         // becomes identity evidence; arbitrary chat text does not.
         for(int pass=0;pass<2;pass++)
         {
-            int scale=pass==0?4:6;
+            int scale=pass==0?4:5; // keep 340-pixel crop below the Windows OCR dimension limit
             using var promptSheet=new Bitmap(promptBox.Width*scale+40,promptBox.Height*scale+40);
             using(var graphics=Graphics.FromImage(promptSheet))
             {
