@@ -1,4 +1,6 @@
-# OSRS Play 1.6.2 – visuelle Trainings-, Bank- und Handelsroutinen
+# OSRS Play 1.6.3 – visuelle Trainings-, Bank- und Handelsroutinen
+
+**Neu in 1.6.3:** Die native F2P-Weltliste erhält eine separate Schwarz-auf-Weiß-Ziffern-OCR für die Spielansicht 1000×600. Der visuell bestätigte Eintrag W399 liegt bereits auf der ersten sichtbaren Seite; es wird daher nicht blind nach rechts geblättert. Vor einer Weltwahl werden verifizierte aufsteigende Spalten und zwei zeitlich unabhängige Beobachtungen derselben Zielzelle verlangt. [Analyse und Grenzen](docs/NATIVE-WORLD-GRID-OCR-1.6.3.md).
 
 **Neu in 1.6.2:** Stabilere Erkennung von Weltlisten auch bei unvollständiger fokussierter OCR, reduzierter Mindestumfang für die bildgestützte Seitennavigation und strukturierte Weltlisten-Diagnose. Die App sucht weiterhin beim Start nach einem neuen GitHub-Release und prüft zusätzlich alle 30 Minuten im Leerlauf. Eine laufende Jagex- oder OSRS-Sitzung wird nicht durch das Update unterbrochen. Ein erfolgreicher Main-Release publiziert EXE und SHA-256-Manifest. [Änderungen und Grenzen](docs/UPDATE-AND-WORLD-DIAGNOSTICS-1.6.2.md).
 

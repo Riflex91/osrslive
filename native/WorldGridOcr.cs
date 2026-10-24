@@ -4,13 +4,19 @@ namespace OSRSLiveDiagnostics;
 
 internal static class WorldGridOcr
 {
+    // Aggregate OCR counts only. Never retain captured text or game pixels.
+    internal static string NativeDiagnostic {get;private set;}="not_attempted";
     internal static async Task<IReadOnlyList<VisualLabel>> Read(Bitmap bitmap,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {
         // Infer the lattice from already validated ascending world columns.
         // A crop alone cannot authorize a click: every resulting column is
         // subjected to WorldGridReader's ascending-world validation again.
         var cells=WorldGridReader.Classify(labels);
-        if(cells.Count<6)return Array.Empty<VisualLabel>();
+        // In the native client the world digits are black on grey/gold pills.
+        // Full-frame Windows OCR can yield 0 validated columns even when the
+        // whole table is visible. Read isolated high-contrast digits only after
+        // verifying the fixed native table geometry.
+        if(cells.Count<6)return await ReadNativeTable(bitmap,engine,labels);
         var columns=new List<List<VisualLabel>>();
         foreach(var cell in cells.OrderBy(c=>c.Bounds.Left))
         {
@@ -60,6 +66,111 @@ internal static class WorldGridOcr
         // coarse numbers even when this pass read only a few digits, making a
         // previously verified grid disappear and disabling page navigation.
         return MergeValidated(cells,extra.ToArray(),labels);
+    }
+
+    // Calibrated to the official 1000x600 OSRS world-selection view
+    // (seven columns and 25 rows). These coordinates never justify an input
+    // by themselves: the visual table guard and ascending OCR columns must
+    // both succeed. No world number is inferred from an index/position.
+    internal static readonly int[] NativeColumns={176,269,362,455,548,641,734};
+    internal static Rectangle NativeNumberRegion(int column,int row)
+    {
+        if(column is <0 or >=7||row is <0 or >=25)
+            throw new ArgumentOutOfRangeException();
+        int y=34+(int)Math.Round(row*18.25,MidpointRounding.AwayFromZero);
+        return new Rectangle(NativeColumns[column]+4,y+3,24,12);
+    }
+
+    internal static bool HasNativeTable(Bitmap bitmap,IReadOnlyList<VisualLabel> labels)
+    {
+        if(bitmap.Size!=DockedWindowLayout.GameSize||
+            labels.Count(l=>l.Text.Contains("Select a world",StringComparison.OrdinalIgnoreCase)&&
+                l.Bounds.Top<42&&l.Bounds.Left is >=70 and <=300)!=1)
+            return false;
+        // Reject a plain black/synthetic screen or a shifted/rescaled layout.
+        // Each world-number pill must contain both black glyph pixels and a
+        // light background. Sample multiple rows and columns.
+        int validColumns=0;
+        for(int c=0;c<7;c++)
+        {
+            int validRows=0;
+            for(int row=0;row<25;row++)
+            {
+                var box=NativeNumberRegion(c,row);
+                int black=0,light=0;
+                for(int y=box.Top;y<box.Bottom;y+=2)
+                for(int x=box.Left;x<box.Right;x+=2)
+                {
+                    var color=bitmap.GetPixel(x,y);
+                    if(color.R<90&&color.G<90&&color.B<90)black++;
+                    if(color.R>105&&color.G>105&&color.B>90)light++;
+                }
+                if(black>=8&&light>=7)validRows++;
+            }
+            if(validRows>=11)validColumns++;
+        }
+        return validColumns>=5;
+    }
+
+    internal static async Task<IReadOnlyList<VisualLabel>> ReadNativeTable(
+        Bitmap bitmap,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
+    {
+        if(!HasNativeTable(bitmap,labels))
+        {
+            NativeDiagnostic="native_table_geometry_not_verified";
+            return Array.Empty<VisualLabel>();
+        }
+        const int tw=144,th=64,columns=7,rows=25;
+        using var sheet=new Bitmap(columns*tw,rows*th);
+        using(var canvas=Graphics.FromImage(sheet))
+        {
+            canvas.Clear(Color.White);
+            canvas.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            canvas.PixelOffsetMode=System.Drawing.Drawing2D.PixelOffsetMode.Half;
+            for(int row=0;row<rows;row++)
+            for(int col=0;col<columns;col++)
+            {
+                var source=NativeNumberRegion(col,row);
+                using var isolated=new Bitmap(source.Width,source.Height);
+                // Preserve only dark raster-font strokes. World flags, star
+                // icons and gold/silver pill backgrounds cannot leak into OCR.
+                for(int y=0;y<source.Height;y++)
+                for(int x=0;x<source.Width;x++)
+                {
+                    var pixel=bitmap.GetPixel(source.Left+x,source.Top+y);
+                    isolated.SetPixel(x,y,pixel.R<90&&pixel.G<90&&pixel.B<90?
+                        Color.Black:Color.White);
+                }
+                canvas.DrawImage(isolated,new Rectangle(col*tw+12,row*th+5,112,52));
+            }
+        }
+        var result=await VisualStartup.RecognizeRaw(sheet,engine);
+        var hits=new Dictionary<(int,int),List<int>>();
+        foreach(var word in result.Lines.SelectMany(l=>l.Words))
+        {
+            if(word.Text.Length!=3||!int.TryParse(word.Text,out int n)||n is <301 or >800)
+                continue;
+            int col=(int)(word.BoundingRect.X+word.BoundingRect.Width/2)/tw;
+            int row=(int)(word.BoundingRect.Y+word.BoundingRect.Height/2)/th;
+            if(col is <0 or >=7||row is <0 or >=25)continue;
+            if(!hits.TryGetValue((col,row),out var values))
+            {values=new();hits[(col,row)]=values;}
+            values.Add(n);
+        }
+        var numbers=hits.Where(h=>h.Value.Distinct().Count()==1)
+            .Select(h=>new VisualLabel(h.Value[0].ToString(),
+                NativeNumberRegion(h.Key.Item1,h.Key.Item2),VisualLabelKind.Number)).ToArray();
+        // Ignore unrelated three-digit player counts from the broad OCR.
+        // This pass only trusts its own isolated number cells plus the observed
+        // native world-selection title.
+        var headers=labels.Where(l=>l.Text.Contains("Select a world",
+            StringComparison.OrdinalIgnoreCase)).Take(1);
+        var verified=WorldGridReader.Classify(headers.Concat(numbers).ToArray());
+        // A lone "399" is NOT enough. Require a validated ascending column,
+        // the same guard used by ordinary world-grid recognition.
+        NativeDiagnostic=$"raster_verified=true isolated_numbers={numbers.Length} "+
+            $"verified_world_cells={verified.Count}";
+        return verified.Count>=6?verified:Array.Empty<VisualLabel>();
     }
 
     internal static IReadOnlyList<VisualLabel> MergeValidated(
