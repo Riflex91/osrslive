@@ -106,6 +106,8 @@ internal sealed class GameInteractions
     {
         if(ensureTab)await OpenInventory(ct);
         if(Driver.Current.Pixels is null)throw new RoutineBlockedException("UNSUPPORTED_INVENTORY_LAYOUT");
+        if(!Driver.Current.Pixels.InventoryTabActive)
+            throw new RoutineBlockedException("INVENTORY_TAB_NOT_VISUALLY_OPEN");
         // Empty cells do not reliably open context menus in OSRS. Only
         // independently matching native background pixels (not missing OCR)
         // may identify an empty slot. Unknown cells still require a readable
