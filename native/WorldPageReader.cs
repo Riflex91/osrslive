@@ -5,8 +5,8 @@ internal static class WorldPageReader
     internal static IReadOnlyList<VisualLabel> Read(Bitmap image,IReadOnlyList<VisualLabel> labels)
     {
         // Only the supported native 1000x600 layout, on a confirmed world-grid
-        // screen. The page arrows are image controls without accessible text.
-        if(image.Size!=DockedWindowLayout.GameSize||labels.Count(l=>l.Kind==VisualLabelKind.WorldCell)<20||
+        // screen with at least one independently validated ascending column.\n        // The page arrows are image controls without accessible text.
+        if(image.Size!=DockedWindowLayout.GameSize||labels.Count(l=>l.Kind==VisualLabelKind.WorldCell)<6||
             !labels.Any(l=>l.Text.Contains("Select a world",StringComparison.OrdinalIgnoreCase)))
             return Array.Empty<VisualLabel>();
         var found=new List<VisualLabel>();
