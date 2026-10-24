@@ -149,6 +149,11 @@ internal static class SkillGridOcr
     {
         var layout=GameScreenReader.LocateSkills(labels,bitmap.Size);
         if(layout is null)return Array.Empty<VisualLabel>();
+        // Exact original-client P11 glyph pixels are stronger evidence than
+        // Windows OCR, particularly for the 24 in the Hitpoints cell.
+        var native=NativeSkillFontReader.Read(bitmap,layout);
+        if(native.Count==24&&native.Sum(l=>int.Parse(l.Text[(l.Text.IndexOf('=')+1)..]))==layout.TotalLevel)
+            return native;
         // A contact sheet gives the tiny base-level digits to OCR at useful size.
         // Icons, current levels and chat are excluded from these crops.
         const int tileWidth=240,tileHeight=88;
@@ -232,6 +237,18 @@ internal static class SkillGridOcr
             }
             foreach(var hit in rescue.Where(e=>e.Value.Count==1))
                 numbers[missing[hit.Key]]=hit.Value;
+        }
+        // Fall back to independently decoded P11 glyphs only for unreadable
+        // OCR tiles. A disagreement is not silently overwritten; the final
+        // 24-value total checksum still gates the observation.
+        foreach(var label in native)
+        {
+            int i=Array.FindIndex(GameScreenReader.GridSkills,n=>
+                label.Text.StartsWith(n+"=",StringComparison.Ordinal));
+            if(i<0)continue;
+            if(numbers.TryGetValue(i,out var prior)&&prior.Count==1)continue;
+            if(int.TryParse(label.Text[(label.Text.IndexOf('=')+1)..],out int value))
+                numbers[i]=new List<int>{value};
         }
         return numbers.Where(p=>p.Value.Count==1).Select(p=>new VisualLabel(
             GameScreenReader.GridSkills[p.Key]+"="+p.Value[0],layout.Bounds,VisualLabelKind.SkillValue)).ToArray();
