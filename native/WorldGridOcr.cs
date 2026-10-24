@@ -69,7 +69,7 @@ internal static class WorldGridOcr
     }
 
     // Calibrated to the official 1000x600 OSRS world-selection view
-    // (seven columns and 25 rows). These coordinates never justify an input
+    // (seven columns and 24 rows). These coordinates never justify an input
     // by themselves: the visual table guard and ascending OCR columns must
     // both succeed. No world number is inferred from an index/position.
     internal static readonly int[] NativeColumns={176,269,362,455,548,641,734};
