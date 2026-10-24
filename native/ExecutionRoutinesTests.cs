@@ -38,6 +38,18 @@ internal static class ExecutionRoutinesTests
         VisualLabel L(string text,int x,int y,int width=180)=>new(text,new(x,y,width,14));
         var menu=new[]{L("Choose Option",30,30),L("Use Logs",30,50),L("Drop Logs",30,66),L("Examine Logs",30,82),L("Cancel",30,98),
             L("Deposit-All Logs",400,50)};
+        ContextMenuOcr.SelfTest();
+        var focusedMenu=menu.Where(l=>l.Bounds.Left<300)
+            .Select(l=>l with {Kind=VisualLabelKind.ContextMenuLine}).ToArray();
+        var conflictingFrame=focusedMenu.Concat(new[]{
+            L("Choose Option",400,30),L("Examine Different Item",400,66),L("Cancel",400,98)
+        }).ToArray();
+        Require(ExecutionUi.Menu(conflictingFrame)?.Exact("Examine Logs") is not null&&
+            ExecutionUi.Menu(conflictingFrame)?.Exact("Examine Different Item") is null,
+            "focused right-click menu cannot be contaminated by unrelated global OCR");
+        var corruptFocused=focusedMenu.Where(l=>l.Text!="Cancel").Concat(menu).ToArray();
+        Require(ExecutionUi.Menu(corruptFocused) is null,
+            "incomplete focused menu fails closed instead of falling back to another source");
         var parsed=ExecutionUi.Menu(menu);
         Require(parsed?.Exact("Drop Logs") is not null&&parsed.Exact("Deposit-All Logs") is null,"unrelated OCR cannot enter a context menu");
         Require(ExecutionUi.Menu(menu.Append(L("Choose Option",400,5)).ToArray()) is null,"ambiguous menu headers blocked");
