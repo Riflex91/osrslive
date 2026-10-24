@@ -15,7 +15,31 @@ internal static class ExecutionVision
                 .Select(l=>int.TryParse(l.Text[(l.Text.IndexOf('=')+1)..],out int n)?(int?)n:null).ToArray();
             return new ObservedSlot(i,box,Signature(image,box),false,quantities.Length==1?quantities[0]:null);
         }).ToArray();
-        return new(slots,Signature(image,new Rectangle(30,50,690,300)));
+        NavigationPixels? navigation=null;
+        var maps=labels.Where(l=>l.Kind==VisualLabelKind.Minimap).ToArray();
+        if(maps.Length==1)
+        {
+            var hp=labels.Where(l=>l.Kind==VisualLabelKind.Hitpoints).ToArray();
+            navigation=new(HudVision.Png(image,maps[0].Bounds),maps[0].Bounds,
+                hp.Length==1&&int.TryParse(hp[0].Text,out int value)?value:null);
+        }
+        return new(slots,Signature(image,new Rectangle(30,50,690,300)),navigation);
+    }
+    internal static async Task<IReadOnlyList<VisualLabel>> ReadHealth(Bitmap image,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
+    {
+        if(HudVision.Minimap(image) is not Rectangle map)return Array.Empty<VisualLabel>();
+        var found=new List<VisualLabel>{new("MINIMAP",map,VisualLabelKind.Minimap)};
+        var detected=HudVision.HealthNumber(image,map,labels);
+        var b=detected??new Rectangle(map.Left-62,map.Top+48,42,28);
+        if(!new Rectangle(Point.Empty,image.Size).Contains(b)||!HudVision.HeartRightOf(image,b))return found;
+        using var contrast=GameplayHudOcr.Contrast(image,b);
+        using var crop=new Bitmap(b.Width*4,b.Height*4);
+        using(var g=Graphics.FromImage(crop))
+        {g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;g.DrawImage(contrast,new Rectangle(Point.Empty,crop.Size));}
+        var ocr=await VisualStartup.RecognizeRaw(crop,engine);
+        var words=ocr.Lines.SelectMany(l=>l.Words).Select(w=>w.Text.Trim()).ToArray();
+        if(words.Length==1&&Regex.IsMatch(words[0],@"^\d{1,2}$"))found.Add(new(words[0],b,VisualLabelKind.Hitpoints));
+        return found;
     }
     internal static ulong Signature(Bitmap image,Rectangle box)
     {

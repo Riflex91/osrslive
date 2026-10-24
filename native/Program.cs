@@ -13,6 +13,14 @@ internal static class Program
         if(args.Length>0 && args[0]=="--apply-update")return Updater.Apply(args);
         if(args.Length>0 && args[0]=="--self-test")return SelfTest.Run();
         if(args.Length>0 && args[0]=="--ocr-self-test")return VisualStartup.OcrSelfTest().GetAwaiter().GetResult();
+        if(args.Length>0 && args[0]=="--navigation-self-test")return WorldNavigationDataTests.Run().GetAwaiter().GetResult();
+        if(args.Length>0 && args[0]=="--third-party-notices")
+        {
+            var assembly=typeof(Program).Assembly;
+            foreach(string name in assembly.GetManifestResourceNames().Where(n=>n.Contains(".Licenses.")))
+            {Console.WriteLine(name);using var reader=new StreamReader(assembly.GetManifestResourceStream(name)!);Console.WriteLine(reader.ReadToEnd());}
+            return 0;
+        }
         if(args.Length>0 && args[0]=="--scenario-tests")
         {
             Console.Error.WriteLine("OFFLINE_SESSIONS_REMOVED");
@@ -45,8 +53,8 @@ internal static class Program
 }
 
 // One-window shell with diagnostic controls. ONLY the unmodified official Jagex
-// Launcher and osclient.exe are displayed. Startup mouse input is isolated
-// from the still-missing gameplay state/action routines.
+// Launcher and osclient.exe are displayed. Visual gameplay executors share
+// the same guarded capture and window-directed input transport.
 internal sealed class MainWindow : Form
 {
     private readonly Diagnostics log=new();
@@ -82,7 +90,7 @@ internal sealed class MainWindow : Form
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","progress"));
     private string lastGameDiagnostic="",lastGoalDiagnostic="";
     private bool logRequestedVisible=true;
-    private readonly System.Windows.Forms.Timer liveObservationTimer=new(){Interval=2000};
+    private readonly System.Windows.Forms.Timer liveObservationTimer=new(){Interval=400};
     private LiveRenderState lastReportedRenderState=LiveRenderState.NoGameWindow;
     private bool followWindows,starting,scanning,stopping;
     private bool loggedBlockedAgent;
@@ -184,7 +192,7 @@ internal sealed class MainWindow : Form
                 $"render_state={liveObserver.Last.State} "+
                 $"frame_sample_age_s={(DateTimeOffset.UtcNow-liveObserver.Last.ObservedUtc).TotalSeconds:0.0} "+
                 $"working_set_mib={p.WorkingSet64/1024/1024} "+
-                $"uptime_s={uptime.Elapsed.TotalSeconds:0} capture={visualStartup.CaptureState} "+
+                $"uptime_s={uptime.Elapsed.TotalSeconds:0} capture={visualStartup.CaptureState} capture_alpha={visualStartup.CaptureAlpha} "+
                 $"authenticated=false_unverified agent_state={visualStartup.Gameplay.State}");
             PersistLog();
         };
@@ -273,9 +281,8 @@ internal sealed class MainWindow : Form
         layout.Controls.Add(eventLog,0,3);
         footer.Dock=DockStyle.Fill;footer.TextAlign=ContentAlignment.MiddleLeft;
         footer.Text="Live-Agent wartet auf konsistente Skills und sichtbare Interaktionen";
-        var toolbar=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=5,RowCount=1};
+        var toolbar=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=4,RowCount=1};
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -291,14 +298,6 @@ internal sealed class MainWindow : Form
         toolbar.Controls.Add(pauseAutomation,1,0);
         toolbar.Controls.Add(toggleLog,2,0);
         toolbar.Controls.Add(copyLog,3,0);
-        var jobButton=new Button{Text="Aufgabe …",AutoSize=true};
-        jobButton.Click+=(_,_)=>
-        {
-            visualStartup.Paused=true;changePending=true;
-            using var dialog=new AgentJobDialog();
-            if(dialog.ShowDialog(this)==DialogResult.OK)visualStartup.Gameplay.Reset();
-        };
-        toolbar.Controls.Add(jobButton,4,0);
         layout.Controls.Add(toolbar,0,4);
         AdjustLogLayout();
     }
@@ -816,7 +815,9 @@ internal static class SelfTest
             AccountGoalPlannerTests.Run();
             F2PProgressionTests.Run();
             ExecutionRoutinesTests.Run();
+            CombatNavigationTests.Run();
             GameScreenReaderTests.Run();
+            SessionRecoveryTests.Run();
             const string manifest="version=0.9.1\n"+
                 "exeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.9.1/OSRS-Play.exe\n"+
                 "exeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

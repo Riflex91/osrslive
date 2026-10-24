@@ -1,0 +1,13 @@
+# HUD-Erkennung und autonome Oberfläche – 1.7.1
+
+Der bereitgestellte 1.7.0-Log zeigt einen erfolgreichen Launcherstart, die empfohlene F2P-Welt 553, zwei unabhängige Bestätigungen des Play-Buttons sowie den anschließend bestätigten zweiten Einstieg. Nach `ENTER_GAME_REQUESTED` bleibt `stage=Unknown` mit `chat_controls=False` bestehen. Die Pause ist später wieder aufgehoben; sie erklärt das anhaltende Erkennungsproblem nicht. Der Alphazähler zeigt überwiegend opake Pixel. Aus diesem Log allein lässt sich die Alphaverarbeitung deshalb nicht als Ursache belegen.
+
+Der Spieleinstieg und der laufende Spielzustand werden getrennt behandelt. Für den Spielzustand benötigt der bisherige Leser die Texte Public, Private, Trade und Report in der unteren Bedienleiste. Die breite HUD-OCR verliert diese kleine native Konturschrift auf strukturiertem Hintergrund. Ein Welcome-Text im Chat ersetzt diese Bedienleistenprüfung nicht.
+
+1.7.1 verarbeitet die vier Bedienfelder einzeln, trennt ihre Titel von den grünen On/Off-Zuständen und liest sie zusammen mit Charakter-Prompt, Tooltip, Skillpanel und Minimap-Anzeigen in einer vergrößerten Kontaktfläche. Eine Grauwert-Kontrasttransformation erhält Kantenglättung; eine harte Schwarzweißschwelle hatte im Regressionstest Buchstaben beschädigt. Überlappende identische Lesungen aus breiter und fokussierter OCR werden vor der Skill-Prüfung zusammengeführt.
+
+Lebenspunkte können zusätzlich in einem aus der automatisch gefundenen Minimap abgeleiteten Ausschnitt gelesen werden. Der rote Herzbereich bleibt als räumlicher Beleg erforderlich; ein beliebiger naher Zahlenwert wird nicht zu HP erklärt. Vier erkannte Bedienfelder allein starten keinen Spielauftrag: Charakterzuordnung sowie alle 24 konsistenten, wiederholt gelesenen Skillwerte bleiben notwendig.
+
+Der Button **Aufgabe …** und sein Dialog wurden entfernt. Die Auswahl von Training, Versorgung, Kampf und Reisen erfolgt durch den vorhandenen automatischen Koordinator. Eine eventuell vorhandene alte `job.json` steuert die Automatik nicht mehr und wird nicht gelöscht. Persistente automatische Beschaffungs-, Kampf- und GE-Vorgänge bleiben erhalten. Pause/F8, Log aus-/einblenden und Log kopieren bleiben verfügbar. Dies beseitigt die manuelle Aufgabenauswahl, bestätigt aber für sich noch keinen vollständig autonom funktionierenden Langzeitbetrieb.
+
+Die OCR-Regression prüft Bedienleisten-Titel und Charakter-Prompt auf farbigem Hintergrund sowie den anschließenden Wechsel nach `InGame`, ohne Skills zu erfinden. Die übrigen Skill-/Prüfsummen-, Karten-, Fenster- und Hintergrundtests gelten weiter. Ein erfolgreiches synthetisches OCR-Bild ist kein Ersatz für den vollständigen Live-Test auf dem offiziellen Client.

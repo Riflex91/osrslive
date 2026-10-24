@@ -44,13 +44,17 @@ internal static class WorldGridReader
     }
 }
 
-internal enum VisibleGameStage { Unknown, Login, WorldSelection, Connecting, Welcome, InGame }
+internal enum VisibleGameStage { Unknown, Login, WorldSelection, Connecting, Welcome, InGame, Disconnected }
 internal sealed record VisibleGameObservation(VisibleGameStage Stage,string? Character,
     IReadOnlyList<PublicOsrsSkill>? Skills,int? TotalLevel,int RecognizedSkills,DateTimeOffset ObservedUtc,int? ReadLevelSum=null);
 internal sealed record SkillGridLayout(Rectangle Bounds,int TotalLevel,double Scale);
 
 internal static class GameScreenReader
 {
+    internal static string ReadinessReason(VisibleGameObservation observation)=>
+        observation.Character is null?"CHARACTER_PROMPT_NOT_READABLE":observation.TotalLevel is null?"SKILLS_TAB_NOT_READABLE":
+        observation.RecognizedSkills!=24?"SKILLS_INCOMPLETE_"+observation.RecognizedSkills+"_OF_24":
+        observation.Skills is null?"SKILL_TOTAL_MISMATCH":"WAITING_FOR_INDEPENDENT_SKILL_CONFIRMATION";
     // Native resizable skill panel: 3 columns x 8 rows. Numbers are base levels,
     // not boosted/drained current levels. Layout is anchored to "Total level".
     internal static readonly string[] GridSkills=
@@ -61,7 +65,7 @@ internal static class GameScreenReader
         "Runecraft","Slayer","Farming","Construction","Hunter","Sailing"
     };
     private static readonly Regex Total=new(@"\bTotal\s*level\s*[:;]?\s*(\d{2,4})\b",RegexOptions.IgnoreCase);
-    private static readonly Regex Prompt=new(@"^([A-Za-z0-9 _-]{1,12})\s*:\s*[*|]?$",RegexOptions.CultureInvariant);
+    private static readonly Regex Prompt=new(@"^([A-Za-z0-9 _-]{1,12})\s*[:;]\s*[*|+.·]?$",RegexOptions.CultureInvariant);
     internal static SkillGridLayout? LocateSkills(IReadOnlyList<VisualLabel> labels,Size frameSize)
     {
         var totals=labels.Where(l=>l.Kind==VisualLabelKind.Text&&Total.IsMatch(l.Text)&&
@@ -81,10 +85,11 @@ internal static class GameScreenReader
         var labels=frame.Labels;
         bool Has(string text)=>labels.Any(l=>l.Kind==VisualLabelKind.Text&&l.Text.Contains(text,StringComparison.OrdinalIgnoreCase));
         VisibleGameObservation Result(VisibleGameStage stage)=>new(stage,null,null,null,0,frame.CapturedUtc);
+        if(SessionRecovery.Disconnected(labels))return Result(VisibleGameStage.Disconnected);
         var filters=labels.Where(l=>l.Bounds.Top>frame.ScreenBounds.Height-40&&
             l.Bounds.Left<frame.ScreenBounds.Width*.55).Select(l=>l.Text).ToArray();
         string row=string.Join(" ",filters);
-        if(!new[]{"Public","Private","Trade","Report"}.All(s=>Regex.IsMatch(row,@"\b"+s+@"\b",RegexOptions.IgnoreCase)))
+        if(!labels.Any(l=>l.Kind==VisualLabelKind.GameHud)&&!new[]{"Public","Private","Trade","Report"}.All(s=>Regex.IsMatch(row,@"\b"+s+@"\b",RegexOptions.IgnoreCase)))
         {
             if(Has("Select a world"))return Result(VisibleGameStage.WorldSelection);
             if(Has("Connecting to server")||Has("Please wait"))return Result(VisibleGameStage.Connecting);
@@ -121,19 +126,30 @@ internal static class SkillGridOcr
         if(layout is null)return Array.Empty<VisualLabel>();
         // A contact sheet gives the tiny base-level digits to OCR at useful size.
         // Icons, current levels and chat are excluded from these crops.
-        const int tileWidth=100,tileHeight=80;
+        const int tileWidth=240,tileHeight=88;
         using var sheet=new Bitmap(tileWidth*6,tileHeight*4);
+        using var contextFont=new Font("Segoe UI",32,FontStyle.Regular,GraphicsUnit.Pixel);
         using(var graphics=Graphics.FromImage(sheet))
         {
-            graphics.Clear(Color.Black);
-            graphics.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            graphics.Clear(Color.White);
+            graphics.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
             for(int i=0;i<24;i++)
             {
-                var crop=new Rectangle((int)Math.Round(layout.Bounds.Left+(i%3*62+44)*layout.Scale),
+                var crop=new Rectangle((int)Math.Round(layout.Bounds.Left+(i%3*62+38)*layout.Scale),
                     (int)Math.Round(layout.Bounds.Top+(i/3*30+14)*layout.Scale),
-                    (int)Math.Round(18*layout.Scale),(int)Math.Round(15*layout.Scale));
+                    (int)Math.Round(24*layout.Scale),(int)Math.Round(16*layout.Scale));
                 if(!new Rectangle(Point.Empty,bitmap.Size).Contains(crop))return Array.Empty<VisualLabel>();
-                graphics.DrawImage(bitmap,new Rectangle(i%6*tileWidth+10,i/6*tileHeight+10,72,60),crop,GraphicsUnit.Pixel);
+                using var digits=new Bitmap(crop.Width,crop.Height);
+                for(int y=0;y<crop.Height;y++)for(int x=0;x<crop.Width;x++)
+                {
+                    var c=bitmap.GetPixel(crop.Left+x,crop.Top+y);
+                    bool yellow=c.R>160&&c.G>140&&c.B<130&&c.R>c.B*1.5&&c.G>c.B*1.5;
+                    digits.SetPixel(x,y,yellow?Color.Black:Color.White);
+                }
+                // A fixed, non-data prefix keeps isolated single digits (most
+                // commonly level 1) from being discarded as page noise by OCR.
+                graphics.DrawString("Level",contextFont,Brushes.Black,i%6*tileWidth+8,i/6*tileHeight+18);
+                graphics.DrawImage(digits,new Rectangle(i%6*tileWidth+112,i/6*tileHeight+10,96,64));
             }
         }
         var result=await VisualStartup.RecognizeRaw(sheet,engine);

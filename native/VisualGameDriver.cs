@@ -16,6 +16,7 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
     private readonly Func<VisualFrame,GameInput,CancellationToken,Task<bool>> dispatch;
     private readonly Action<string> report;
     public VisualFrame Current {get;private set;}
+    internal Action<VisualFrame>? Guard;
     internal WindowVisualGameDriver(VisualFrame first,Func<CancellationToken,Task<VisualFrame?>> capture,
         Func<VisualFrame,GameInput,CancellationToken,Task<bool>> dispatch,Action<string> report)
     {Current=first;this.capture=capture;this.dispatch=dispatch;this.report=report;}
@@ -26,14 +27,16 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
         if(next is null||next.Window!=Current.Window||next.ScreenBounds!=Current.ScreenBounds||
             DateTimeOffset.UtcNow-next.CapturedUtc>TimeSpan.FromSeconds(2))
             throw new RoutineBlockedException("FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED");
-        if(GameScreenReader.Read(next).Stage is VisibleGameStage.Login or VisibleGameStage.WorldSelection or VisibleGameStage.Welcome or VisibleGameStage.Connecting)
-            throw new RoutineBlockedException("GAME_SESSION_LEFT_EXECUTION_SCREEN");
-        Current=next;return next;
+        var stage=GameScreenReader.Read(next).Stage;
+        if(stage!=VisibleGameStage.InGame)
+            throw new RoutineBlockedException(stage==VisibleGameStage.Unknown?"GAMEPLAY_HUD_NOT_VERIFIED":"GAME_SESSION_LEFT_EXECUTION_SCREEN");
+        Current=next;Guard?.Invoke(next);return next;
     }
     public async Task InputAsync(GameInput input,CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if(DateTimeOffset.UtcNow-Current.CapturedUtc>TimeSpan.FromSeconds(2))await ObserveAsync(ct);
+        Guard?.Invoke(Current);
         if(!await dispatch(Current,input,ct))throw new RoutineBlockedException("INPUT_NOT_QUEUED");
         report(input.Kind.ToString());
         var sent=DateTimeOffset.UtcNow;

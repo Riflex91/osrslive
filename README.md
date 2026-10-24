@@ -1,4 +1,10 @@
-# OSRS Play 1.6.7 – visuelle Trainings-, Bank- und Handelsroutinen
+# OSRS Play 1.7.2 – schneller Einstieg und Wiederverbindung
+
+**Neu in 1.7.2:** Häufigere, weiterhin serielle Bildschirmbeobachtung und sofortige Weiterverarbeitung neu erkannter Login-Schritte. Wiederholte Klicks auf denselben Bildschirm bleiben zeitlich begrenzt. Ein Session-Controller erkennt Logout/Verbindungsverlust, stoppt Spielaktionen, prüft die Spielwelt-Verbindung und setzt den bekannten Einstieg mit Backoff fort. Die native Spielansicht kann zusätzlich über Minimap, Skills-Symbol und mehrere Bereiche der Chat-Bedienleiste erkannt werden. Charakter und vollständige Skillwerte müssen anschließend weiterhin neu bestätigt werden. [Ursache des Stillstands, Verhalten und Grenzen](docs/LOGIN-UND-RECONNECT-1.7.2.md).
+
+**Neu in 1.7.1:** Der manuelle Aufgabenbutton ist entfernt. Die native HUD-Schrift wird in isolierten, kontrastverstärkten Ausschnitten gelesen; Chat-Schaltflächen werden getrennt von ihren On/Off-Anzeigen verarbeitet. Das behebt die im 1.7.0-Log belegte OCR-Schwachstelle nach dem Spieleinstieg. Die Wirkung im vollständigen Spielablauf wird separat geprüft; unbekannte oder unvollständige Skills geben weiterhin keine Spielaktionen frei. [Analyse und Prüfstand](docs/HUD-ERKENNUNG-1.7.1.md).
+
+**Neu in 1.7.0:** Automatische Minimap-Erkennung und Zuordnung zu öffentlichen Karten, A*-Wegsuche auf Kollisionsdaten, Treppenverbindungen und begrenzte Tür-/Torbehandlung. Keine vom Benutzer aufgezeichneten Wege oder Wegpunkt-Kalibrierung. Die Automatik reist selbst zu eingebauten F2P-Zielen und beschafft Kampfbedarf über Bank/GE. Nahkampf, Fernkampf und Wind Strike gegen Level-1-Hühner prüfen Lebenspunkte, Nahrung, Ausrüstung und tatsächlichen Skill-XP-Zuwachs. [Bedienung, Datenquellen, Tests und verbleibende Grenzen](docs/KAMPF-UND-AUTOMATISCHE-NAVIGATION-1.7.0.md).
 
 **Neu in 1.6.7:** Die zweite Spieleinstiegsseite wird über das Pergamentbanner, die drei Informationskacheln und den rot-weißen „CLICK HERE TO PLAY“-Button auch dann identifiziert, wenn Windows OCR den grafischen Text nicht lesen kann. Erst nach zwei zeitlich unabhängigen Bestätigungen und zuvor geprüfter Welt folgt ein Eingabeversuch; Passwort- und unbekannte Bildschirme bleiben gesperrt. [Analyse, Testgrenzen und neue Logereignisse](docs/NATIVE-SECOND-ENTRY-1.6.7.md).
 
@@ -61,9 +67,9 @@ Die Ausführer untersuchen Inventarslots über Bildsignaturen, Mengen-OCR und Ko
 
 Die Beschaffungspolicy bevorzugt vorhandene Gegenstände, bindet Angebote an Produkt und fehlende Menge, prüft frische Gesamtkosten und die Münzreserve. Die neue Laufzeit kann ausgewählte Produkte ablegen, Material entnehmen und nach bestätigter leerer Banksuche einen nötigen Gegenstand kaufen. Aktuelle F2P-Preise kommen von der Wiki-Preis-API. Ein dauerhaftes Angebotsjournal verhindert blindes Wiedereinstellen bei Teilfüllung oder Neustart. Ein vollständiger automatischer Vergleich aller Beschaffungswege ist noch nicht angebunden.
 
-**Aufgabe …** pausiert die Automatik und öffnet Einzelaufträge für Training, Herstellung, Kaufen/Verkaufen und Bank. Nach dem Einreihen **Automatik fortsetzen** wählen. Ohne Einzelauftrag wählt die Automatik eine versorgte, unterstützte Trainingsaktivität. Der Kontotyp ist eine Einstellung, keine automatische Ironman-Erkennung; die anfängliche Münzreserve beträgt 500.
+Die Automatik wählt selbst eine unterstützte Aktivität und deren Reiseziel. Es gibt keinen manuellen Aufgabenbutton mehr. Die benötigten Referenzkarten werden automatisch heruntergeladen und lokal zwischengespeichert. Der Kontotyp ist eine Einstellung, keine automatische Ironman-Erkennung; die anfängliche Münzreserve beträgt 500.
 
-**Noch offen:** Kalibrierung und vollständiger Live-Test der neuen Routinen, Kampf, globale Navigation, Quest-Ausführung und Gefahrenmanagement. Ein sichtbarer Szenenausschnitt ersetzt keine Route zwischen Bank, Ressourcen, Altar und GE. Minimiert bleibt die Aufnahme pausiert. Die Anwendung wird weiterhin nicht als fertiger Langzeit-Maxing-Agent ausgegeben.
+**Noch offen:** Der vollständige Live-Test auf dem offiziellen Client, weitere Kampfziele, Quest-Ausführung, zuverlässiger Umgang mit allen Gefahren sowie Navigation außerhalb des unterstützten F2P-Festlands. Die automatische Kartenlokalisierung ist mit gedrehten/gezoomten Referenzbildern getestet; das ersetzt keinen erfolgreichen Reise- oder Kampflauf im Spiel. Minimiert bleibt die Aufnahme pausiert. Die Anwendung wird weiterhin nicht als fertiger Langzeit-Maxing-Agent ausgegeben.
 
 [Gründliche F2P-Auswertung, konkrete Loginbefunde, Quellen und Implementierungsgrenzen](docs/F2P-PROGRESSION-UND-LOGIN-2026-10-24.md).
 
