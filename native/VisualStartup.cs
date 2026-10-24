@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal, CharacterPrompt }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal, CharacterPrompt, CharacterSummary, CharacterSummaryName }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -23,7 +23,7 @@ internal static class SkillsHoverPolicy
     internal static readonly Point RestPoint=new(500,400);
     internal static readonly Rectangle RestTarget=new(RestPoint.X-2,RestPoint.Y-2,4,4);
     internal static bool AfterOpen(string action,GameInputKind kind,Size size)=>
-        action=="OPEN_SKILLS"&&kind==GameInputKind.LeftClick&&size==DockedWindowLayout.GameSize;
+        (action=="OPEN_SKILLS"||action=="OPEN_SKILLS_FROM_SUMMARY")&&kind==GameInputKind.LeftClick&&size==DockedWindowLayout.GameSize;
     internal static bool NeedsClear(bool alreadyCleared,VisibleGameObservation observation,Size size)=>
         !alreadyCleared&&size==DockedWindowLayout.GameSize&&
         observation.Stage==VisibleGameStage.InGame&&observation.TotalLevel is not null&&
@@ -146,6 +146,7 @@ internal sealed class VisualStartup:IDisposable
     private static string footerDiagnostic="not_read";
     private int repeatedActions;
     private bool skillsHoverCleared;
+    private readonly CharacterSummaryIdentity summaryIdentity=new();
     private int pageActions;
     private string previousAction="";
     private string lastWorldGridDiagnostic="";
@@ -195,7 +196,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";lastSkillOcrDiagnostic="";skillsHoverCleared=false;ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";lastSkillOcrDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -222,7 +223,9 @@ internal sealed class VisualStartup:IDisposable
         if(observed is null)
         {SetState("CAPTURE_"+backgroundCapture.State);return;}
         observed=ConnectivityWatch.Signal(observed,networkLost);
-        Game.Observe(GameScreenReader.Read(observed),DateTimeOffset.UtcNow);
+        var visible=GameScreenReader.Read(observed);
+        summaryIdentity.Observe(visible,observed.Labels);
+        Game.Observe(summaryIdentity.Apply(visible),DateTimeOffset.UtcNow);
         DiagnoseSkillOcr(observed);
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
         else if(lastVerifiedHud!=default&&DateTimeOffset.UtcNow-lastVerifiedHud>TimeSpan.FromSeconds(3))
@@ -241,7 +244,7 @@ internal sealed class VisualStartup:IDisposable
             if(recoveryDecision.ResetSubject)
             {
                 Game.Reset();Gameplay.Reset();observedSelectedWorld=null;previousAction="";repeatedActions=0;
-                ResetWorldChoice();ResetPlayButton();ResetEnter();skillsHoverCleared=false;
+                ResetWorldChoice();ResetPlayButton();ResetEnter();skillsHoverCleared=false;summaryIdentity.Reset();
             }
             if(lastRecoveryState!=recoveryDecision.State)
             {lastRecoveryState=recoveryDecision.State;log.Add(Severity.INFO,"RECONNECT","STATE","state="+lastRecoveryState+" pending_transactions_preserved=true");}
@@ -260,6 +263,21 @@ internal sealed class VisualStartup:IDisposable
         }
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
         {
+            // The official Character Summary displays the real account name
+            // while the Skills tab displays the full 24-value raster. Require
+            // two fresh summary frames, then switch to the separately verified
+            // Skills icon. Do not click the Summary's Total Level as if it
+            // contained individual skill cells.
+            if(Game.Confirmed is null&&observed.Labels.Any(l=>l.Kind==VisualLabelKind.CharacterSummary))
+            {
+                if(summaryIdentity.Verified(observed.CapturedUtc) is null)
+                {SetState("CONFIRMING_CHARACTER_SUMMARY");return;}
+                var icon=observed.Labels.Where(l=>l.Kind==VisualLabelKind.SkillsButton).ToArray();
+                if(icon.Length!=1)
+                {SetState("SKILLS_BUTTON_NOT_VERIFIED_IN_SUMMARY");return;}
+                await Dispatch(observed,new("OPEN_SKILLS_FROM_SUMMARY",icon[0].Bounds),owner,ct);
+                return;
+            }
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
             {
                 if(Paused||ObserveOnly)throw new OperationCanceledException(token);
@@ -442,6 +460,7 @@ internal sealed class VisualStartup:IDisposable
             labels.RemoveAll(l=>l.Kind==VisualLabelKind.CharacterPrompt);
             labels.Add(nativePrompt);
         }
+        labels.AddRange(await CharacterSummaryReader.Read(bitmap,engine));
         labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
         labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
         if(NativeGameHudReader.Skills(bitmap) is VisualLabel skillsButton)labels.Add(skillsButton);
