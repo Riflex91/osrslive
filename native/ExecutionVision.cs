@@ -8,12 +8,14 @@ internal static class ExecutionVision
     internal static ExecutionPixels? Read(Bitmap image,IReadOnlyList<VisualLabel> labels)
     {
         if(image.Size!=DockedWindowLayout.GameSize)return null;
+        var emptyEvidence=NativeInventoryEmptyReader.Read(image);
         var slots=Enumerable.Range(0,28).Select(i=>
         {
             var box=ExecutionUi.InventorySlot(i);
             var quantities=labels.Where(l=>l.Kind==VisualLabelKind.InventoryQuantity&&l.Text.StartsWith(i+"=",StringComparison.Ordinal))
                 .Select(l=>int.TryParse(l.Text[(l.Text.IndexOf('=')+1)..],out int n)?(int?)n:null).ToArray();
-            return new ObservedSlot(i,box,Signature(image,box),false,quantities.Length==1?quantities[0]:null);
+            return new ObservedSlot(i,box,Signature(image,box),
+                emptyEvidence[i]&&quantities.Length==0,quantities.Length==1?quantities[0]:null);
         }).ToArray();
         NavigationPixels? navigation=null;
         var maps=labels.Where(l=>l.Kind==VisualLabelKind.Minimap).ToArray();
