@@ -412,7 +412,8 @@ internal sealed class VisualStartup:IDisposable
             string diagnostic=$"anchor_x={anchor.X} anchor_y={anchor.Y} focused_lines={focused} "+
                 $"header_candidates={headers} cancel_candidates={cancels} parsed={menu is not null} "+
                 $"entries={menu?.Entries.Count??0} inventory_tab_active={pixels?.InventoryTabActive??false} "+
-                $"empty_candidates={empty} slot0_empty={slotZero} panel_changed={changed?.ToString()??"unknown"}";
+                $"empty_candidates={empty} slot0_empty={slotZero} panel_changed={changed?.ToString()??"unknown"} "+
+                $"empty_pixel_quality={pixels?.InventorySlot0Diagnostic??"unavailable"}";
             if(diagnostic!=lastContextDiagnostic)
             {
                 lastContextDiagnostic=diagnostic;
