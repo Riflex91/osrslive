@@ -15,6 +15,22 @@ internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
 internal sealed record VisualDecision(string State,Rectangle? Click=null,bool MoveOnly=false,GameInput? RuntimeInput=null);
 
+// Moving the window-directed mouse to this neutral game-view coordinate after
+// opening Skills removes any mouseover tooltip before the next OCR frame.
+// It is outside the skills panel, minimap, chat and interactive tab buttons.
+internal static class SkillsHoverPolicy
+{
+    internal static readonly Point RestPoint=new(500,400);
+    internal static readonly Rectangle RestTarget=new(RestPoint.X-2,RestPoint.Y-2,4,4);
+    internal static bool AfterOpen(string action,GameInputKind kind,Size size)=>
+        action=="OPEN_SKILLS"&&kind==GameInputKind.LeftClick&&size==DockedWindowLayout.GameSize;
+    internal static bool NeedsClear(bool alreadyCleared,VisibleGameObservation observation,Size size)=>
+        !alreadyCleared&&size==DockedWindowLayout.GameSize&&
+        observation.Stage==VisibleGameStage.InGame&&observation.TotalLevel is not null&&
+        (observation.RecognizedSkills!=24||observation.Skills is null);
+}
+
+
 internal static class WorldFooterPolicy
 {
     internal static IReadOnlyList<VisualLabel> Read(IReadOnlyList<VisualLabel> labels,Size imageSize)
@@ -129,6 +145,7 @@ internal sealed class VisualStartup:IDisposable
     private string lastState="";
     private static string footerDiagnostic="not_read";
     private int repeatedActions;
+    private bool skillsHoverCleared;
     private int pageActions;
     private string previousAction="";
     private string lastWorldGridDiagnostic="";
@@ -177,7 +194,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";skillsHoverCleared=false;ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -222,7 +239,7 @@ internal sealed class VisualStartup:IDisposable
             if(recoveryDecision.ResetSubject)
             {
                 Game.Reset();Gameplay.Reset();observedSelectedWorld=null;previousAction="";repeatedActions=0;
-                ResetWorldChoice();ResetPlayButton();ResetEnter();
+                ResetWorldChoice();ResetPlayButton();ResetEnter();skillsHoverCleared=false;
             }
             if(lastRecoveryState!=recoveryDecision.State)
             {lastRecoveryState=recoveryDecision.State;log.Add(Severity.INFO,"RECONNECT","STATE","state="+lastRecoveryState+" pending_transactions_preserved=true");}
@@ -257,6 +274,15 @@ internal sealed class VisualStartup:IDisposable
                     l.Bounds.Left<200&&l.Bounds.Top<50);
                 bool identified=tooltip||nativeSkills is not null;
                 await Dispatch(observed,new(identified?"OPEN_SKILLS":"HOVER_SKILLS",button,!identified),owner,ct);
+                return;
+            }
+            // Also handle a session that entered with Skills already selected:
+            // one safe hover transition clears a possibly obscuring tooltip.
+            // Do not loop hover inputs if OCR still misses a base level.
+            if(Game.LastObservation is { } incomplete&&
+                SkillsHoverPolicy.NeedsClear(skillsHoverCleared,incomplete,observed.ScreenBounds.Size))
+            {
+                await Dispatch(observed,new("CLEAR_SKILLS_HOVER",SkillsHoverPolicy.RestTarget,true),owner,ct);
                 return;
             }
             SetState(Game.Confirmed is null?"IN_GAME_"+GameScreenReader.ReadinessReason(Game.LastObservation):"IN_GAME_GOAL_PLANNED");return;
@@ -600,6 +626,21 @@ internal sealed class VisualStartup:IDisposable
         };
         if(!queued)
         {SetState("INPUT_DISPATCH_FAILED_REOBSERVING");return false;}
+        // A click on the Skills tab leaves the game mouse over the tab.
+        // Clear the hover BEFORE the next capture; never click in the world.
+        bool afterOpen=SkillsHoverPolicy.AfterOpen(decision.State,kind,frame.ScreenBounds.Size);
+        if(afterOpen&&!BackgroundWindowInput.Move(frame.Window,SkillsHoverPolicy.RestPoint))
+        {
+            skillsHoverCleared=false;
+            SetState("SKILLS_HOVER_CLEAR_FAILED_REOBSERVING");
+            return false;
+        }
+        if(afterOpen||decision.State=="CLEAR_SKILLS_HOVER"&&kind==GameInputKind.Hover)
+        {
+            skillsHoverCleared=true;
+            log.Add(Severity.INFO,"VISUAL_INPUT","SKILLS_HOVER_CLEARED",
+                "cursor=NEUTRAL_GAME_VIEW tooltip_clear=REQUESTED independent_next_frame_required=true");
+        }
         repeatedActions=previousAction==decision.State?repeatedActions+1:1;
         if(decision.State.StartsWith("WORLD_PAGE_"))pageActions++;
         previousAction=decision.State;
@@ -732,6 +773,23 @@ internal static class VisualStartupTests
     {
         static VisualLabel Label(string text,int y)=>new(text,new Rectangle(20,y,200,25));
         static void Require(bool value,string reason){if(!value)throw new Exception("Visual startup: "+reason);}
+        var incompleteSkills=new VisibleGameObservation(VisibleGameStage.InGame,null,null,131,23,DateTimeOffset.UtcNow,107);
+        Require(SkillsHoverPolicy.RestPoint==new Point(500,400)&&
+            SkillsHoverPolicy.RestTarget.Contains(SkillsHoverPolicy.RestPoint),
+            "neutral game-view mouse target");
+        Require(!new Rectangle(740,260,260,340).Contains(SkillsHoverPolicy.RestPoint)&&
+            !new Rectangle(0,450,740,150).Contains(SkillsHoverPolicy.RestPoint),
+            "hover target must not cover skill panel or chat");
+        Require(SkillsHoverPolicy.AfterOpen("OPEN_SKILLS",GameInputKind.LeftClick,new(1000,600))&&
+            !SkillsHoverPolicy.AfterOpen("HOVER_SKILLS",GameInputKind.Hover,new(1000,600))&&
+            !SkillsHoverPolicy.AfterOpen("OPEN_SKILLS",GameInputKind.LeftClick,new(800,600)),
+            "only a verified native Skills click triggers immediate mouse clearing");
+        Require(SkillsHoverPolicy.NeedsClear(false,incompleteSkills,new(1000,600))&&
+            !SkillsHoverPolicy.NeedsClear(true,incompleteSkills,new(1000,600))&&
+            !SkillsHoverPolicy.NeedsClear(false,incompleteSkills with {TotalLevel=null},new(1000,600))&&
+            !SkillsHoverPolicy.NeedsClear(false,incompleteSkills with {RecognizedSkills=24,
+                Skills=GameScreenReader.GridSkills.Select(n=>new PublicOsrsSkill(n,1,-1,-1)).ToArray()},new(1000,600)),
+            "already-open partial Skills panel gets one hover clearing, never an infinite retry");
         var welcome=new[]{Label("Welcome to Old School RuneScape",10),Label("Play Now",60),Label("World 417",250)};
         Require(VisualStartupPolicy.Decide(welcome,null).Click is null,"wait for measured world");
         Require(VisualStartupPolicy.Decide(welcome,417).State=="PLAY_SELECTED_CHARACTER","matching world before play");
