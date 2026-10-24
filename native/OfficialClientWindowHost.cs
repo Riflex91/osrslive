@@ -173,7 +173,10 @@ internal sealed class OfficialClientWindowHost : IDisposable
         // Avoid unnecessarily resizing a GPU-accelerated foreign HWND each
         // UI refresh. Only act when the hosting panel actually changes size.
         if(desired==lastHostedSize)return;
-        if(SetWindowPos(attached,IntPtr.Zero,0,0,desired.Width,desired.Height,
+        var frame=new RECT{Left=0,Top=0,Right=desired.Width,Bottom=desired.Height};
+        AdjustWindowRectEx(ref frame,(uint)GetWindowLongPtr(attached,GWL_STYLE).ToInt64(),false,
+            (uint)GetWindowLongPtr(attached,GWL_EXSTYLE).ToInt64());
+        if(SetWindowPos(attached,IntPtr.Zero,frame.Left,frame.Top,frame.Right-frame.Left,frame.Bottom-frame.Top,
             SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED))
             lastHostedSize=desired;
     }
@@ -222,6 +225,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
     [DllImport("user32.dll",SetLastError=true)] private static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int width,int height,uint flags);
     [StructLayout(LayoutKind.Sequential)] private struct RECT {internal int Left,Top,Right,Bottom;}
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
+    [DllImport("user32.dll")] private static extern bool AdjustWindowRectEx(ref RECT rect,uint style,bool menu,uint extendedStyle);
 }
 
 internal static class OfficialClientWindowHostTests

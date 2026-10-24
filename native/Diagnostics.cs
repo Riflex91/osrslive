@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.2.0";
+    internal const string Version="1.4.0";
     private const int Capacity=10000;
     private readonly object sync=new();
     private readonly List<LogEvent> entries=new();
@@ -72,8 +72,10 @@ internal sealed class Diagnostics
         sb.AppendLine($"Events: {counters.Events} | Warnungen: {counters.Warnings} | Fehler: {counters.Errors}");
         sb.AppendLine($"Puffer-Überlauf: {counters.Dropped} | RAM: {proc.WorkingSet64/1024/1024} MiB");
         sb.AppendLine("Offizielle Spielansicht: Jagex Launcher / osclient.exe als Originalfenster eingebettet.");
-        sb.AppendLine("Spielzustand und Authentifizierung: durch OSRS Play NICHT verifiziert.");
-        sb.AppendLine("Visueller Start: Launcher, erkennbare Weltenauswahl und Play per Maus; F8 pausiert.");
+        sb.AppendLine("Serverseitige Authentifizierung: NICHT verifiziert. Skilldaten benötigen wiederholte, konsistente OCR-Lesungen.");
+        sb.AppendLine("Hintergrundaufnahme: Windows Graphics Capture; Eingaben: gezielte Fensternachrichten; F8 pausiert.");
+        sb.AppendLine("Hintergrundtransport im Testfenster geprüft; Annahme durch osclient.exe noch nicht bestätigt. Minimiert pausiert die Aufnahme.");
+        sb.AppendLine("Spielansicht: fest 1000x600 Pixel; Log dockt darunter an und verkleinert das Spiel nicht.");
         sb.AppendLine("Spielender Agent: NICHT VERFÜGBAR – Aktivitäts-, Bank-, Handels- und Herstellungsroutinen fehlen.");
         sb.AppendLine("Keine Offline-Sitzungen, Sandbox-Welt oder künstliche Game-Ticks.");
         sb.AppendLine("--- LOG ---");
@@ -89,8 +91,9 @@ internal sealed class Diagnostics
         using var proc=Process.GetCurrentProcess();
         return JsonSerializer.Serialize(new
         {
-            schemaVersion=3,clientVersion=Version,exportedAt=DateTimeOffset.UtcNow,
-            mode=Mode,executionMode="OFFICIAL_WINDOW_ONLY",
+            schemaVersion=4,clientVersion=Version,exportedAt=DateTimeOffset.UtcNow,
+            mode=Mode,executionMode="OFFICIAL_WINDOW_WGC",inputTransport="WINDOW_MESSAGES",
+            backgroundTransportImplemented=true,officialBackgroundInputVerified=false,
             liveAgentAvailable=false,verifiedOfficialGameState=false,
             officialAuthenticationHandledBy="JAGEX_LAUNCHER",
             statistics=new{s.Events,s.Dropped,s.Errors,s.Warnings,

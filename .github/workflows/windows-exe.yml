@@ -44,6 +44,21 @@ jobs:
           dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --ocr-self-test
           if ($LASTEXITCODE -eq 2) { Write-Warning 'OCR fixture not run: no Windows OCR language on runner'; exit 0 }
           if ($LASTEXITCODE -ne 0) { throw 'Windows OCR fixture failed' }
+      - name: Verify fixed viewport and docked log
+        shell: pwsh
+        run: |
+          $test = Start-Process -FilePath 'native/bin/Release/net10.0-windows10.0.19041.0/win-x64/OSRS-Play.exe' -ArgumentList '--layout-self-test' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput layout-test.log -RedirectStandardError layout-test.err
+          Get-Content layout-test.log
+          Get-Content layout-test.err
+          if ($test.ExitCode -ne 0) { throw "Layout test failed: $($test.ExitCode)" }
+      - name: Verify background capture and input transport
+        shell: pwsh
+        run: |
+          $test = Start-Process -FilePath 'native/bin/Release/net10.0-windows10.0.19041.0/win-x64/OSRS-Play.exe' -ArgumentList '--background-self-test' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput background-test.log -RedirectStandardError background-test.err
+          Get-Content background-test.log
+          Get-Content background-test.err
+          if ($test.ExitCode -eq 2) { Write-Warning 'Windows Graphics Capture unavailable on this runner; real background operation not validated here'; exit 0 }
+          if ($test.ExitCode -ne 0) { throw "Background transport test failed: $($test.ExitCode)" }
       - name: Publish single self-contained EXE
         shell: pwsh
         run: |
@@ -76,7 +91,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "Official-client window host with hide/copy log controls, visual mouse startup for recognized screens, and F8 pause. World selection requires the measured F2P world to be visible and unambiguous. Goal/procurement policies are tested but not connected to gameplay executors; training, banking, trading and crafting are not implemented. The legacy-named asset serves only auto-update compatibility."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "Fixed 1000x600 official-client viewport with bottom-docked hide/copy log controls. Windows Graphics Capture and window-message input implement a background transport verified on a covered test window; official osclient input acceptance remains unverified. Consistent repeated visual skill readings feed goal proposals and local progress checkpoints. Skill training, banking, trading and crafting executors are not implemented. Minimization pauses capture. F8 pauses automation."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()

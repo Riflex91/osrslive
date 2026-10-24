@@ -19,11 +19,13 @@ internal static class Program
             return 2;
         }
         ApplicationConfiguration.Initialize();
+        if(args.Contains("--background-self-test"))return BackgroundIntegrationTests.Run();
+        if(args.Contains("--layout-self-test"))return WindowLayoutTests.Run();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException+=(_,e)=>
             MessageBox.Show(e.Exception.GetType().Name+": "+e.Exception.Message,
                 "OSRS Play: UI-Fehler",MessageBoxButtons.OK,MessageBoxIcon.Error);
-        try{Application.Run(new MainWindow(!args.Contains("--ui-smoke-test")));return 0;}
+        try{Application.Run(new MainWindow(!args.Contains("--ui-smoke-test"),args.Contains("--observe-only")));return 0;}
         catch(Exception ex)
         {
             try
@@ -74,6 +76,10 @@ internal sealed class MainWindow : Form
     private bool visualTickRunning;
     private readonly bool autoStartupEnabled;
     private bool pauseHotkeyRegistered;
+    private readonly AccountProgressStore progressStore=new(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","progress"));
+    private string lastGameDiagnostic="",lastGoalDiagnostic="";
+    private bool logRequestedVisible=true;
     private readonly System.Windows.Forms.Timer liveObservationTimer=new(){Interval=2000};
     private LiveRenderState lastReportedRenderState=LiveRenderState.NoGameWindow;
     private bool followWindows,starting,scanning,stopping;
@@ -88,14 +94,17 @@ internal sealed class MainWindow : Form
         "OSRSPlay","live-logs");
     private readonly string runtimeLogFile;
 
-    internal MainWindow(bool startAutomatically=true)
+    internal MainWindow(bool startAutomatically=true,bool observeOnly=false)
     {
         autoStartupEnabled=startAutomatically;
-        visualStartup=new VisualStartup(log);
+        visualStartup=new VisualStartup(log,liveObserver);
+        visualStartup.ObserveOnly=observeOnly;
         runtimeLogFile=Path.Combine(logDirectory,
-            startAutomatically?"last-session.log":"ui-smoke-test.log");
+            !startAutomatically?"ui-smoke-test.log":observeOnly?"observation-session.log":"last-session.log");
         Text=$"OSRS Play {Diagnostics.Version} – offizielles OSRS";
-        Width=1140;Height=800;MinimumSize=new Size(810,580);
+        AutoScaleMode=AutoScaleMode.None;
+        FormBorderStyle=FormBorderStyle.FixedSingle;MaximizeBox=false;
+        ClientSize=DockedWindowLayout.ClientSize(true);
         StartPosition=FormStartPosition.CenterScreen;
         Font=new Font("Segoe UI",9);
         BackColor=Color.FromArgb(245,247,250);
@@ -109,13 +118,16 @@ internal sealed class MainWindow : Form
         log.Add(Severity.INFO,"CORE","PRIVACY",
             "credentials_and_oauth_handled_only_by_jagex=true");
         log.Add(Severity.INFO,"LIVE_AGENT","CAPABILITIES",
-            "startup_input=VISIBLE_MOUSE gameplay_routines=MISSING "+
+            "startup_input=WINDOW_MESSAGES capture=WINDOWS_GRAPHICS_CAPTURE gameplay_routines=MISSING "+
             "goal=MAX_ALL_SKILLS_THEN_WEALTH_AND_GEAR");
         if(Updater.TakeLastOutcome() is string result)
             log.Add(Severity.INFO,"UPDATER","PREVIOUS_UPDATE",result);
 
         uiTimer.Tick+=(_,_) =>
         {
+            bool hadPlan=visualStartup.Game.Plan is not null;
+            visualStartup.Game.Expire(DateTimeOffset.UtcNow);
+            if(hadPlan&&visualStartup.Game.Plan is null)changePending=true;
             if(followWindows && uptime.ElapsedMilliseconds-lastWindowCheckMs>1050)
             {
                 lastWindowCheckMs=uptime.ElapsedMilliseconds;
@@ -131,7 +143,6 @@ internal sealed class MainWindow : Form
         uiTimer.Start();
         liveObservationTimer.Tick+=async (_,_)=>
         {
-            ObserveOfficialGame();
             if(visualTickRunning||stopping||!followWindows)return;
             visualTickRunning=true;
             try
@@ -145,7 +156,11 @@ internal sealed class MainWindow : Form
                 log.Add(Severity.WARN,"VISUAL_STARTUP","OBSERVATION_FAILED",
                     "reason="+ex.GetType().Name);
             }
-            finally{visualTickRunning=false;changePending=true;}
+            finally
+            {
+                visualTickRunning=false;changePending=true;
+                if(!stopping){ObserveOfficialGame();ReportGameObservation();}
+            }
         };
         liveObservationTimer.Start();
         diagnosticsTimer.Tick+=(_,_) =>
@@ -156,7 +171,7 @@ internal sealed class MainWindow : Form
                 $"render_state={liveObserver.Last.State} "+
                 $"frame_sample_age_s={(DateTimeOffset.UtcNow-liveObserver.Last.ObservedUtc).TotalSeconds:0.0} "+
                 $"working_set_mib={p.WorkingSet64/1024/1024} "+
-                $"uptime_s={uptime.Elapsed.TotalSeconds:0} "+
+                $"uptime_s={uptime.Elapsed.TotalSeconds:0} capture={visualStartup.CaptureState} "+
                 "authenticated=false_unverified agent_actions=DISABLED");
             PersistLog();
         };
@@ -172,7 +187,7 @@ internal sealed class MainWindow : Form
             stopping=true;followWindows=false;
             closing.Cancel();uiTimer.Stop();diagnosticsTimer.Stop();
             liveObservationTimer.Stop();liveObservationTimer.Dispose();
-            windowHost.Dispose();liveObserver.Reset();
+            visualStartup.Dispose();windowHost.Dispose();liveObserver.Reset();
             log.Add(Severity.INFO,"CORE","SHUTDOWN",
                 "jagex_process_not_terminated=true");
             PersistLog();
@@ -180,15 +195,44 @@ internal sealed class MainWindow : Form
         };
     }
 
+    private void ReportGameObservation()
+    {
+        var observed=visualStartup.Game.LastObservation;
+        if(observed is not null)
+        {
+            string diagnostic=$"stage={observed.Stage} skill_reads={observed.RecognizedSkills}/24 "+
+                $"total_level={observed.TotalLevel?.ToString()??"unknown"} read_sum={observed.ReadLevelSum?.ToString()??"unknown"} "+
+                $"character_prompt_seen={observed.Character is not null} source=VISIBLE_OCR server_auth_verified=false";
+            if(diagnostic!=lastGameDiagnostic)
+            {lastGameDiagnostic=diagnostic;log.Add(Severity.INFO,"GAME_OBSERVER","STATE",diagnostic);}
+        }
+        var confirmed=visualStartup.Game.Confirmed;
+        var plan=visualStartup.Game.Plan;
+        string goal=plan is null?"state=WAITING_FOR_CONSISTENT_VISIBLE_SKILLS":
+            $"phase={plan.Phase} skill={plan.Skill??"none"} reason={plan.Reason} "+
+            "scope=F2P_PROPOSAL executor=NOT_IMPLEMENTED";
+        if(goal!=lastGoalDiagnostic)
+        {lastGoalDiagnostic=goal;log.Add(Severity.INFO,"ACCOUNT_GOAL","DECISION",goal);}
+        if(confirmed is not null&&plan is not null)
+        {
+            try
+            {
+                if(progressStore.Save(confirmed,plan))log.Add(Severity.INFO,"ACCOUNT_PROGRESS","SAVED",
+                    $"total_level={confirmed.TotalLevel} skills=24 source=REPEATED_VISUAL_OCR character_name_persisted=false");
+            }
+            catch(Exception ex){log.Add(Severity.WARN,"ACCOUNT_PROGRESS","SAVE_FAILED","reason="+ex.GetType().Name);}
+        }
+    }
+
     private void BuildUI()
     {
         layout.Dock=DockStyle.Fill;layout.Padding=new Padding(11);
         layout.ColumnCount=1;layout.RowCount=5;
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,39));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,46));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,180));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,40));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,DockedWindowLayout.HeaderHeight));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,DockedWindowLayout.StatusHeight));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,DockedWindowLayout.GameSize.Height));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,DockedWindowLayout.LogHeight));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute,DockedWindowLayout.ToolbarHeight));
         Controls.Add(layout);
         heading.Text=$"OSRS PLAY {Diagnostics.Version}  ·  AUTOMATISCHER LIVE-BETRIEB";
         heading.Dock=DockStyle.Fill;heading.Font=new Font("Segoe UI",13,FontStyle.Bold);
@@ -196,6 +240,7 @@ internal sealed class MainWindow : Form
         status.Dock=DockStyle.Fill;status.Font=new Font("Segoe UI",10);
         status.Text="Starte offizielle Jagex-Anmeldung …";
         layout.Controls.Add(status,0,1);
+        gameSurface.Margin=Padding.Empty;
         gameSurface.Controls.Add(emptyHint);
         layout.Controls.Add(gameSurface,0,2);
         eventLog.Dock=DockStyle.Fill;eventLog.ReadOnly=true;
@@ -225,16 +270,25 @@ internal sealed class MainWindow : Form
         toolbar.Controls.Add(toggleLog,2,0);
         toolbar.Controls.Add(copyLog,3,0);
         layout.Controls.Add(toolbar,0,4);
+        AdjustLogLayout();
     }
 
     private void SetLogVisible(bool visible)
     {
-        layout.SuspendLayout();
-        eventLog.Visible=visible;
-        layout.RowStyles[3].Height=visible?180:0;
-        toggleLog.Text=visible?"Log ausblenden":"Log einblenden";
-        layout.ResumeLayout(true);
+        logRequestedVisible=visible;
+        AdjustLogLayout();
         log.Add(Severity.INFO,"UI","LOG_VISIBILITY_CHANGED",$"visible={visible} logging_continues=true");
+    }
+    private void AdjustLogLayout()
+    {
+        layout.SuspendLayout();
+        eventLog.Visible=logRequestedVisible;
+        layout.RowStyles[3].Height=logRequestedVisible?DockedWindowLayout.LogHeight:0;
+        ClientSize=DockedWindowLayout.ClientSize(logRequestedVisible);
+        toggleLog.Text=logRequestedVisible?"Log ausblenden":"Log einblenden";
+        layout.ResumeLayout(true);
+        if(IsHandleCreated&&Bottom>Screen.FromControl(this).WorkingArea.Bottom)
+            Top=Math.Max(Screen.FromControl(this).WorkingArea.Top,Screen.FromControl(this).WorkingArea.Bottom-Height);
     }
 
     private void CopyLog()
@@ -253,6 +307,23 @@ internal sealed class MainWindow : Form
         }
     }
 
+    internal void VerifyDockedLayout()
+    {
+        PerformLayout();layout.PerformLayout();
+        if(gameSurface.ClientSize!=DockedWindowLayout.GameSize)
+            throw new Exception($"Unexpected game viewport {gameSurface.ClientSize}");
+        if(FormBorderStyle!=FormBorderStyle.FixedSingle||MaximizeBox)
+            throw new Exception("Window must have a fixed border and disabled maximize");
+        int shownHeight=ClientSize.Height;
+        if(eventLog.Top<gameSurface.Bottom)throw new Exception("Log overlaps the game viewport");
+        SetLogVisible(false);PerformLayout();layout.PerformLayout();
+        if(gameSurface.ClientSize!=DockedWindowLayout.GameSize||ClientSize.Height!=shownHeight-DockedWindowLayout.LogHeight)
+            throw new Exception("Hiding log resized the game instead of removing the dock");
+        SetLogVisible(true);PerformLayout();layout.PerformLayout();
+        if(gameSurface.ClientSize!=DockedWindowLayout.GameSize||ClientSize.Height!=shownHeight)
+            throw new Exception("Showing log did not restore fixed dock geometry");
+    }
+
     private async Task StartAutomaticallyAsync()
     {
         if(starting)return;
@@ -260,6 +331,11 @@ internal sealed class MainWindow : Form
         bool updating=false;
         try
         {
+            if(visualStartup.ObserveOnly)
+            {
+                log.Add(Severity.INFO,"CORE","OBSERVATION_ONLY","updates_skipped=true no_input=true");
+                return;
+            }
             log.Add(Severity.INFO,"UPDATER","CHECK_START","verified_release_only=true");
             bool updated=await Updater.CheckAndUpdateAsync(message=>
             {
@@ -286,8 +362,8 @@ internal sealed class MainWindow : Form
             if(!updating && !stopping && !IsDisposed)
             {
                 followWindows=true;
-                StartOfficialLauncherIfNeeded();
-                _=MeasureF2PAutomatically();
+                if(visualStartup.ObserveOnly)FollowOfficialWindows();
+                else{StartOfficialLauncherIfNeeded();_=MeasureF2PAutomatically();}
             }
         }
     }
@@ -295,14 +371,14 @@ internal sealed class MainWindow : Form
     private void ObserveOfficialGame()
     {
         if(stopping || !IsHandleCreated)return;
-        var frame=liveObserver.Observe(windowHost.VisibleGameHandle,Handle);
+        var frame=liveObserver.Last;
         if(frame.State!=lastReportedRenderState)
         {
             lastReportedRenderState=frame.State;
             log.Add(Severity.INFO,"OFFICIAL_OBSERVER","RENDER_STATE_CHANGED",
                 $"state={frame.State} pixels_sampled={frame.SampleCells} "+
                 $"variance={frame.LuminanceVariance} changed={frame.ChangedCells} "+
-                "origin=VISIBLE_OSCLIENT_FRAME auth_verified=false "+
+                "origin=WINDOWS_GRAPHICS_CAPTURE auth_verified=false "+
                 "world_verified=false screenshot_persisted=false");
         }
         // This has no access to the actual authenticated player state,
@@ -374,7 +450,8 @@ internal sealed class MainWindow : Form
                             "state=WAITING_FOR_VERIFIED_SKILLS_AND_ACTIVITY_RUNNERS "+
                             "game_window_visible=true pixel_observation_cannot_verify_login=true");
                         log.Add(Severity.INFO,"VISUAL_STARTUP","AUTO_START",
-                            "mouse_input_enabled=true gameplay_routines=MISSING F8=PAUSE");
+                            $"input_enabled={!visualStartup.ObserveOnly} transport=WINDOW_MESSAGES "+
+                            "gameplay_routines=MISSING F8=PAUSE");
                     }
                     changePending=true;
                 }
@@ -470,6 +547,8 @@ internal sealed class MainWindow : Form
             " | Livebild: "+liveObserver.Last.State:"";
         status.Text=$"{window}{render}  |  {f2pSummary}"+
             $"  |  Automatik: {visualStartup.State}";
+        var plan=visualStartup.Game.Plan;
+        if(plan is not null)status.Text+=$" | Zielvorschlag: {plan.Skill??plan.Phase.ToString()}";
         if(!autoStartupEnabled)status.Text="UI-Test: keine Updates, kein Clientstart, keine Eingaben";
         pauseAutomation.Text=visualStartup.Paused?"Automatik fortsetzen":"Automatik pausieren (F8)";
         if(!string.IsNullOrEmpty(footer.Text) &&
@@ -479,7 +558,8 @@ internal sealed class MainWindow : Form
         }
         else footer.Text=windowHost.Attached &&
             windowHost.CurrentKind==OfficialWindowKind.Game?
-            "Mausstart aktiv; Spielroutinen fehlen. Login bleibt serverseitig unverifiziert.":
+            visualStartup.ObserveOnly?"Nur Beobachtung: keine Mauseingaben. Zielvorschläge führen noch keine Spielaktionen aus.":
+            "Hintergrundstart per Fensternachrichten; Zielvorschlag aus Skills. Spielroutinen fehlen.":
             "Jagex-Anmeldung erfolgt im Original-Launcher. OSRS Play fordert kein Passwort an.";
         if(!eventLog.Visible)return;
         var events=log.Snapshot().TakeLast(420);
@@ -582,6 +662,7 @@ internal static class SelfTest
             PublicOsrsHiscoresTests.Run();
             VisualStartupTests.Run();
             AccountGoalPlannerTests.Run();
+            GameScreenReaderTests.Run();
             const string manifest="version=0.9.1\n"+
                 "exeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.9.1/OSRS-Play.exe\n"+
                 "exeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
