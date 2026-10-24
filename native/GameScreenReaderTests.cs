@@ -5,6 +5,8 @@ internal static class GameScreenReaderTests
     internal static void Run()
     {
         static void Require(bool value,string message){if(!value)throw new Exception("Game reader: "+message);}
+        NativeSkillFontReader.SelfTest();
+        NativeCharacterFontReader.SelfTest();
         var now=DateTimeOffset.UtcNow;
         var labels=new List<VisualLabel>
         {
