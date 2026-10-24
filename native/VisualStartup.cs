@@ -9,16 +9,34 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels);
 internal sealed record VisualDecision(string State,Rectangle? Click=null,bool MoveOnly=false);
 
+internal static class WorldFooterPolicy
+{
+    internal static IReadOnlyList<VisualLabel> Read(IReadOnlyList<VisualLabel> labels,Size imageSize)
+    {
+        var switches=labels.Where(l=>Regex.IsMatch(l.Text.Trim(),@"^Click\s*(?:to\s*)?switch$",RegexOptions.IgnoreCase)&&
+            l.Bounds.Left<imageSize.Width/2&&l.Bounds.Top>imageSize.Height-85).ToArray();
+        if(switches.Length!=1)return Array.Empty<VisualLabel>();
+        var marker=switches[0];
+        var numbers=labels.Where(l=>Regex.IsMatch(l.Text.Trim(),@"^[3-8]\d{2}$")&&
+            int.Parse(l.Text.Trim())<=800&&l.Bounds.Bottom<=marker.Bounds.Top+3&&
+            marker.Bounds.Top-l.Bounds.Bottom<30&&l.Bounds.Left<marker.Bounds.Right&&l.Bounds.Right>marker.Bounds.Left).ToArray();
+        return numbers.Length==1?new[]{new VisualLabel("World "+numbers[0].Text.Trim(),numbers[0].Bounds)}:
+            Array.Empty<VisualLabel>();
+    }
+}
+
 // Only known startup screens are actionable. OCR content is never logged.
 internal static class VisualStartupPolicy
 {
-    private static readonly Regex World=new(@"^World\s+(\d{3})$",RegexOptions.IgnoreCase);
+    // The native footer may put the world and "Click to switch" on one OCR
+    // line, and the pixel font's lowercase l is often read as I/1/i.
+    private static readonly Regex World=new(@"^W[o0]r[lI1i]d\s*([3-8]\d{2})(?:\s+Click to switch)?$",RegexOptions.IgnoreCase);
     internal static VisualDecision Decide(IReadOnlyList<VisualLabel> labels,int? preferredWorld,
         bool selectedWorldPreviouslyObserved=false)
     {
@@ -39,8 +57,14 @@ internal static class VisualStartupPolicy
         {
             var gridTarget=Unique(l=>l.Kind==VisualLabelKind.WorldCell&&l.Text==preferredWorld.Value.ToString());
             if(gridTarget is not null)return new("SELECT_F2P_WORLD",gridTarget.Bounds);
-            if(normalized.Any(l=>l.Kind==VisualLabelKind.WorldCell))
+            var worldIds=normalized.Where(l=>l.Kind==VisualLabelKind.WorldCell).Select(l=>int.Parse(l.Text)).ToArray();
+            if(worldIds.Length>0)
+            {
+                string direction=preferredWorld>worldIds.Max()?"NEXT":preferredWorld<worldIds.Min()?"PREVIOUS":"";
+                var arrow=Unique(l=>l.Kind==VisualLabelKind.WorldNavigation&&l.Text==direction);
+                if(arrow is not null)return new($"WORLD_PAGE_{direction}_{worldIds.Min()}_{worldIds.Max()}",arrow.Bounds);
                 return new("TARGET_WORLD_NOT_UNAMBIGUOUSLY_VISIBLE");
+            }
             var headers=normalized.Where(l=>l.Text.Equals("World",StringComparison.OrdinalIgnoreCase)).ToArray();
             var target=Unique(l=>l.Text==preferredWorld.Value.ToString()&&headers.Any(h=>
                 l.Bounds.Top>h.Bounds.Bottom&&Math.Abs(l.Bounds.Left-h.Bounds.Left)<Math.Max(30,h.Bounds.Width)));
@@ -50,7 +74,11 @@ internal static class VisualStartupPolicy
         bool welcome=Has("Welcome to Old School RuneScape");
         if(welcome)
         {
-            var world=Unique(l=>World.IsMatch(l.Text));
+            var worlds=normalized.Where(l=>World.IsMatch(l.Text))
+                .GroupBy(l=>World.Match(l.Text).Groups[1].Value).ToArray();
+            // A line and its word-level OCR can describe the same footer.
+            // Different world numbers remain ambiguous and never authorize input.
+            var world=worlds.Length==1?worlds[0].OrderBy(l=>l.Bounds.Width).First():null;
             if(world is null)return new("WORLD_LABEL_NOT_RECOGNIZED");
             int selected=int.Parse(World.Match(world.Text).Groups[1].Value);
             if(selected!=preferredWorld)return new("OPEN_WORLD_SELECTION",world.Bounds);
@@ -71,12 +99,15 @@ internal sealed class VisualStartup:IDisposable
     private readonly OcrEngine? ocr;
     private DateTimeOffset lastAction=DateTimeOffset.MinValue;
     private string lastState="";
+    private static string footerDiagnostic="not_read";
     private int repeatedActions;
+    private int pageActions;
     private string previousAction="";
     private int? observedSelectedWorld;
     private IntPtr observedWindow;
     private readonly BackgroundWindowCapture backgroundCapture=new();
     internal string CaptureState=>backgroundCapture.State;
+    internal string CaptureGeometry=>backgroundCapture.Geometry;
     internal readonly OfficialLiveRenderObserver RenderObserver;
     internal readonly GameObservationTracker Game=new();
     internal bool Paused {get;set;}
@@ -99,7 +130,8 @@ internal sealed class VisualStartup:IDisposable
         if(Paused){SetState("PAUSED");return;}
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
-        if(observedWindow!=target){observedWindow=target;observedSelectedWorld=null;Game.Reset();}
+        if(observedWindow!=target)
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();previousAction="";repeatedActions=0;pageActions=0;}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromSeconds(4))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -117,12 +149,13 @@ internal sealed class VisualStartup:IDisposable
             var frame=new VisualFrame(target,new Rectangle(origin.X,origin.Y,client.Right,client.Bottom),
                 DateTimeOffset.UtcNow,Array.Empty<VisualLabel>());
             await Dispatch(frame,new("LAUNCH_SELECTED_CHARACTER",new Rectangle(
-                (int)bounds.X-origin.X,(int)bounds.Y-origin.Y,(int)bounds.Width,(int)bounds.Height)),owner,ct);
+                (int)bounds.X-origin.X,(int)bounds.Y-origin.Y,(int)bounds.Width,(int)bounds.Height)),GetAncestor(target,2),ct);
             return;
         }
         if(ocr is null){SetState("OCR_LANGUAGE_UNAVAILABLE");return;}
         var observed=await Capture(target,owner,ct);
-        if(observed is null){SetState("CAPTURE_"+backgroundCapture.State);return;}
+        if(observed is null)
+        {SetState("CAPTURE_"+backgroundCapture.State);return;}
         Game.Observe(GameScreenReader.Read(observed),DateTimeOffset.UtcNow);
         if(ObserveOnly){SetState("OBSERVATION_ONLY_"+Game.LastObservation?.Stage);return;}
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
@@ -151,7 +184,8 @@ internal sealed class VisualStartup:IDisposable
         var images=root.FindAll(TreeScope.Descendants,
             new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Image));
         if(!images.Cast<AutomationElement>().Any(e=>!e.Current.IsOffscreen&&
-            e.Current.Name.Contains("Old School RuneScape",StringComparison.OrdinalIgnoreCase)))return null;
+            (e.Current.Name.Contains("Old School RuneScape",StringComparison.OrdinalIgnoreCase)||
+             e.Current.HelpText.Contains("Old School RuneScape",StringComparison.OrdinalIgnoreCase))))return null;
         var buttons=root.FindAll(TreeScope.Descendants,new AndCondition(
             new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Button),
             new OrCondition(new PropertyCondition(AutomationElement.NameProperty,"Spielen"),
@@ -201,8 +235,41 @@ internal sealed class VisualStartup:IDisposable
             .Select(w=>new VisualLabel(w.Text,Map(w.BoundingRect),Regex.IsMatch(w.Text,@"^\d+$")?
                 VisualLabelKind.Number:VisualLabelKind.Text)));
         labels=labels.Distinct().ToList();
-        labels.AddRange(WorldGridReader.Classify(labels));
+        // A separate enlarged footer pass avoids the tiny native bitmap font
+        // being merged with copyright text by full-frame OCR.
+        if(labels.Any(l=>l.Text.Contains("Welcome to Old School RuneScape",StringComparison.OrdinalIgnoreCase)))
+            labels.AddRange(await ReadWorldFooter(bitmap,engine));
+        var focusedWorlds=await WorldGridOcr.Read(bitmap,engine,labels);
+        labels.AddRange(focusedWorlds.Count>0?focusedWorlds:WorldGridReader.Classify(labels));
+        labels.AddRange(WorldPageReader.Read(bitmap,labels));
         labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
+        return labels;
+    }
+    private static async Task<IReadOnlyList<VisualLabel>> ReadWorldFooter(Bitmap bitmap,OcrEngine engine)
+    {
+        var crop=new Rectangle(0,Math.Max(0,bitmap.Height-100),bitmap.Width/2,Math.Min(100,bitmap.Height));
+        using var enlarged=new Bitmap(crop.Width*4,crop.Height*4);
+        using(var g=Graphics.FromImage(enlarged))
+        {
+            g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode=System.Drawing.Drawing2D.PixelOffsetMode.Half;
+            g.DrawImage(bitmap,new Rectangle(Point.Empty,enlarged.Size),crop,GraphicsUnit.Pixel);
+        }
+        var result=await RecognizeRaw(enlarged,engine);
+        var labels=new List<VisualLabel>();
+        var mapped=new List<VisualLabel>();
+        foreach(var line in result.Lines)
+        {
+            var bounds=line.Words.Select(w=>new Rectangle(crop.X+(int)(w.BoundingRect.X/4),
+                crop.Y+(int)(w.BoundingRect.Y/4),(int)Math.Ceiling(w.BoundingRect.Width/4),
+                (int)Math.Ceiling(w.BoundingRect.Height/4))).Aggregate(Rectangle.Union);
+            mapped.Add(new(line.Text,bounds));
+            string joined=string.Join("",line.Words.Select(w=>w.Text));
+            var match=Regex.Match(joined,@"^W[o0]r[lI1i|]d([3-8]\d{2})(?:Clicktoswitch)?$",RegexOptions.IgnoreCase);
+            if(match.Success)labels.Add(new("World "+match.Groups[1].Value,bounds));
+        }
+        labels.AddRange(WorldFooterPolicy.Read(mapped,bitmap.Size));
+        footerDiagnostic=$"world_candidates={labels.Count} switch_marker="+mapped.Any(l=>l.Text.Contains("switch",StringComparison.OrdinalIgnoreCase));
         return labels;
     }
     internal static async Task<OcrResult> RecognizeRaw(Bitmap bitmap,OcrEngine engine)
@@ -240,6 +307,35 @@ internal sealed class VisualStartup:IDisposable
             var decision=VisualStartupPolicy.Decide(labels,417);
             if(decision.State!="PLAY_SELECTED_CHARACTER")
                 throw new InvalidOperationException("OCR-to-policy fixture failed: "+decision.State);
+            using var native=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(native))
+            using(var font=new Font("Segoe UI",10))
+            {
+                g.Clear(Color.Black);
+                // Regression: OCR dropped the literal World but retained the
+                // three digits and the smaller second line on the real client.
+                g.DrawString("397",font,Brushes.White,180,550);
+                g.DrawString("Click switch",font,Brushes.White,150,568);
+            }
+            var footer=await ReadWorldFooter(native,engine);
+            if(!footer.Any(l=>l.Text=="World 397"))
+                throw new InvalidOperationException("Native footer OCR regression");
+            using var worldGrid=new Bitmap(1000,600);
+            var gridLabels=new List<VisualLabel>{new("Select a world",new(20,5,100,15))};
+            using(var g=Graphics.FromImage(worldGrid))
+            using(var font=new Font("Segoe UI",9))
+            {
+                g.Clear(Color.Black);
+                for(int col=0;col<5;col++)for(int row=0;row<25;row++)
+                {
+                    string id=(301+col*25+row).ToString();
+                    var bounds=new Rectangle(80+col*93,40+row*19,26,13);
+                    g.DrawString(id,font,Brushes.White,bounds.Location);
+                    if(id!="399")gridLabels.Add(new(id,bounds,VisualLabelKind.Number));
+                }
+            }
+            var worldRead=await WorldGridOcr.Read(worldGrid,engine,gridLabels);
+            if(!worldRead.Any(l=>l.Text=="399"))throw new InvalidOperationException("Focused world-grid OCR regression");
             Console.WriteLine("OCR FIXTURE PASS: Windows OCR -> known-screen policy, no capture or input");
             return 0;
         }
@@ -247,12 +343,15 @@ internal sealed class VisualStartup:IDisposable
     }
     private async Task Dispatch(VisualFrame frame,VisualDecision decision,IntPtr owner,CancellationToken ct)
     {
+        if(decision.State.StartsWith("WORLD_PAGE_")&&pageActions>=12)
+        {SetState("WORLD_PAGE_LIMIT_REACHED");return;}
         if(previousAction==decision.State&&repeatedActions>=3)
         {SetState("ACTION_RETRY_LIMIT_"+decision.State);return;}
         var box=decision.Click!.Value;
         if(box.Width<2||box.Height<2||!new Rectangle(Point.Empty,frame.ScreenBounds.Size).Contains(box))return;
-        if(Paused||ObserveOnly||GetAncestor(frame.Window,2)!=owner||
-            DateTimeOffset.UtcNow-frame.CapturedUtc>TimeSpan.FromSeconds(2))return;
+        if(Paused||ObserveOnly||GetAncestor(frame.Window,2)!=owner)return;
+        if(DateTimeOffset.UtcNow-frame.CapturedUtc>TimeSpan.FromSeconds(2))
+        {SetState("INPUT_FRAME_TOO_OLD");return;}
         var currentOrigin=new POINT();
         if(!GetClientRect(frame.Window,out var currentRect)||!ClientToScreen(frame.Window,ref currentOrigin)||
            new Rectangle(currentOrigin.X,currentOrigin.Y,currentRect.Right,currentRect.Bottom)!=frame.ScreenBounds)return;
@@ -262,6 +361,7 @@ internal sealed class VisualStartup:IDisposable
         if(!queued)
         {Paused=true;SetState("INPUT_DISPATCH_FAILED");return;}
         repeatedActions=previousAction==decision.State?repeatedActions+1:1;
+        if(decision.State.StartsWith("WORLD_PAGE_"))pageActions++;
         previousAction=decision.State;
         lastAction=DateTimeOffset.UtcNow;
         SetState(decision.State+"_REQUESTED");
@@ -275,6 +375,10 @@ internal sealed class VisualStartup:IDisposable
         if(state==lastState)return;
         lastState=state;
         log.Add(Severity.INFO,"VISUAL_STARTUP","STATE",$"state={state}");
+        if(state.StartsWith("CAPTURE_")&&state.Contains("CLIPPED"))
+            log.Add(Severity.WARN,"VISUAL_STARTUP","CAPTURE_GEOMETRY",backgroundCapture.Geometry);
+        if(state=="WORLD_LABEL_NOT_RECOGNIZED")log.Add(Severity.WARN,"VISUAL_STARTUP","WORLD_FOOTER_OCR",
+            footerDiagnostic);
     }
     public void Dispose()=>backgroundCapture.Dispose();
     [StructLayout(LayoutKind.Sequential)]private struct POINT{internal int X,Y;}
@@ -296,14 +400,39 @@ internal static class VisualStartupTests
         Require(VisualStartupPolicy.Decide(welcome,null).Click is null,"wait for measured world");
         Require(VisualStartupPolicy.Decide(welcome,417).State=="PLAY_SELECTED_CHARACTER","matching world before play");
         Require(VisualStartupPolicy.Decide(welcome,397).State=="OPEN_WORLD_SELECTION","wrong world is corrected before login");
+        foreach(string footer in new[]{"World397","WorId 397","Wor1d 397 Click to switch","World 397 Click to switch"})
+            Require(VisualStartupPolicy.Decide(new[]{welcome[0],welcome[1],Label(footer,250)},397).State=="PLAY_SELECTED_CHARACTER",
+                "native combined footer and pixel-font l: "+footer);
+        Require(VisualStartupPolicy.Decide(welcome.Append(Label("World 417",260)).ToArray(),417).State=="PLAY_SELECTED_CHARACTER",
+            "duplicate line/word world evidence");
+        Require(VisualStartupPolicy.Decide(welcome.Append(Label("World 397",260)).ToArray(),417).Click is null,
+            "conflicting footer worlds block input");
         Require(VisualStartupPolicy.Decide(welcome.Append(Label("password",100)).ToArray(),417).Click is null,
             "credentials screens are manual");
         Require(VisualStartupPolicy.Decide(new[]{Label("Play Now",20)},417).Click is null,"isolated text is not a welcome screen");
         var grid=new[]{Label("Select a world",10),Label("World",40),Label("397",80)};
+        var nativeFooter=new[]{new VisualLabel("397",new Rectangle(180,550,25,12)),
+            new VisualLabel("Click switch",new Rectangle(155,565,75,10))};
+        Require(WorldFooterPolicy.Read(nativeFooter,new(1000,600)).Single().Text=="World 397","dropped World word in native pixel OCR");
+        Require(WorldFooterPolicy.Read(nativeFooter.Append(new VisualLabel("399",new Rectangle(181,536,25,12))).ToArray(),new(1000,600)).Count==0,
+            "two nearby numbers cannot identify current world");
+        Require(WorldFooterPolicy.Read(new[]{nativeFooter[0]},new(1000,600)).Count==0,"bare number never identifies footer");
         Require(VisualStartupPolicy.Decide(grid,397).State=="SELECT_F2P_WORLD","select visible measured world");
         Require(VisualStartupPolicy.Decide(grid.Append(Label("397",120)).ToArray(),397).Click is null,
             "ambiguous player counts cannot become a world click");
         Require(VisualStartupPolicy.Decide(grid,417).Click is null,"offscreen world never gets guessed");
+        var paged=new[]{Label("Select a world",10),new VisualLabel("397",new(180,40,25,12),VisualLabelKind.WorldCell),
+            new VisualLabel("472",new(730,500,25,12),VisualLabelKind.WorldCell),
+            new VisualLabel("NEXT",new(835,282,48,42),VisualLabelKind.WorldNavigation)};
+        Require(VisualStartupPolicy.Decide(paged,553).State=="WORLD_PAGE_NEXT_397_472","next page for a higher measured world");
+        Require(VisualStartupPolicy.Decide(paged,417).Click is null,"missing OCR inside current range does not page blindly");
+        Require(VisualStartupPolicy.Decide(paged.Take(3).ToArray(),553).Click is null,"no page click without image evidence");
+        using var arrowImage=new Bitmap(1000,600);
+        var pageLabels=Enumerable.Range(301,25).Select(n=>new VisualLabel(n.ToString(),new(180,40,25,12),VisualLabelKind.WorldCell))
+            .Append(Label("Select a world",5)).ToArray();
+        Require(WorldPageReader.Read(arrowImage,pageLabels).Count==0,"blank arrow area blocks pagination");
+        using(var g=Graphics.FromImage(arrowImage))g.FillRectangle(Brushes.Gray,835,290,48,20);
+        Require(WorldPageReader.Read(arrowImage,pageLabels).Count==0,"flat grey patch is not an arrow");
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),Label("CLICK HERE TO PLAY",80)},417,true).State=="ENTER_GAME",
             "welcome transition");
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),Label("CLICK HERE TO PLAY",80)},417).Click is null,

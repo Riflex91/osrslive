@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.4.0";
+    internal const string Version="1.5.0";
     private const int Capacity=10000;
     private readonly object sync=new();
     private readonly List<LogEvent> entries=new();
@@ -71,7 +71,7 @@ internal sealed class Diagnostics
         sb.AppendLine("Modus: "+Mode);
         sb.AppendLine($"Events: {counters.Events} | Warnungen: {counters.Warnings} | Fehler: {counters.Errors}");
         sb.AppendLine($"Puffer-Überlauf: {counters.Dropped} | RAM: {proc.WorkingSet64/1024/1024} MiB");
-        sb.AppendLine("Offizielle Spielansicht: Jagex Launcher / osclient.exe als Originalfenster eingebettet.");
+        sb.AppendLine("Offizieller Launcher bleibt im Originalfenster; osclient.exe wird in die Spielansicht eingebettet.");
         sb.AppendLine("Serverseitige Authentifizierung: NICHT verifiziert. Skilldaten benötigen wiederholte, konsistente OCR-Lesungen.");
         sb.AppendLine("Hintergrundaufnahme: Windows Graphics Capture; Eingaben: gezielte Fensternachrichten; F8 pausiert.");
         sb.AppendLine("Hintergrundtransport im Testfenster geprüft; Annahme durch osclient.exe noch nicht bestätigt. Minimiert pausiert die Aufnahme.");

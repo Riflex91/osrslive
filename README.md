@@ -1,11 +1,11 @@
-# OSRS Play 1.4.0 – feste Spielansicht und Hintergrundtransport
+# OSRS Play 1.5.0 – Login-Erkennung und F2P-Fortschrittsplanung
 
 Windows-Oberfläche für den unveränderten offiziellen Jagex Launcher und `osclient.exe`.
 Die Anwendung ist **noch kein vollständig selbstständig spielender Maxing-Agent**.
 
 ## Fenster und Log
 
-Die Spielansicht bleibt fest **1000 × 600 Pixel** groß. Das Hauptfenster lässt sich verschieben und minimieren, aber nicht frei skalieren oder maximieren. **Log ausblenden / einblenden** klappt unterhalb des Spiels einen 180-Pixel-Bereich zu oder auf; nur die Gesamthöhe des Fensters ändert sich. Das Spiel bleibt dabei unverändert groß und vollständig sichtbar.
+Die Spielansicht bleibt fest **1000 × 600 Pixel** groß. Das Hauptfenster lässt sich verschieben und minimieren, aber nicht frei skalieren oder maximieren. **Log ausblenden / einblenden** klappt unterhalb des Spiels einen 180-Pixel-Bereich zu oder auf; nur die Gesamthöhe des Fensters ändert sich. Auf kleinen Desktops kann das Gesamtfenster über den sichtbaren Bereich hinausragen.
 
 **Log kopieren** und **Strg+Umschalt+C** kopieren denselben bereinigten Bericht mit bis zu 10.000 gepufferten Ereignissen, auch bei verborgenem Log. Die Vorschau zeigt die letzten 420 Ereignisse. Überläufe werden genannt. Bei belegter Zwischenablage gibt es begrenzte Wiederholungen und eine sichtbare Wiederholungsmöglichkeit.
 
@@ -17,7 +17,7 @@ Windows Graphics Capture liest die Compositor-Oberfläche des eigenen Hostfenste
 
 Eingaben werden als Mausnachrichten an das ermittelte Fenster bzw. dessen Render-Child geschickt. Der Transport verwendet weder `SendInput` noch `SetCursorPos` noch `SetForegroundWindow`. Ein Versand gilt nicht als Erfolg; erforderlich ist eine passende neue Beobachtung. Die feste Geometrie wird vor dem Versand geprüft, F8/Pause/Abbruch werden berücksichtigt, und ein gedrückter Knopf wird auch bei Abbruch losgelassen.
 
-**Der Hintergrundtransport wurde an einem verdeckten Testfenster einschließlich beobachteter Bildänderung geprüft. Die tatsächliche Annahme der Nachrichten durch `osclient.exe` ist noch nicht bestätigt.** Eine Anwendung kann Fensternachrichten ignorieren oder eigene Fokusregeln anwenden. Es gibt keinen stillen Rückfall auf den globalen Mauszeiger.
+**Der Hintergrundtransport wurde an einem verdeckten Testfenster einschließlich beobachteter Bildänderung geprüft. Am echten Client öffnete eine Fensternachricht die Weltenauswahl. Der vollständige automatische Login und die Annahme aller Aktionen bei verdecktem Client sind noch nicht bestätigt.** Eine Anwendung kann Fensternachrichten ignorieren oder eigene Fokusregeln anwenden. Es gibt keinen stillen Rückfall auf den globalen Mauszeiger.
 
 Hintergrund bedeutet hier: hinter anderen Anwendungen oder verdeckt. **Minimiert pausiert die Bildaufnahme**, weil Windows dort keine frischen Renderframes garantiert. Veraltete Frames geben keine Aktionen frei. Statische Oberflächen erhalten bei Bedarf eine neue Capture-Sitzung. Capture-Aufräumarbeiten blockieren nicht den UI-Thread.
 
@@ -25,7 +25,9 @@ Hintergrund bedeutet hier: hinter anderen Anwendungen oder verdeckt. **Minimiert
 
 Im Jagex Launcher den gewünschten Charakter und **Offizieller Client** wählen und gegebenenfalls anmelden/MFA abschließen. Vorhandene Auswahl wird übernommen; die App gibt keine Zugangsdaten ein.
 
-Der Startablauf erkennt den Launcher-Play-Button über Accessibility und bekannte Spielbildschirme mit lokaler Windows OCR. Die F2P-Prüfung lädt die offizielle Weltliste und vergleicht erreichbare uneingeschränkte freie Welten anhand mehrerer TCP-Proben. Ein erkannter passender Welteintrag wird gewählt und danach erneut beobachtet. Nicht sichtbare Weltseiten werden noch nicht automatisch durchgeblättert. Das native mehrspaltige Raster wird über aufsteigende Weltnummern-Spalten erkannt, nicht allein über die Position der Überschrift „World“.
+Der Launcher bleibt ab 1.5.0 im Originalfenster, damit dessen größere Mindestbreite den Play-Button nicht abschneidet. Nur der Spielclient wird eingebettet.
+
+Der Startablauf erkennt den Launcher-Play-Button über Accessibility und bekannte Spielbildschirme mit lokaler Windows OCR. Die F2P-Prüfung lädt die offizielle Weltliste und vergleicht erreichbare uneingeschränkte freie Welten anhand mehrerer TCP-Proben. Ein erkannter passender Welteintrag wird gewählt und danach erneut beobachtet. Ein zusätzlicher vergrößerter Footer-Durchlauf erkennt die Welt auch dann, wenn OCR das Wort „World“ verliert, aber Weltzahl und Switch-Hinweis eindeutig zuordnen kann. Zahlenausschnitte verbessern das Lesen des Weltrasters. Für die feste native Geometrie ist eine begrenzte, bildgestützte Seitennavigation implementiert; sie benötigt noch den echten Ende-zu-Ende-Test.
 
 In der Spielansicht erkennt der Leser Chat-Bedienleiste und Charakter-Prompt. Die Skilltafel wird über „Total level“ lokalisiert, und die winzigen Basislevel werden in vergrößerten Ausschnitten gelesen. Es müssen alle 24 Werte zur Gesamtstufe passen und in zwei zeitlich getrennten Beobachtungen übereinstimmen. Wiederverwendung eines Frames reicht nicht. Fremde Charakterdaten, unvollständige oder veraltete Lesungen geben keinen Zielvorschlag frei. Sichtbare OCR ist kein serverseitiger Authentifizierungsnachweis.
 
@@ -35,7 +37,11 @@ Falls die Skilltafel geschlossen ist, kann die Automatik bei der festen Standard
 
 Der Zielplaner schlägt den nächsten zugänglichen F2P-Skill unter 99 vor; erst bei allen 24 bekannten Skills auf 99 wechselt er zu Vermögen/Ausrüstung. Mitglieder-Skills werden auf F2P nicht als abgeschlossen behandelt. Bestätigte visuelle Levelstände werden unter `%LOCALAPPDATA%\OSRSPlay\progress` gespeichert. Der Dateischlüssel ist ein Hash des Charakternamens; der Klarname wird dort nicht gespeichert. Ein gespeicherter Stand ersetzt keine frische Sitzungsbeobachtung.
 
-Die Beschaffungspolicy bevorzugt vorhandene Gegenstände, vergleicht ausführbares Kaufen/Herstellen anhand übergebener frischer Gesamtkosten und erhält eine Münzreserve. **Navigation, Skill-Aktivitäten, Inventar-/Bankerkennung, Preis-/Rezept-/Upgrade-Katalog und tatsächliche Bank-/Handels-/Herstellungsroutinen fehlen.** Die Anwendung trainiert, kauft und fertigt deshalb noch nicht selbstständig.
+Der neue F2P-Katalog enthält Basismethoden für alle 15 freien Skills und jeden trainierbaren Levelbereich, neun Quest-XP-Gelegenheiten, Werkzeug-Upgrades und erste Rezeptketten. Aus bestätigten Skills entsteht ein Aktivitätsvorschlag mit offen ausgewiesenen Voraussetzungen. Unbekannte Inventar-/Bank-/Questdaten werden nicht als erfüllt behandelt.
+
+Die Beschaffungspolicy bevorzugt vorhandene Gegenstände, bindet Angebote an Produkt und fehlende Menge, prüft die vollständige Charge, frische Gesamtkosten und die Münzreserve. Kontomodus, GE-Slots, neue F2P-Verkaufsbeschränkungen sowie fehlende Ausführer werden berücksichtigt. **Navigation, Skill-Aktivitäten, Inventar-/Bank-/Questerkennung, Live-Preise und tatsächliche Bank-/Handels-/Herstellungsroutinen fehlen weiterhin.** Die Anwendung trainiert, kauft und fertigt deshalb noch nicht selbstständig.
+
+[Gründliche F2P-Auswertung, konkrete Loginbefunde, Quellen und Implementierungsgrenzen](docs/F2P-PROGRESSION-UND-LOGIN-2026-10-24.md).
 
 ## Diagnose und Entwicklung
 

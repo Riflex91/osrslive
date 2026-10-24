@@ -162,15 +162,16 @@ internal sealed class GameObservationTracker
     private DateTimeOffset candidateTimestamp;
     internal VisibleGameObservation? LastObservation {get;private set;}
     internal AccountGoalDecision? Plan {get;private set;}
+    internal F2PActivityPlan? Activity {get;private set;}
     internal VisibleGameObservation? Confirmed {get;private set;}
-    internal void Reset(){candidate=null;repetitions=0;candidateTimestamp=default;LastObservation=null;Confirmed=null;Plan=null;}
+    internal void Reset(){candidate=null;repetitions=0;candidateTimestamp=default;LastObservation=null;Confirmed=null;Plan=null;Activity=null;}
     internal void Observe(VisibleGameObservation observation,DateTimeOffset now)
     {
         LastObservation=observation;
         if(observation.Stage!=VisibleGameStage.InGame||observation.Character is null||
             observation.Skills is null||now-observation.ObservedUtc>TimeSpan.FromSeconds(3)||
             observation.ObservedUtc>now)
-        {candidate=null;repetitions=0;Plan=null;Confirmed=null;return;}
+        {candidate=null;repetitions=0;Plan=null;Confirmed=null;Activity=null;return;}
         string signature=observation.Character.ToUpperInvariant()+":"+
             string.Join(",",observation.Skills.OrderBy(s=>s.Name,StringComparer.Ordinal).Select(s=>s.Name+"="+s.Level));
         if(signature==candidate)
@@ -180,15 +181,18 @@ internal sealed class GameObservationTracker
         }
         else{candidate=signature;repetitions=1;}
         candidateTimestamp=observation.ObservedUtc;
-        if(repetitions<2){Plan=null;Confirmed=null;return;}
+        if(repetitions<2){Plan=null;Confirmed=null;Activity=null;return;}
         Confirmed=observation;
         // The user requested F2P. This is a proposal, never a world/auth assertion.
         Plan=AccountGoalPlanner.Decide(observation.Skills,false,true);
+        // Inventory, bank, quest and GE observers are not implemented yet.
+        // Unknown facts stay unknown; the plan exposes exactly what is missing.
+        Activity=F2PProgression.Plan(Plan.Skill,observation.Skills,new(),now);
     }
     internal void Expire(DateTimeOffset now)
     {
         if(LastObservation is not null&&now-LastObservation.ObservedUtc>TimeSpan.FromSeconds(6))
-        {Plan=null;Confirmed=null;candidate=null;repetitions=0;}
+        {Plan=null;Confirmed=null;Activity=null;candidate=null;repetitions=0;}
     }
 }
 

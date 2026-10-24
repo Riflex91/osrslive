@@ -29,6 +29,7 @@ internal sealed class BackgroundWindowCapture:IDisposable
     internal string State {get;private set;}="WAITING_FOR_FRAME";
     internal int FrameEvents,FrameCopies;
     internal string LastFrameError="none";
+    internal string Geometry {get;private set;}="unknown";
 
     internal CapturedWindowFrame? ReadClient(IntPtr window)
     {
@@ -65,6 +66,7 @@ internal sealed class BackgroundWindowCapture:IDisposable
                 matched=native;
             }
             var crop=new Rectangle(origin.X-matched.Left,origin.Y-matched.Top,client.Right,client.Bottom);
+            Geometry=$"frame={latest.Width}x{latest.Height} client={client.Right}x{client.Bottom} crop={crop.X},{crop.Y},{crop.Width},{crop.Height}";
             if(!new Rectangle(Point.Empty,latest.Size).Contains(crop)||crop.Width<1||crop.Height<1)
             {State="CLIENT_CLIPPED";return null;}
             State="BACKGROUND_FRAME_READY";

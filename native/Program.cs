@@ -210,6 +210,8 @@ internal sealed class MainWindow : Form
         var plan=visualStartup.Game.Plan;
         string goal=plan is null?"state=WAITING_FOR_CONSISTENT_VISIBLE_SKILLS":
             $"phase={plan.Phase} skill={plan.Skill??"none"} reason={plan.Reason} "+
+            $"activity={visualStartup.Game.Activity?.Method?.Id??"none"} prerequisites={visualStartup.Game.Activity?.State??"none"} "+
+            $"recommended_tool={visualStartup.Game.Activity?.RecommendedTool?.Item.Replace(' ','_')??"none"} "+
             "scope=F2P_PROPOSAL executor=NOT_IMPLEMENTED";
         if(goal!=lastGoalDiagnostic)
         {lastGoalDiagnostic=goal;log.Add(Severity.INFO,"ACCOUNT_GOAL","DECISION",goal);}
@@ -474,10 +476,11 @@ internal sealed class MainWindow : Form
                 var chosen=launchers.OrderBy(c=>c.ProcessId).First();
                 if(windowHost.Attach(chosen))
                 {
-                    emptyHint.Visible=false;
+                    emptyHint.Visible=true;
+                    emptyHint.Text="Jagex Launcher wird im Originalfenster gesteuert.\n\nWarte auf den offiziellen Spielclient …";
                     log.Add(Severity.INFO,"OFFICIAL_CLIENT","LOGIN_WINDOW_READY",
                         $"pid={chosen.ProcessId} login=JAGEX "+
-                        "automatic_window_host=true");
+                        "automatic_window_tracking=true embedding=false original_size_preserved=true");
                     changePending=true;
                 }
             }
@@ -546,7 +549,7 @@ internal sealed class MainWindow : Form
     {
         string window=windowHost.Attached?
             windowHost.CurrentKind==OfficialWindowKind.Game?"OSRS-SPIEL SICHTBAR":
-            "JAGEX-ANMELDUNG SICHTBAR":
+            "JAGEX LAUNCHER IM ORIGINALFENSTER":
             "WARTE AUF OFFIZIELLEN CLIENT";
         string render=windowHost.Attached &&
             windowHost.CurrentKind==OfficialWindowKind.Game?
@@ -668,6 +671,7 @@ internal static class SelfTest
             PublicOsrsHiscoresTests.Run();
             VisualStartupTests.Run();
             AccountGoalPlannerTests.Run();
+            F2PProgressionTests.Run();
             GameScreenReaderTests.Run();
             const string manifest="version=0.9.1\n"+
                 "exeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.9.1/OSRS-Play.exe\n"+

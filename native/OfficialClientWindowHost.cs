@@ -38,7 +38,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
     // The game remains our child even though it disappears from EnumWindows
     // top-level enumeration. Don't infer that it has exited from that list.
     internal bool Attached => attached!=IntPtr.Zero && IsWindow(attached) &&
-        GetParent(attached)==panel.Handle;
+        (CurrentKind==OfficialWindowKind.Launcher?GetParent(attached)==originalParent:GetParent(attached)==panel.Handle);
     internal OfficialClientWindowHost(Control panel,Diagnostics diagnostics)
     {
         this.panel=panel;
@@ -118,13 +118,25 @@ internal sealed class OfficialClientWindowHost : IDisposable
         Detach();
         var hwnd=window.Handle;
         originalParent=GetParent(hwnd);
+        if(window.Kind==OfficialWindowKind.Launcher)
+        {
+            // Chromium's launcher has its own minimum width. Squeezing it into
+            // the game viewport clips its right-hand Play button and UIA marks
+            // that button offscreen. Track it at its original size instead.
+            attached=hwnd;CurrentKind=window.Kind;
+            diagnostics.SetMode("OFFIZIELLER JAGEX LAUNCHER (ORIGINALFENSTER)");
+            diagnostics.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_TRACKED",
+                "embedding=false original_geometry_preserved=true login_owner=JAGEX_LAUNCHER");
+            return true;
+        }
         originalStyle=GetWindowLongPtr(hwnd,GWL_STYLE).ToInt64();
         originalExStyle=GetWindowLongPtr(hwnd,GWL_EXSTYLE).ToInt64();
         GetWindowRect(hwnd,out var bounds);
         originalBounds=Rectangle.FromLTRB(bounds.Left,bounds.Top,bounds.Right,bounds.Bottom);
-        long embedded=(originalStyle&~(WS_POPUP|WS_CAPTION|WS_THICKFRAME))|WS_CHILD;
+        long embedded=(originalStyle&~(WS_POPUP|WS_CAPTION|WS_THICKFRAME|0x01000000L|0x20000000L))|WS_CHILD;
         try
         {
+            ShowWindow(hwnd,4); // normal layout without activating the foreign window
             SetWindowLongPtr(hwnd,GWL_STYLE,new IntPtr(embedded));
             // Strip independent taskbar-window hint WHILE EMBEDDED only.
             // Restore original flags when the official client is detached.
@@ -136,7 +148,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
             CurrentKind=window.Kind;
             lastHostedSize=Size.Empty;
             Resize();
-            ShowWindow(hwnd,5);
+            ShowWindow(hwnd,4);
             if(window.Kind==OfficialWindowKind.Game &&
                formerLauncher!=IntPtr.Zero && IsWindow(formerLauncher))
                 ShowWindow(formerLauncher,6); // Hide original launcher after "Play Now"
@@ -167,18 +179,23 @@ internal sealed class OfficialClientWindowHost : IDisposable
     }
     internal void Resize()
     {
-        if(!Attached)return;
+        if(!Attached||CurrentKind!=OfficialWindowKind.Game)return;
         var desired=new Size(Math.Max(1,panel.ClientSize.Width),
             Math.Max(1,panel.ClientSize.Height));
         // Avoid unnecessarily resizing a GPU-accelerated foreign HWND each
         // UI refresh. Only act when the hosting panel actually changes size.
-        if(desired==lastHostedSize)return;
+        if(desired==lastHostedSize&&GetClientRect(attached,out var current)&&
+            current.Right==desired.Width&&current.Bottom==desired.Height)return;
         var frame=new RECT{Left=0,Top=0,Right=desired.Width,Bottom=desired.Height};
         AdjustWindowRectEx(ref frame,(uint)GetWindowLongPtr(attached,GWL_STYLE).ToInt64(),false,
             (uint)GetWindowLongPtr(attached,GWL_EXSTYLE).ToInt64());
         if(SetWindowPos(attached,IntPtr.Zero,frame.Left,frame.Top,frame.Right-frame.Left,frame.Bottom-frame.Top,
             SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED))
+        {
+            if(GetClientRect(attached,out var actual))diagnostics.Add(Severity.DEBUG,"OFFICIAL_CLIENT","HOST_GEOMETRY",
+                $"desired={desired.Width}x{desired.Height} client={actual.Right}x{actual.Bottom}");
             lastHostedSize=desired;
+        }
     }
     private void RestoreBounds(IntPtr hwnd)
     {
@@ -194,7 +211,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
         var previousKind=CurrentKind;
         CurrentKind=null;
         lastHostedSize=Size.Empty;
-        if(IsWindow(hwnd))
+        if(IsWindow(hwnd)&&previousKind==OfficialWindowKind.Game)
         {
             SetParent(hwnd,originalParent);
             SetWindowLongPtr(hwnd,GWL_STYLE,new IntPtr(originalStyle));
@@ -226,6 +243,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
     [StructLayout(LayoutKind.Sequential)] private struct RECT {internal int Left,Top,Right,Bottom;}
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
     [DllImport("user32.dll")] private static extern bool AdjustWindowRectEx(ref RECT rect,uint style,bool menu,uint extendedStyle);
+    [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd,out RECT rect);
 }
 
 internal static class OfficialClientWindowHostTests
