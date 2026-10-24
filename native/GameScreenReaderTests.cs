@@ -17,6 +17,24 @@ internal static class GameScreenReaderTests
         labels.AddRange(GameScreenReader.GridSkills.Select(name=>new VisualLabel(
             name+"="+(name=="Hitpoints"?10:1),new Rectangle(900,400,180,240),VisualLabelKind.SkillValue)));
         VisualFrame Frame(List<VisualLabel> source)=>new(new IntPtr(1),new Rectangle(0,0,1140,700),now,source);
+        Require(GameScreenReader.ParseCharacterPrompt("Example_123: *")=="Example_123"&&
+            GameScreenReader.ParseCharacterPrompt("Example_123; +")=="Example_123"&&
+            GameScreenReader.ParseCharacterPrompt("Example_123: ")=="Example_123"&&
+            GameScreenReader.ParseCharacterPrompt("Example_123: fishing") is null&&
+            GameScreenReader.ParseCharacterPrompt("AnameThatsTooLong: *") is null,
+            "pixel-cursor OCR accepts only a complete, bounded empty chat input");
+        var focusedLabels=labels.Append(new VisualLabel("Example: *",
+            new Rectangle(10,645,100,10),VisualLabelKind.CharacterPrompt))
+            .Append(new VisualLabel("Wrong: *",new Rectangle(10,648,100,10))).ToList();
+        Require(GameScreenReader.Read(Frame(focusedLabels)).Character=="Example",
+            "scoped prompt outranks conflicting broad OCR without trusting unrelated chat");
+        var gridLayout=new SkillGridLayout(new Rectangle(752,304,186,240),131,1);
+        var original=SkillGridOcr.LevelCrop(gridLayout,1,false);
+        var rescue=SkillGridOcr.LevelCrop(gridLayout,1,true);
+        Require(rescue.Left<original.Left&&rescue.Right>original.Right&&
+            rescue.Top==original.Top&&rescue.Bottom==original.Bottom&&
+            rescue.Contains(new Point(849,320)),
+            "missing-hitpoints retry broadens horizontal OCR crop but retains base-level row");
         var observation=GameScreenReader.Read(Frame(labels));
         Require(observation.Stage==VisibleGameStage.InGame&&observation.Character=="Example"&&observation.Skills?.Count==24,
             "HUD, prompt, 24 base skills, total checksum and chat isolation");
