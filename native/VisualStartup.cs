@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal, CharacterPrompt, CharacterSummary, CharacterSummaryName }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal, CharacterPrompt, CharacterSummary, CharacterSummaryName, ContextMenuLine }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -151,6 +151,8 @@ internal sealed class VisualStartup:IDisposable
     private string previousAction="";
     private string lastWorldGridDiagnostic="";
     private string lastSkillOcrDiagnostic="";
+    private Point? contextMenuAnchor;
+    private string lastContextDiagnostic="";
     private int? pendingWorldChoice;
     private Rectangle? pendingWorldChoiceBounds;
     private DateTimeOffset pendingWorldChoiceFrame;
@@ -196,7 +198,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";lastSkillOcrDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";lastSkillOcrDiagnostic="";contextMenuAnchor=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -244,7 +246,7 @@ internal sealed class VisualStartup:IDisposable
             if(recoveryDecision.ResetSubject)
             {
                 Game.Reset();Gameplay.Reset();observedSelectedWorld=null;previousAction="";repeatedActions=0;
-                ResetWorldChoice();ResetPlayButton();ResetEnter();skillsHoverCleared=false;summaryIdentity.Reset();
+                ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();
             }
             if(lastRecoveryState!=recoveryDecision.State)
             {lastRecoveryState=recoveryDecision.State;log.Add(Severity.INFO,"RECONNECT","STATE","state="+lastRecoveryState+" pending_transactions_preserved=true");}
@@ -389,12 +391,29 @@ internal sealed class VisualStartup:IDisposable
         if(!ClientToScreen(target,ref point))return null;
         var bounds=new Rectangle(point.X,point.Y,captured.Image.Width,captured.Image.Height);
         var labels=await Recognize(captured.Image,ocr!,
-            postPlay: recovery.Recovering||previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME");
+            postPlay: recovery.Recovering||previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME",
+            contextAnchor:contextMenuAnchor);
         ct.ThrowIfCancellationRequested();
+        if(contextMenuAnchor is Point anchor)
+        {
+            var menu=ExecutionUi.Menu(labels);
+            var focused=labels.Count(l=>l.Kind==VisualLabelKind.ContextMenuLine);
+            var headers=labels.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
+            var cancels=labels.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
+            // Counts and positions only; item names and menu contents remain private.
+            string diagnostic=$"anchor_x={anchor.X} anchor_y={anchor.Y} focused_lines={focused} "+
+                $"header_candidates={headers} cancel_candidates={cancels} parsed={menu is not null} "+
+                $"entries={menu?.Entries.Count??0}";
+            if(diagnostic!=lastContextDiagnostic)
+            {
+                lastContextDiagnostic=diagnostic;
+                log.Add(Severity.INFO,"GAMEPLAY","CONTEXT_MENU_DIAGNOSTIC",diagnostic);
+            }
+        }
         return new(target,bounds,captured.CapturedUtc,labels,ExecutionVision.Read(captured.Image,labels));
     }
     private static async Task<IReadOnlyList<VisualLabel>> Recognize(
-        Bitmap bitmap,OcrEngine engine,bool postPlay=false)
+        Bitmap bitmap,OcrEngine engine,bool postPlay=false,Point? contextAnchor=null)
     {
         using var enlarged=bitmap.Width*2<=OcrEngine.MaxImageDimension&&bitmap.Height*2<=OcrEngine.MaxImageDimension?
             new Bitmap(bitmap.Width*2,bitmap.Height*2):null;
@@ -467,6 +486,8 @@ internal sealed class VisualStartup:IDisposable
         if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel hud)labels.Add(hud);
         if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
             labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
+        if(contextAnchor is Point anchor&&ExecutionUi.Menu(labels) is null)
+            labels.AddRange(await ContextMenuOcr.Read(bitmap,engine,anchor));
         return labels;
     }
     private static async Task<IReadOnlyList<VisualLabel>> ReadWorldFooter(Bitmap bitmap,OcrEngine engine)
@@ -655,6 +676,11 @@ internal sealed class VisualStartup:IDisposable
         };
         if(!queued)
         {SetState("INPUT_DISPATCH_FAILED_REOBSERVING");return false;}
+        // Context OCR only runs after a successful directed right-click, and
+        // the anchor is invalidated by the very next non-right-click input.
+        // Captured frames are always independent of the dispatched input.
+        contextMenuAnchor=kind==GameInputKind.RightClick?point:null;
+        lastContextDiagnostic="";
         // A click on the Skills tab leaves the game mouse over the tab.
         // Clear the hover BEFORE the next capture; never click in the world.
         bool afterOpen=SkillsHoverPolicy.AfterOpen(decision.State,kind,frame.ScreenBounds.Size);
