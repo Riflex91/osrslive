@@ -486,7 +486,10 @@ internal sealed class VisualStartup:IDisposable
         if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel hud)labels.Add(hud);
         if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
             labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
-        if(contextAnchor is Point anchor&&ExecutionUi.Menu(labels) is null)
+        if(contextAnchor is Point anchor)
+            // Even a global "Choose Option / Cancel" pair can miss an item's
+            // Examine entry. The focused view must get its own chance to read
+            // all visible lines instead of treating the slot as empty.
             labels.AddRange(await ContextMenuOcr.Read(bitmap,engine,anchor));
         return labels;
     }
