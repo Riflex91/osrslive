@@ -16,6 +16,20 @@ internal enum OfficialWindowKind { Launcher, Game }
 internal sealed record OfficialClientWindow(
     int ProcessId,IntPtr Handle,string Title,OfficialWindowKind Kind);
 
+internal enum LauncherCloseResult { NotReady, NotTracked, AlreadyClosed, WindowMismatch, Requested, Failed }
+
+// Visual agreement on the player and all 24 skills is required. This is not
+// proof of server-side authentication.
+internal static class LauncherLifecyclePolicy
+{
+    internal static bool MayClose(OfficialWindowKind? kind,VisibleGameObservation? confirmed,DateTimeOffset now)=>
+        kind==OfficialWindowKind.Game&&confirmed is not null&&
+        confirmed.Stage==VisibleGameStage.InGame&&
+        !string.IsNullOrWhiteSpace(confirmed.Character)&&confirmed.Skills?.Count==24&&
+        confirmed.RecognizedSkills==24&&confirmed.TotalLevel==confirmed.Skills.Sum(s=>s.Level)&&
+        confirmed.ObservedUtc<=now&&now-confirmed.ObservedUtc<=TimeSpan.FromSeconds(3);
+}
+
 internal sealed class OfficialClientWindowHost : IDisposable
 {
     private const int GWL_STYLE=-16,GWL_EXSTYLE=-20;
@@ -25,7 +39,8 @@ internal sealed class OfficialClientWindowHost : IDisposable
     private const uint SWP_NOZORDER=0x0004,SWP_NOACTIVATE=0x0010,SWP_FRAMECHANGED=0x0020;
     private readonly Control panel;
     private readonly Diagnostics diagnostics;
-    private IntPtr attached,originalParent;
+    private IntPtr attached,originalParent,trackedLauncherHandle;
+    private int trackedLauncherPid;
     private long originalStyle,originalExStyle;
     private Rectangle originalBounds;
     private Size lastHostedSize=Size.Empty;
@@ -56,6 +71,49 @@ internal sealed class OfficialClientWindowHost : IDisposable
         FindRunningWindows(OfficialWindowKind.Game);
     internal static IReadOnlyList<OfficialClientWindow> FindRunningLauncherWindows()=>
         FindRunningWindows(OfficialWindowKind.Launcher);
+    internal static bool LauncherProcessRunning()
+    {
+        bool found=false;
+        foreach(string name in new[]{"JagexLauncher","Jagex Launcher"})
+            foreach(var process in Process.GetProcessesByName(name))
+            {
+                using(process){found=true;}
+            }
+        return found;
+    }
+    private static bool IsMatchingLauncherWindow(IntPtr window,int pid)
+    {
+        if(!IsWindow(window)||pid<=0)return false;
+        GetWindowThreadProcessId(window,out uint actual);
+        if(actual!=(uint)pid)return false;
+        try
+        {
+            using var process=Process.GetProcessById(pid);
+            return SupportedLauncherProcessName(process.ProcessName);
+        }
+        catch(ArgumentException){return false;}
+        catch(System.ComponentModel.Win32Exception){return false;}
+        catch(InvalidOperationException){return false;}
+    }
+    // ShowWindowAsync avoids blocking on another process's window thread.
+    internal static bool TryRestoreLauncher(OfficialClientWindow launcher)
+    {
+        if(launcher.Kind!=OfficialWindowKind.Launcher||
+            !IsMatchingLauncherWindow(launcher.Handle,launcher.ProcessId))return false;
+        return !IsIconic(launcher.Handle)||ShowWindowAsync(launcher.Handle,9); // SW_RESTORE
+    }
+    internal bool TrackedLauncherWindowOpen=>
+        IsMatchingLauncherWindow(trackedLauncherHandle,trackedLauncherPid);
+    internal LauncherCloseResult RequestTrackedLauncherClose()
+    {
+        if(!Attached||CurrentKind!=OfficialWindowKind.Game)return LauncherCloseResult.NotReady;
+        if(trackedLauncherHandle==IntPtr.Zero)return LauncherCloseResult.NotTracked;
+        if(!IsWindow(trackedLauncherHandle))return LauncherCloseResult.AlreadyClosed;
+        if(!IsMatchingLauncherWindow(trackedLauncherHandle,trackedLauncherPid))return LauncherCloseResult.WindowMismatch;
+        // WM_CLOSE only. Never terminate the launcher process or its game child.
+        return PostMessage(trackedLauncherHandle,0x0010,IntPtr.Zero,IntPtr.Zero)?
+            LauncherCloseResult.Requested:LauncherCloseResult.Failed;
+    }
     private static IReadOnlyList<OfficialClientWindow> FindRunningWindows(
         OfficialWindowKind kind)
     {
@@ -114,7 +172,6 @@ internal sealed class OfficialClientWindowHost : IDisposable
             FindRunningClients().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId):
             FindRunningLauncherWindows().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId);
         if(window.Handle==IntPtr.Zero||!IsWindow(window.Handle)||!valid)return false;
-        var formerLauncher=CurrentKind==OfficialWindowKind.Launcher?attached:IntPtr.Zero;
         Detach();
         var hwnd=window.Handle;
         originalParent=GetParent(hwnd);
@@ -124,6 +181,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
             // the game viewport clips its right-hand Play button and UIA marks
             // that button offscreen. Track it at its original size instead.
             attached=hwnd;CurrentKind=window.Kind;
+            trackedLauncherHandle=hwnd;trackedLauncherPid=window.ProcessId;
             diagnostics.SetMode("OFFIZIELLER JAGEX LAUNCHER (ORIGINALFENSTER)");
             diagnostics.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_TRACKED",
                 "embedding=false original_geometry_preserved=true login_owner=JAGEX_LAUNCHER");
@@ -149,9 +207,8 @@ internal sealed class OfficialClientWindowHost : IDisposable
             lastHostedSize=Size.Empty;
             Resize();
             ShowWindow(hwnd,4);
-            if(window.Kind==OfficialWindowKind.Game &&
-               formerLauncher!=IntPtr.Zero && IsWindow(formerLauncher))
-                ShowWindow(formerLauncher,6); // Hide original launcher after "Play Now"
+            // Keep the launcher at its original size and visibility until the
+            // character and complete skill panel are independently observed.
             diagnostics.SetMode(window.Kind==OfficialWindowKind.Game?
                 "OFFIZIELLES OSRS (SPIELFENSTER EINGEBETTET)":
                 "OFFIZIELLER JAGEX LAUNCHER (ANMELDUNG EINGEBETTET)");
@@ -230,6 +287,9 @@ internal sealed class OfficialClientWindowHost : IDisposable
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc callback,IntPtr state);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr hwnd,int command);
+    [DllImport("user32.dll",EntryPoint="PostMessageW",SetLastError=true)] private static extern bool PostMessage(IntPtr hwnd,uint msg,IntPtr wParam,IntPtr lParam);
     [DllImport("user32.dll",SetLastError=true)] private static extern IntPtr GetWindow(IntPtr hwnd,uint command);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd,StringBuilder text,int capacity);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr hwnd);
@@ -261,6 +321,17 @@ internal static class OfficialClientWindowHostTests
            OfficialClientWindowHost.SupportedLauncherProcessName("osclient"))
             throw new Exception("Only official launcher and game processes may be hosted.");
         OfficialWindowTransitionTests.Run();
+        var now=DateTimeOffset.UtcNow;
+        var skills=Enumerable.Range(0,24).Select(i=>new PublicOsrsSkill("skill"+i,2,0,0)).ToArray();
+        var confirmed=new VisibleGameObservation(VisibleGameStage.InGame,"Test Player",skills,48,24,now);
+        if(!LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed,now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Launcher,confirmed,now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{Stage=VisibleGameStage.Welcome},now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{Skills=null},now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{Character=null},now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{TotalLevel=49},now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{ObservedUtc=now.AddSeconds(-5)},now))
+            throw new Exception("Launcher must remain open until fresh, complete, consistent in-game OCR.");
         Console.WriteLine("OFFICIAL WINDOW HOST PASS: process filter, exclusive embedded HWND, original styles restored");
     }
 }
