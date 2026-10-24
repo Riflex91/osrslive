@@ -480,7 +480,7 @@ internal sealed class VisualStartup:IDisposable
             $"range={(cells.Length>0?cells.Min().ToString()+"-"+cells.Max():"unknown")} "+
             $"target={desiredWorld?.ToString()??"none"} "+
             $"target_cells={cells.Count(n=>n==desiredWorld)} next_arrows={next} previous_arrows={previous} "+
-            $"decision={decision.State}";
+            $"native_ocr={WorldGridOcr.NativeDiagnostic.Replace(' ','_')} decision={decision.State}";
         if(summary==lastWorldGridDiagnostic)return;
         lastWorldGridDiagnostic=summary;
         log.Add(Severity.INFO,"VISUAL_STARTUP","WORLD_GRID_DIAGNOSTIC",summary);
