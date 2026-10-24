@@ -96,6 +96,9 @@ internal sealed class OfficialClientWindowHost : IDisposable
         catch(InvalidOperationException){return false;}
     }
     // ShowWindowAsync avoids blocking on another process's window thread.
+    internal static bool LauncherIsMinimized(OfficialClientWindow launcher)=>
+        launcher.Kind==OfficialWindowKind.Launcher&&
+        IsMatchingLauncherWindow(launcher.Handle,launcher.ProcessId)&&IsIconic(launcher.Handle);
     internal static bool TryRestoreLauncher(OfficialClientWindow launcher)
     {
         if(launcher.Kind!=OfficialWindowKind.Launcher||
