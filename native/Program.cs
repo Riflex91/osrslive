@@ -810,6 +810,7 @@ internal static class SelfTest
             PublicOsrsHiscoresTests.Run();
             VisualStartupTests.Run();
             WelcomePlayButtonReader.SelfTest();
+            PostPlayScreenReader.SelfTest();
             NativeWorldDigitReader.SelfTest();
             AccountGoalPlannerTests.Run();
             F2PProgressionTests.Run();
