@@ -75,10 +75,12 @@ internal static class WorldGridOcr
     internal static readonly int[] NativeColumns={176,269,362,455,548,641,734};
     internal static Rectangle NativeNumberRegion(int column,int row)
     {
-        if(column is <0 or >=7||row is <0 or >=25)
+        if(column is <0 or >=7||row is <0 or >=24)
             throw new ArgumentOutOfRangeException();
-        int y=34+(int)Math.Round(row*18.25,MidpointRounding.AwayFromZero);
-        return new Rectangle(NativeColumns[column]+4,y+3,24,12);
+        // Real native rows are exactly 19px apart (not 18.25). The former
+        // fractional pitch drifted 17px by the last row and ruined OCR crops.
+        int y=34+row*19;
+        return new Rectangle(NativeColumns[column]+3,y+4,25,12);
     }
 
     internal static bool HasNativeTable(Bitmap bitmap,IReadOnlyList<VisualLabel> labels)
@@ -94,7 +96,7 @@ internal static class WorldGridOcr
         for(int c=0;c<7;c++)
         {
             int validRows=0;
-            for(int row=0;row<25;row++)
+            for(int row=0;row<24;row++)
             {
                 var box=NativeNumberRegion(c,row);
                 int black=0,light=0;
@@ -120,7 +122,19 @@ internal static class WorldGridOcr
             NativeDiagnostic="native_table_geometry_not_verified";
             return Array.Empty<VisualLabel>();
         }
-        const int tw=144,th=64,columns=7,rows=25;
+        var header=labels.Where(l=>l.Text.Contains("Select a world",
+            StringComparison.OrdinalIgnoreCase)).Take(1).ToArray();
+        var glyphNumbers=NativeWorldDigitReader.Read(bitmap);
+        var glyphCells=WorldGridReader.Classify(header.Concat(glyphNumbers).ToArray());
+        if(glyphCells.Count>=6)
+        {
+            NativeDiagnostic=$"raster_verified=true glyph_numbers={glyphNumbers.Count} "+
+                $"glyph_validated_world_cells={glyphCells.Count} method=PIXEL_FONT";
+            return glyphCells;
+        }
+        // Conservative fallback for images with a different digit raster:
+        // retain Windows OCR, never infer world IDs from row indices.
+        const int tw=144,th=64,columns=7,rows=24;
         using var sheet=new Bitmap(columns*tw,rows*th);
         using(var canvas=Graphics.FromImage(sheet))
         {
@@ -163,13 +177,12 @@ internal static class WorldGridOcr
         // Ignore unrelated three-digit player counts from the broad OCR.
         // This pass only trusts its own isolated number cells plus the observed
         // native world-selection title.
-        var headers=labels.Where(l=>l.Text.Contains("Select a world",
-            StringComparison.OrdinalIgnoreCase)).Take(1);
-        var verified=WorldGridReader.Classify(headers.Concat(numbers).ToArray());
+        var verified=WorldGridReader.Classify(header.Concat(numbers).ToArray());
         // A lone "399" is NOT enough. Require a validated ascending column,
         // the same guard used by ordinary world-grid recognition.
-        NativeDiagnostic=$"raster_verified=true isolated_numbers={numbers.Length} "+
-            $"verified_world_cells={verified.Count}";
+        NativeDiagnostic=$"raster_verified=true glyph_numbers={glyphNumbers.Count} "+
+            $"glyph_validated_world_cells={glyphCells.Count} isolated_numbers={numbers.Length} "+
+            $"verified_world_cells={verified.Count} method=WINDOWS_OCR";
         return verified.Count>=6?verified:Array.Empty<VisualLabel>();
     }
 
