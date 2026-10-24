@@ -1,4 +1,6 @@
-# OSRS Play 1.6.5 – visuelle Trainings-, Bank- und Handelsroutinen
+# OSRS Play 1.6.6 – visuelle Trainings-, Bank- und Handelsroutinen
+
+**Neu in 1.6.6:** Der auf den bestätigten Play-Now-Klick folgende Bildschirm wird durch zusätzliche, eng begrenzte OCR auf erkennbare Welcome-/Connecting-/Click-here-to-play-Texte geprüft. Bei unklarer Anzeige werden ausschließlich datensparsame Statusinformationen protokolliert und keine angenommenen UI-Ziele geklickt. Ein klar erkannter zweiter Spieleinstieg verlangt erneut zwei unabhängige Bestätigungen und die vorherige Weltkontrolle. [Erklärung und Live-Testgrenzen](docs/POST-PLAY-OBSERVATION-1.6.6.md).
 
 **Neu in 1.6.5:** Der auf Welt 553 gezeigte „Play Now“-Button kann bei fehlender Vollbild-OCR zusätzlich durch Bildkontur, weißen Buttontext und getrennten gelben Untertext erkannt werden. Es bleiben die Prüfung der empfohlenen Welt, zwei voneinander unabhängige Bildschirmbeobachtungen und F8-Pause erforderlich. [Details zur Play-Button-Erkennung](docs/PLAY-NOW-VISUAL-FALLBACK-1.6.5.md).
 
