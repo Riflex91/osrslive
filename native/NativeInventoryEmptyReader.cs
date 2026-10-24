@@ -16,8 +16,8 @@ internal static class NativeInventoryEmptyReader
             var ordered=v.Order().ToArray();
             return ordered[ordered.Length/2];
         }
-        return Color.FromArgb(Mid(values.Select(c=>c.R)),Mid(values.Select(c=>c.G)),
-            Mid(values.Select(c=>c.B)));
+        return Color.FromArgb(Mid(values.Select(c=>(int)c.R)),Mid(values.Select(c=>(int)c.G)),
+            Mid(values.Select(c=>(int)c.B)));
     }
 
     private static bool Similar(Color a,Color b,int threshold)=>
