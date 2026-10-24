@@ -44,8 +44,8 @@ internal static class ExecutionRoutinesTests
         await new GameInteractions(tabDriver).OpenInventory(CancellationToken.None);
         Require(tabDriver.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==1&&
             tabDriver.Inputs.Where(i=>i.Kind==GameInputKind.LeftClick)
-                .All(i=>i.Bounds.Top>=565&&i.Bounds.Top<595),
-            "Inventory opening must click the confirmed bottom-row icon, not Equipment");
+                .All(i=>i.Bounds.Top>=265&&i.Bounds.Top<302),
+            "Inventory opening must click upper-row backpack, never bottom-row Logout");
         var wrongTooltip=new InventoryTabDriver(misplacedTooltip:true);
         bool noWrongClick=false;
         try {await new GameInteractions(wrongTooltip).OpenInventory(CancellationToken.None);}
