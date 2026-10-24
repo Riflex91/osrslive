@@ -434,6 +434,14 @@ internal sealed class VisualStartup:IDisposable
             labels.Add(focused);
         }
         labels=labels.Distinct().ToList();
+        // The native chat line uses P12 raster glyphs; a complete username
+        // plus ':' plus its blue input cursor is independently observable
+        // without relying on unreliable enlarged Windows OCR.
+        if(NativeCharacterFontReader.Read(bitmap) is VisualLabel nativePrompt)
+        {
+            labels.RemoveAll(l=>l.Kind==VisualLabelKind.CharacterPrompt);
+            labels.Add(nativePrompt);
+        }
         labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
         labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
         if(NativeGameHudReader.Skills(bitmap) is VisualLabel skillsButton)labels.Add(skillsButton);
