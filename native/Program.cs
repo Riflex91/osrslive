@@ -284,7 +284,13 @@ internal sealed class MainWindow : Form
         layout.SuspendLayout();
         eventLog.Visible=logRequestedVisible;
         layout.RowStyles[3].Height=logRequestedVisible?DockedWindowLayout.LogHeight:0;
-        ClientSize=DockedWindowLayout.ClientSize(logRequestedVisible);
+        // Explicit outer bounds keep Windows' screen-dependent tracking limit from
+        // silently shrinking the dock on a small desktop (including CI runners).
+        var desiredClient=DockedWindowLayout.ClientSize(logRequestedVisible);
+        MinimumSize=Size.Empty;MaximumSize=Size.Empty;
+        var fixedOuter=SizeFromClientSize(desiredClient);
+        MaximumSize=fixedOuter;MinimumSize=fixedOuter;
+        ClientSize=desiredClient;
         toggleLog.Text=logRequestedVisible?"Log ausblenden":"Log einblenden";
         layout.ResumeLayout(true);
         if(IsHandleCreated&&Bottom>Screen.FromControl(this).WorkingArea.Bottom)
@@ -318,7 +324,7 @@ internal sealed class MainWindow : Form
         if(eventLog.Top<gameSurface.Bottom)throw new Exception("Log overlaps the game viewport");
         SetLogVisible(false);PerformLayout();layout.PerformLayout();
         if(gameSurface.ClientSize!=DockedWindowLayout.GameSize||ClientSize.Height!=shownHeight-DockedWindowLayout.LogHeight)
-            throw new Exception("Hiding log resized the game instead of removing the dock");
+            throw new Exception($"Hiding log resized the game instead of removing the dock: viewport={gameSurface.ClientSize} client={ClientSize} shownHeight={shownHeight}");
         SetLogVisible(true);PerformLayout();layout.PerformLayout();
         if(gameSurface.ClientSize!=DockedWindowLayout.GameSize||ClientSize.Height!=shownHeight)
             throw new Exception("Showing log did not restore fixed dock geometry");
