@@ -191,11 +191,11 @@ internal sealed class VisualStartup:IDisposable
             preferredWorld is not null&&observedSelectedWorld==preferredWorld);
         DiagnoseWorldGrid(observed,preferredWorld,decision);
         if(decision.State=="PLAY_SELECTED_CHARACTER")observedSelectedWorld=preferredWorld;
-        if(decision.State=="SELECT_F2P_WORLD"&&decision.Click is Rectangle target)
+        if(decision.State=="SELECT_F2P_WORLD"&&decision.Click is Rectangle worldCell)
         {
             // A target from one OCR capture is not enough to click a server.
             // Confirm the SAME world and cell on a distinct newer frame.
-            if(!WorldCellConfirmed(preferredWorld,target,observed.CapturedUtc))
+            if(!WorldCellConfirmed(preferredWorld,worldCell,observed.CapturedUtc))
             {
                 SetState("AWAITING_INDEPENDENT_WORLD_CELL_CONFIRMATION");
                 return;
