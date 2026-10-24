@@ -226,6 +226,9 @@ internal static class NativeCharacterFontReader
                 foreach(var state in states)
                 foreach(char c in NameChars)
                 {
+                    // Reject leading/repeated spaces, which otherwise allow
+                    // an empty raster prefix to shift a valid name silently.
+                    if(c==' '&&(state.Name.Length==0||state.Name[^1]==' '))continue;
                     var glyph=ByChar[c];
                     if(Score(white,state.Pen,baseline,glyph)!=0)continue;
                     int nextPen=state.Pen+glyph.Advance;
