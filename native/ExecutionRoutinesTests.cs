@@ -40,6 +40,19 @@ internal static class ExecutionRoutinesTests
             L("Deposit-All Logs",400,50)};
         ContextMenuOcr.SelfTest();
         InventoryTabPolicy.SelfTest();
+        NativeInventoryEmptyReader.SelfTest();
+        var emptyDriver=new InventoryGridDriver(true);
+        var fullyEmpty=await new GameInteractions(emptyDriver).Inventory(CancellationToken.None);
+        Require(fullyEmpty.EmptySlots==28&&fullyEmpty.Items.Count==0&&
+            emptyDriver.Inputs.Any(i=>i.Kind==GameInputKind.LeftClick)&&
+            emptyDriver.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "a visually and independently verified empty inventory skips all right clicks");
+        var unknownDriver=new InventoryGridDriver(false);
+        bool unknownBlocked=false;
+        try{await new GameInteractions(unknownDriver).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){unknownBlocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
+        Require(unknownBlocked&&unknownDriver.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1,
+            "missing context menu alone must NEVER mark an unverified slot empty");
         var tabDriver=new InventoryTabDriver();
         await new GameInteractions(tabDriver).OpenInventory(CancellationToken.None);
         Require(tabDriver.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==1&&
@@ -127,6 +140,33 @@ internal static class ExecutionRoutinesTests
         finally{if(Directory.Exists(directory))Directory.Delete(directory,true);}
         Console.WriteLine("EXECUTION ROUTINES PASS: context selection, independent yields, recipe deltas, supply gates, GE invoices/receipts/partial fills, durable deduplication");
     }
+    private sealed class InventoryGridDriver:IVisualGameDriver
+    {
+        internal readonly List<GameInput> Inputs=new();
+        public VisualFrame Current {get;private set;}
+        internal InventoryGridDriver(bool pixelVerifiedEmpty)
+        {
+            var slots=Enumerable.Range(0,28).Select(i=>
+                new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,pixelVerifiedEmpty)).ToArray();
+            Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
+                DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),
+                new ExecutionPixels(slots,1));
+        }
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)
+        {
+            Current=Current with {CapturedUtc=Current.CapturedUtc.AddSeconds(1)};
+            return Task.FromResult(Current);
+        }
+        public Task InputAsync(GameInput input,CancellationToken ct)
+        {
+            Inputs.Add(input);
+            if(input.Kind==GameInputKind.Hover)
+                Current=Current with{Labels=new[]{new VisualLabel("Inventory",new Rectangle(12,8,80,12))}};
+            Current=Current with{CapturedUtc=Current.CapturedUtc.AddSeconds(1)};
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class InventoryTabDriver:IVisualGameDriver
     {
         private readonly bool misplacedTooltip;
