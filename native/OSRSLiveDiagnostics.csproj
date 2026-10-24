@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.6.7</Version>
+    <Version>1.7.0</Version>
     <AssemblyName>OSRS-Play</AssemblyName>
     <ApplicationTitle>OSRS Play</ApplicationTitle>
     <PublishSingleFile>true</PublishSingleFile>
@@ -20,5 +20,9 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4.Windows.Slim" Version="4.13.0.20260627" />
+    <EmbeddedResource Include="Licenses/*.txt" />
   </ItemGroup>
 </Project>

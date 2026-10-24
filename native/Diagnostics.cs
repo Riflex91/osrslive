@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.6.7";
+    internal const string Version="1.7.0";
     private const int Capacity=10000;
     private readonly object sync=new();
     private readonly List<LogEvent> entries=new();
@@ -76,7 +76,8 @@ internal sealed class Diagnostics
         sb.AppendLine("Hintergrundaufnahme: Windows Graphics Capture; Eingaben: gezielte Fensternachrichten; F8 pausiert.");
         sb.AppendLine("Hintergrundtransport im Testfenster geprüft; Annahme durch osclient.exe noch nicht bestätigt. Minimiert pausiert die Aufnahme.");
         sb.AppendLine("Spielansicht: fest 1000x600 Pixel; Log dockt darunter an und verkleinert das Spiel nicht.");
-        sb.AppendLine("Routinen: visuelles Sammeln, Produktion, Bank und GE implementiert; Live-Ende-zu-Ende noch nicht verifiziert. Kampf und globale Navigation fehlen.");
+        sb.AppendLine("Routinen: Sammeln, Produktion, Bank, GE, Hühnerkampf und automatische F2P-Kartennavigation implementiert; Live-Ende-zu-Ende noch nicht verifiziert.");
+        sb.AppendLine("Navigation: automatische Minimap-Erkennung/Bildzuordnung, öffentliche Kollisionskarte, A*, Treppen und begrenzte Tür-/Torbehandlung; keine aufgezeichneten Benutzerwege.");
         sb.AppendLine("Keine Offline-Sitzungen, Sandbox-Welt oder künstliche Game-Ticks.");
         sb.AppendLine("--- LOG ---");
         foreach(var ev in Snapshot())

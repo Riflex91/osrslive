@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -144,6 +144,7 @@ internal sealed class VisualStartup:IDisposable
     private readonly BackgroundWindowCapture backgroundCapture=new();
     internal string CaptureState=>backgroundCapture.State;
     internal string CaptureGeometry=>backgroundCapture.Geometry;
+    internal string CaptureAlpha=>backgroundCapture.AlphaState;
     internal readonly OfficialLiveRenderObserver RenderObserver;
     internal readonly GameObservationTracker Game=new();
     internal readonly GameplayCoordinator Gameplay;
@@ -201,7 +202,11 @@ internal sealed class VisualStartup:IDisposable
         DiagnosePostPlay(observed);
         if(!ObserveOnly&&Game.Confirmed is not null)
             VisuallyConfirmedSession?.Invoke();
-        if(ObserveOnly){SetState("OBSERVATION_ONLY_"+Game.LastObservation?.Stage);return;}
+        if(ObserveOnly)
+        {
+            SetState("OBSERVATION_ONLY_"+Game.LastObservation?.Stage);
+            await Gameplay.InspectNavigation(observed,ct);return;
+        }
         if(Game.LastObservation?.Stage==VisibleGameStage.Connecting)
         {
             SetState("POST_PLAY_CONNECTING");
@@ -364,7 +369,10 @@ internal sealed class VisualStartup:IDisposable
         var focusedWorlds=await WorldGridOcr.Read(bitmap,engine,labels);
         labels.AddRange(focusedWorlds.Count>0?focusedWorlds:WorldGridReader.Classify(labels));
         labels.AddRange(WorldPageReader.Read(bitmap,labels));
+        labels.AddRange(await GameplayHudOcr.Read(bitmap,engine));
+        labels=labels.Distinct().ToList();
         labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
+        labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
         if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
             labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
         return labels;

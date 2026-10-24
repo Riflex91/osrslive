@@ -9,12 +9,12 @@ internal sealed class AgentJobDialog:Form
         Text="Agentenaufgabe";ClientSize=new(520,310);FormBorderStyle=FormBorderStyle.FixedDialog;
         MaximizeBox=false;MinimizeBox=false;StartPosition=FormStartPosition.CenterParent;
         var kinds=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
-        kinds.Items.AddRange(new object[]{"Training","Herstellen","Kaufen","Verkaufen","Bank: ablegen","Bank: abheben"});kinds.SelectedIndex=0;
+        kinds.Items.AddRange(new object[]{"Training","Herstellen","Kaufen","Verkaufen","Bank: ablegen","Bank: abheben","Kampf","Reisen"});kinds.SelectedIndex=0;
         var target=new ComboBox{Dock=DockStyle.Fill};
         var amount=new NumericUpDown{Minimum=1,Maximum=1000,Value=1,Dock=DockStyle.Fill};
         var mode=new CheckBox{Text="Ironman-Konto",AutoSize=true};
         var reserve=new NumericUpDown{Minimum=0,Maximum=1000000,Value=500,Dock=DockStyle.Fill};
-        var detail=new Label{AutoSize=false,Dock=DockStyle.Fill,Text="Die Automatik wählt ohne Einzelauftrag selbst eine versorgte Aktivität. Einzelaufträge benötigen Gegenstände und Ziel in der sichtbaren Spielumgebung."};
+        var detail=new Label{AutoSize=false,Dock=DockStyle.Fill,Text="Die Automatik wählt Aktivitäten und reist selbst zu bekannten F2P-Zielen. Kartendaten werden automatisch geladen. Kampf bestätigt einen XP-Schritt; er zählt keine Kills."};
         var start=new Button{Text="Aufgabe einreihen",AutoSize=true};
         var discard=new Button{Text="Auftrag verwerfen",AutoSize=true};
         var feedback=new Label{Dock=DockStyle.Fill,AutoSize=false};
@@ -30,12 +30,17 @@ internal sealed class AgentJobDialog:Form
         void RefreshTargets()
         {
             amount.Value=1;
-            amount.Maximum=kinds.SelectedIndex is 0 or 1 or 4?1:kinds.SelectedIndex==5?28:1000;
+            amount.Maximum=kinds.SelectedIndex is 0 or 1 or 4 or 6 or 7?1:kinds.SelectedIndex==5?28:1000;
             target.Items.Clear();target.Text="";
             if(kinds.SelectedIndex==0)target.Items.AddRange(ExecutionCatalog.Training.Select(s=>(object)s.Id).ToArray());
             else if(kinds.SelectedIndex==1)target.Items.AddRange(F2PProgression.Recipes.Select(s=>(object)s.Product).ToArray());
+            else if(kinds.SelectedIndex==6)target.Items.AddRange(CombatPolicy.Specs.Select(s=>(object)s.Id).ToArray());
+            else if(kinds.SelectedIndex==7)
+            {
+                target.Items.AddRange(NavigationDestinations.All.Select(s=>(object)s.Id).ToArray());
+            }
             else target.Items.AddRange(new object[]{"iron axe","iron pickaxe","copper ore","tin ore","leather","thread","logs","bronze bar"});
-            target.SelectedIndex=0;
+            if(target.Items.Count>0)target.SelectedIndex=0;
         }
         kinds.SelectedIndexChanged+=(_,_)=>RefreshTargets();RefreshTargets();
         string agentDirectory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","agent");
@@ -68,8 +73,9 @@ internal sealed class AgentJobDialog:Form
                 Directory.CreateDirectory(directory);
                 string path=Path.Combine(directory,"job.json");
                 if(File.Exists(path)){feedback.Text="Eine Aufgabe ist bereits eingereiht; der Log zeigt ihren Status.";return;}
-                string kind=new[]{"train","craft","buy","sell","deposit","withdraw"}[kinds.SelectedIndex];
-                var settings=new AgentSettings(mode.Checked,(long)reserve.Value);
+                string kind=new[]{"train","craft","buy","sell","deposit","withdraw","combat","travel"}[kinds.SelectedIndex];
+                var previous=File.Exists(settingsPath)?JsonSerializer.Deserialize<AgentSettings>(File.ReadAllText(settingsPath))??new AgentSettings():new AgentSettings();
+                var settings=previous with{Ironman=mode.Checked,ReserveCoins=(long)reserve.Value};
                 File.WriteAllText(Path.Combine(directory,"settings.json"),JsonSerializer.Serialize(settings));
                 string temp=path+".tmp";
                 File.WriteAllText(temp,JsonSerializer.Serialize(new AgentJob(Guid.NewGuid().ToString("N"),kind,value,(int)amount.Value)));

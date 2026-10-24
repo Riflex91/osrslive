@@ -17,7 +17,7 @@ internal sealed record InventoryState(IReadOnlyList<InventoryItem> Items,int Emp
     }
     internal InventoryItem? Find(string name)=>Items.FirstOrDefault(i=>i.Name.Equals(name,StringComparison.OrdinalIgnoreCase));
 }
-internal sealed record ExecutionPixels(IReadOnlyList<ObservedSlot> Slots,ulong SceneSignature);
+internal sealed record ExecutionPixels(IReadOnlyList<ObservedSlot> Slots,ulong SceneSignature,NavigationPixels? Navigation=null);
 internal sealed record MenuEntry(string Text,Rectangle Bounds);
 internal sealed record ContextMenu(IReadOnlyList<MenuEntry> Entries)
 {
@@ -85,7 +85,7 @@ internal static class ExecutionUi
 {
     // Native resizable inventory: four columns, seven rows. Use only after
     // observing the Inventory tab and verifying slot context menus.
-    internal static Rectangle InventorySlot(int index)=>new(792+index%4*42,312+index/4*36,32,32);
+    internal static Rectangle InventorySlot(int index)=>new(760+index%4*42,312+index/4*36,32,32);
     internal static ContextMenu? Menu(IReadOnlyList<VisualLabel> labels)
     {
         var headers=labels.Where(l=>l.Kind==VisualLabelKind.Text&&l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase)).ToArray();

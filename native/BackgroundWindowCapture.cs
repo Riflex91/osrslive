@@ -30,6 +30,7 @@ internal sealed class BackgroundWindowCapture:IDisposable
     internal int FrameEvents,FrameCopies;
     internal string LastFrameError="none";
     internal string Geometry {get;private set;}="unknown";
+    internal string AlphaState {get;private set;}="unknown";
 
     internal CapturedWindowFrame? ReadClient(IntPtr window)
     {
@@ -120,9 +121,11 @@ internal sealed class BackgroundWindowCapture:IDisposable
             converted.CopyToBuffer(buffer);
             var bytes=new byte[buffer.Length];
             using(var reader=DataReader.FromBuffer(buffer))reader.ReadBytes(bytes);
-            var bitmap=new Bitmap(converted.PixelWidth,converted.PixelHeight,PixelFormat.Format32bppArgb);
-            var data=bitmap.LockBits(new Rectangle(Point.Empty,bitmap.Size),ImageLockMode.WriteOnly,PixelFormat.Format32bppArgb);
-            try{Marshal.Copy(bytes,0,data.Scan0,bytes.Length);}finally{bitmap.UnlockBits(data);}
+            int opaque=0,zero=0,samples=0;
+            for(int i=3;i<bytes.Length;i+=Math.Max(4,(bytes.Length/256/4)*4))
+            {samples++;if(bytes[i]==255)opaque++;else if(bytes[i]==0)zero++;}
+            AlphaState=$"opaque:{opaque}/zero:{zero}/samples:{samples}";
+            var bitmap=OpaqueBitmap(converted.PixelWidth,converted.PixelHeight,bytes);
             lock(sync)
             {
                 if(currentGeneration!=generation){bitmap.Dispose();return;}
@@ -132,6 +135,18 @@ internal sealed class BackgroundWindowCapture:IDisposable
         }
         catch(Exception ex){if(currentGeneration==generation){LastFrameError=ex.GetType().Name+"_"+ex.HResult.ToString("X");State="FRAME_UNAVAILABLE_"+LastFrameError;}}
         finally{frame?.Dispose();if(entered)Interlocked.Exchange(ref converting,0);}
+    }
+    internal static Bitmap OpaqueBitmap(int width,int height,byte[] bytes)
+    {
+        if(width<=0||height<=0||bytes.Length!=checked(width*height*4))throw new ArgumentException("Invalid BGRA surface size");
+        // Ignore-alpha surfaces have undefined alpha bytes. Feeding them into
+        // an ARGB Bitmap makes GDI/PNG/OCR treat valid RGB text as transparent.
+        // A composited window image is opaque; preserve RGB and define alpha.
+        for(int i=3;i<bytes.Length;i+=4)bytes[i]=255;
+        var bitmap=new Bitmap(width,height,PixelFormat.Format32bppArgb);
+        var locked=bitmap.LockBits(new Rectangle(Point.Empty,bitmap.Size),ImageLockMode.WriteOnly,PixelFormat.Format32bppArgb);
+        try{Marshal.Copy(bytes,0,locked.Scan0,bytes.Length);}finally{bitmap.UnlockBits(locked);}
+        return bitmap;
     }
     private static GraphicsCaptureItem CreateItem(IntPtr window)
     {

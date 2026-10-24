@@ -53,6 +53,11 @@ jobs:
           dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --ocr-self-test
           if ($LASTEXITCODE -eq 2) { Write-Warning 'OCR fixture not run: no Windows OCR language on runner'; exit 0 }
           if ($LASTEXITCODE -ne 0) { throw 'Windows OCR fixture failed' }
+      - name: Verify automatic map localisation and public collision routes
+        shell: pwsh
+        run: |
+          dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --navigation-self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Automatic navigation/reference-data test failed' }
       - name: Verify fixed viewport and docked log
         shell: pwsh
         run: |
@@ -108,7 +113,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "OSRS Play $tag for the official Windows client. Includes bounded visual startup and F2P-world selection, diagnostics, launcher lifecycle management, conservative execution routines, and SHA-256-checked automatic updates at startup or in the idle state. Built and regression-tested by Windows CI. The full login, training, banking and Grand Exchange flows on the official client are not yet end-to-end verified. Combat and global navigation remain unimplemented. See README and docs for details."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "OSRS Play $tag for the official Windows client. Adds bounded chicken combat and automatic visual F2P mainland navigation using public reference maps and collision data, alongside startup, training, banking and GE routines. Routes require no user recording. Built and regression-tested by Windows CI, including rotated/zoomed reference-map fixtures. Full live login, travel, combat and economic flows are not yet end-to-end verified. See README and docs for supported areas and remaining limitations."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
