@@ -4,6 +4,8 @@ namespace OSRSLiveDiagnostics;
 
 internal static class WorldGridOcr
 {
+    // Aggregate OCR counts only. Never retain captured text or game pixels.
+    internal static string NativeDiagnostic {get;private set;}="not_attempted";
     internal static async Task<IReadOnlyList<VisualLabel>> Read(Bitmap bitmap,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {
         // Infer the lattice from already validated ascending world columns.
@@ -113,7 +115,11 @@ internal static class WorldGridOcr
     internal static async Task<IReadOnlyList<VisualLabel>> ReadNativeTable(
         Bitmap bitmap,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {
-        if(!HasNativeTable(bitmap,labels))return Array.Empty<VisualLabel>();
+        if(!HasNativeTable(bitmap,labels))
+        {
+            NativeDiagnostic="native_table_geometry_not_verified";
+            return Array.Empty<VisualLabel>();
+        }
         const int tw=144,th=64,columns=7,rows=25;
         using var sheet=new Bitmap(columns*tw,rows*th);
         using(var canvas=Graphics.FromImage(sheet))
@@ -162,6 +168,8 @@ internal static class WorldGridOcr
         var verified=WorldGridReader.Classify(headers.Concat(numbers).ToArray());
         // A lone "399" is NOT enough. Require a validated ascending column,
         // the same guard used by ordinary world-grid recognition.
+        NativeDiagnostic=$"raster_verified=true isolated_numbers={numbers.Length} "+
+            $"verified_world_cells={verified.Count}";
         return verified.Count>=6?verified:Array.Empty<VisualLabel>();
     }
 
