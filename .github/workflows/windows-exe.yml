@@ -71,6 +71,14 @@ jobs:
           if ($size -lt 10000000) { throw "EXE unexpectedly small: $size" }
           Write-Host "Single EXE verified: $size bytes"
           Write-Host (Get-FileHash $exe -Algorithm SHA256).Hash
+      - name: Upload Windows test EXE for pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OSRS-Play-${{ github.event.pull_request.number }}-win-x64-test
+          path: publish/OSRS-Play.exe
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish verified GitHub release
         if: github.event_name != 'pull_request'
         shell: pwsh
