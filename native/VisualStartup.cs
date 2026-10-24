@@ -104,6 +104,9 @@ internal sealed class VisualStartup:IDisposable
     private int pageActions;
     private string previousAction="";
     private string lastWorldGridDiagnostic="";
+    private int? pendingWorldChoice;
+    private Rectangle? pendingWorldChoiceBounds;
+    private DateTimeOffset pendingWorldChoiceFrame;
     private int? observedSelectedWorld;
     private IntPtr observedWindow;
     private readonly BackgroundWindowCapture backgroundCapture=new();
@@ -137,7 +140,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();previousAction="";repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();previousAction="";repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";ResetWorldChoice();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromSeconds(4))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -188,6 +191,18 @@ internal sealed class VisualStartup:IDisposable
             preferredWorld is not null&&observedSelectedWorld==preferredWorld);
         DiagnoseWorldGrid(observed,preferredWorld,decision);
         if(decision.State=="PLAY_SELECTED_CHARACTER")observedSelectedWorld=preferredWorld;
+        if(decision.State=="SELECT_F2P_WORLD"&&decision.Click is Rectangle target)
+        {
+            // A target from one OCR capture is not enough to click a server.
+            // Confirm the SAME world and cell on a distinct newer frame.
+            if(!WorldCellConfirmed(preferredWorld,target,observed.CapturedUtc))
+            {
+                SetState("AWAITING_INDEPENDENT_WORLD_CELL_CONFIRMATION");
+                return;
+            }
+            ResetWorldChoice();
+        }
+        else ResetWorldChoice();
         if(decision.Click is null){SetState(decision.State);return;}
         await Dispatch(observed,decision,owner,ct);
     }
@@ -426,6 +441,26 @@ internal sealed class VisualStartup:IDisposable
             "success_requires_next_observation=true");
         return true;
     }
+    private void ResetWorldChoice()
+    {
+        pendingWorldChoice=null;
+        pendingWorldChoiceBounds=null;
+        pendingWorldChoiceFrame=default;
+    }
+    private bool WorldCellConfirmed(int? world,Rectangle bounds,DateTimeOffset frameTime)
+    {
+        if(world is null)return false;
+        if(pendingWorldChoice==world&&pendingWorldChoiceBounds==bounds&&
+           frameTime>pendingWorldChoiceFrame.AddMilliseconds(500))
+            return true;
+        // Always keep the most recent unconfirmed candidate, including when
+        // the screenshot timestamp or cell changed.
+        pendingWorldChoice=world;
+        pendingWorldChoiceBounds=bounds;
+        pendingWorldChoiceFrame=frameTime;
+        return false;
+    }
+
     private void DiagnoseWorldGrid(VisualFrame frame,int? desiredWorld,VisualDecision decision)
     {
         // Summaries only: never log full OCR text, chat, screenshots or pixels.
@@ -525,6 +560,30 @@ internal static class VisualStartupTests
         Require(WorldGridOcr.MergeValidated(coarse,
             new[]{new VisualLabel("399",new(550,130,25,12),VisualLabelKind.Number)},titleOnly).Count==6,
             "isolated unrelated number cannot join a verified world column");
+        // Fixed-native geometry is a SEARCH REGION only, not a trusted
+        // world-number mapping. It requires visible raster-pill evidence.
+        using var blankNative=new Bitmap(1000,600);
+        var nativeHeader=new[]{new VisualLabel("Select a world",new(135,2,119,16))};
+        Require(!WorldGridOcr.HasNativeTable(blankNative,nativeHeader),
+            "world title alone cannot activate native OCR coordinates");
+        using var nativePills=new Bitmap(1000,600);
+        using(var paint=Graphics.FromImage(nativePills))
+        {
+            paint.Clear(Color.Black);
+            for(int col=0;col<7;col++)
+            for(int row=0;row<25;row++)
+            {
+                var bounds=WorldGridOcr.NativeNumberRegion(col,row);
+                paint.FillRectangle(Brushes.LightGray,bounds);
+                paint.FillRectangle(Brushes.Black,bounds.X+4,bounds.Y+2,3,8);
+                paint.FillRectangle(Brushes.Black,bounds.X+13,bounds.Y+2,3,8);
+                paint.FillRectangle(Brushes.Black,bounds.X+21,bounds.Y+2,2,8);
+            }
+        }
+        Require(WorldGridOcr.HasNativeTable(nativePills,nativeHeader),
+            "verified native world grid enables isolated black-digit OCR");
+        Require(WorldGridOcr.NativeNumberRegion(4,1).Contains(new Point(560,60)),
+            "world 399 screenshot location is in native fifth-column second-row crop");
         using var arrowImage=new Bitmap(1000,600);
         var pageLabels=Enumerable.Range(301,25).Select(n=>new VisualLabel(n.ToString(),new(180,40,25,12),VisualLabelKind.WorldCell))
             .Append(Label("Select a world",5)).ToArray();
