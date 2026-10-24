@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -99,7 +99,10 @@ internal static class VisualStartupPolicy
             if(world is null)return new("WORLD_LABEL_NOT_RECOGNIZED");
             int selected=int.Parse(World.Match(world.Text).Groups[1].Value);
             if(selected!=preferredWorld)return new("OPEN_WORLD_SELECTION",world.Bounds);
-            var play=Unique(l=>l.Text.Equals("Play Now",StringComparison.OrdinalIgnoreCase));
+            // Prefer the strongly validated native image evidence. A full-
+            // frame OCR hit is still supported for alternate DPI appearances.
+            var guarded=Unique(l=>l.Kind==VisualLabelKind.PlayButton);
+            var play=guarded??Unique(l=>l.Text.Equals("Play Now",StringComparison.OrdinalIgnoreCase));
             return play is null?new("PLAY_BUTTON_NOT_RECOGNIZED"):
                 new("PLAY_SELECTED_CHARACTER",play.Bounds);
         }
@@ -124,6 +127,8 @@ internal sealed class VisualStartup:IDisposable
     private int? pendingWorldChoice;
     private Rectangle? pendingWorldChoiceBounds;
     private DateTimeOffset pendingWorldChoiceFrame;
+    private Rectangle? pendingPlayBounds;
+    private DateTimeOffset pendingPlayFrame;
     private int? observedSelectedWorld;
     private IntPtr observedWindow;
     private readonly BackgroundWindowCapture backgroundCapture=new();
@@ -157,7 +162,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();previousAction="";repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";ResetWorldChoice();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();previousAction="";repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";ResetWorldChoice();ResetPlayButton();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromSeconds(4))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -207,7 +212,19 @@ internal sealed class VisualStartup:IDisposable
         var decision=VisualStartupPolicy.Decide(observed.Labels,preferredWorld,
             preferredWorld is not null&&observedSelectedWorld==preferredWorld);
         DiagnoseWorldGrid(observed,preferredWorld,decision);
-        if(decision.State=="PLAY_SELECTED_CHARACTER")observedSelectedWorld=preferredWorld;
+        if(decision.State=="PLAY_SELECTED_CHARACTER"&&decision.Click is Rectangle playButton)
+        {
+            // Must see the same button from two independent fresh frames.
+            // Never convert a single fixed rectangle into an unchecked click.
+            if(!PlayButtonConfirmed(playButton,observed.CapturedUtc))
+            {
+                SetState("AWAITING_INDEPENDENT_PLAY_BUTTON_CONFIRMATION");
+                return;
+            }
+            ResetPlayButton();
+            observedSelectedWorld=preferredWorld;
+        }
+        else ResetPlayButton();
         if(decision.State=="SELECT_F2P_WORLD"&&decision.Click is Rectangle worldCell)
         {
             // A target from one OCR capture is not enough to click a server.
@@ -285,7 +302,11 @@ internal sealed class VisualStartup:IDisposable
         // A separate enlarged footer pass avoids the tiny native bitmap font
         // being merged with copyright text by full-frame OCR.
         if(labels.Any(l=>l.Text.Contains("Welcome to Old School RuneScape",StringComparison.OrdinalIgnoreCase)))
+        {
             labels.AddRange(await ReadWorldFooter(bitmap,engine));
+            if(WelcomePlayButtonReader.Read(bitmap,labels) is VisualLabel playButton)
+                labels.Add(playButton);
+        }
         var focusedWorlds=await WorldGridOcr.Read(bitmap,engine,labels);
         labels.AddRange(focusedWorlds.Count>0?focusedWorlds:WorldGridReader.Classify(labels));
         labels.AddRange(WorldPageReader.Read(bitmap,labels));
@@ -458,6 +479,21 @@ internal sealed class VisualStartup:IDisposable
             "success_requires_next_observation=true");
         return true;
     }
+    private void ResetPlayButton()
+    {
+        pendingPlayBounds=null;
+        pendingPlayFrame=default;
+    }
+    private bool PlayButtonConfirmed(Rectangle bounds,DateTimeOffset captured)
+    {
+        if(pendingPlayBounds==bounds&&captured>pendingPlayFrame.AddMilliseconds(500)&&
+           captured-pendingPlayFrame<TimeSpan.FromSeconds(10))
+            return true;
+        pendingPlayBounds=bounds;
+        pendingPlayFrame=captured;
+        return false;
+    }
+
     private void ResetWorldChoice()
     {
         pendingWorldChoice=null;
@@ -533,6 +569,14 @@ internal static class VisualStartupTests
         var welcome=new[]{Label("Welcome to Old School RuneScape",10),Label("Play Now",60),Label("World 417",250)};
         Require(VisualStartupPolicy.Decide(welcome,null).Click is null,"wait for measured world");
         Require(VisualStartupPolicy.Decide(welcome,417).State=="PLAY_SELECTED_CHARACTER","matching world before play");
+        var guardedButton=new VisualLabel("Play Now",WelcomePlayButtonReader.ButtonTextBounds,
+            VisualLabelKind.PlayButton);
+        var welcomeWithoutPlay=new[]{welcome[0],welcome[2]};
+        Require(VisualStartupPolicy.Decide(welcomeWithoutPlay,417).Click is null,
+            "do not guess Play Now click without OCR or pixel confirmation");
+        Require(VisualStartupPolicy.Decide(welcomeWithoutPlay.Append(guardedButton).ToArray(),417)
+            .State=="PLAY_SELECTED_CHARACTER",
+            "strongly validated image button is actionable when full-frame OCR misses text");
         Require(VisualStartupPolicy.Decide(welcome,397).State=="OPEN_WORLD_SELECTION","wrong world is corrected before login");
         foreach(string footer in new[]{"World397","WorId 397","Wor1d 397 Click to switch","World 397 Click to switch"})
             Require(VisualStartupPolicy.Decide(new[]{welcome[0],welcome[1],Label(footer,250)},397).State=="PLAY_SELECTED_CHARACTER",

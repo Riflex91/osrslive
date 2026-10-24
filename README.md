@@ -1,4 +1,6 @@
-# OSRS Play 1.6.4 – visuelle Trainings-, Bank- und Handelsroutinen
+# OSRS Play 1.6.5 – visuelle Trainings-, Bank- und Handelsroutinen
+
+**Neu in 1.6.5:** Der auf Welt 553 gezeigte „Play Now“-Button kann bei fehlender Vollbild-OCR zusätzlich durch Bildkontur, weißen Buttontext und getrennten gelben Untertext erkannt werden. Es bleiben die Prüfung der empfohlenen Welt, zwei voneinander unabhängige Bildschirmbeobachtungen und F8-Pause erforderlich. [Details zur Play-Button-Erkennung](docs/PLAY-NOW-VISUAL-FALLBACK-1.6.5.md).
 
 **Neu in 1.6.4:** Der anhand eines echten Weltlisten-Screenshots bestätigte Zeilenabstand beträgt 19 Pixel statt 18,25. Das Programm liest die dunkle native Ziffernschrift zusätzlich mit einem bildgestützten Font-Matcher. Erforderlich bleiben die aufsteigend validierte Spalte, eine eindeutige Welt und zwei unabhängige Bildschirmbeobachtungen vor einem Klick. [Ursache, Umsetzung und Prüfgrenzen](docs/NATIVE-WORLD-GRID-1.6.4.md).
 
