@@ -127,8 +127,10 @@ internal sealed class VisualStartup:IDisposable
     private int? pendingWorldChoice;
     private Rectangle? pendingWorldChoiceBounds;
     private DateTimeOffset pendingWorldChoiceFrame;
-    private Rectangle? pendingPlayBounds;
-    private DateTimeOffset pendingPlayFrame;
+    private Rectangle? pendingPlayBounds,pendingEnterBounds;
+    private DateTimeOffset pendingPlayFrame,pendingEnterFrame;
+    private string lastPostPlayDiagnostic="";
+    private DateTimeOffset lastPostPlayDiagnosticAt=DateTimeOffset.MinValue;
     private int? observedSelectedWorld;
     private IntPtr observedWindow;
     private readonly BackgroundWindowCapture backgroundCapture=new();
@@ -162,7 +164,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();previousAction="";repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";ResetWorldChoice();ResetPlayButton();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();previousAction="";repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromSeconds(4))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -188,9 +190,15 @@ internal sealed class VisualStartup:IDisposable
         if(observed is null)
         {SetState("CAPTURE_"+backgroundCapture.State);return;}
         Game.Observe(GameScreenReader.Read(observed),DateTimeOffset.UtcNow);
+        DiagnosePostPlay(observed);
         if(!ObserveOnly&&Game.Confirmed is not null)
             VisuallyConfirmedSession?.Invoke();
         if(ObserveOnly){SetState("OBSERVATION_ONLY_"+Game.LastObservation?.Stage);return;}
+        if(Game.LastObservation?.Stage==VisibleGameStage.Connecting)
+        {
+            SetState("POST_PLAY_CONNECTING");
+            return;
+        }
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
         {
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
@@ -225,6 +233,18 @@ internal sealed class VisualStartup:IDisposable
             observedSelectedWorld=preferredWorld;
         }
         else ResetPlayButton();
+        if(decision.State=="ENTER_GAME"&&decision.Click is Rectangle enterButton)
+        {
+            // The second "Click here to play" prompt is a separate transition.
+            // Verify that the same action remains visible in two fresh frames.
+            if(!EnterConfirmed(enterButton,observed.CapturedUtc))
+            {
+                SetState("AWAITING_INDEPENDENT_ENTER_GAME_CONFIRMATION");
+                return;
+            }
+            ResetEnter();
+        }
+        else ResetEnter();
         if(decision.State=="SELECT_F2P_WORLD"&&decision.Click is Rectangle worldCell)
         {
             // A target from one OCR capture is not enough to click a server.
@@ -237,7 +257,13 @@ internal sealed class VisualStartup:IDisposable
             ResetWorldChoice();
         }
         else ResetWorldChoice();
-        if(decision.Click is null){SetState(decision.State);return;}
+        if(decision.Click is null)
+        {
+            SetState(decision.State=="WAITING_FOR_RECOGNIZED_SCREEN"&&
+                previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME"?
+                "POST_PLAY_WAITING_FOR_RECOGNIZABLE_SCREEN":decision.State);
+            return;
+        }
         await Dispatch(observed,decision,owner,ct);
     }
 
@@ -272,11 +298,13 @@ internal sealed class VisualStartup:IDisposable
         var point=new POINT();
         if(!ClientToScreen(target,ref point))return null;
         var bounds=new Rectangle(point.X,point.Y,captured.Image.Width,captured.Image.Height);
-        var labels=await Recognize(captured.Image,ocr!);
+        var labels=await Recognize(captured.Image,ocr!,
+            postPlay: previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME");
         ct.ThrowIfCancellationRequested();
         return new(target,bounds,captured.CapturedUtc,labels,ExecutionVision.Read(captured.Image,labels));
     }
-    private static async Task<IReadOnlyList<VisualLabel>> Recognize(Bitmap bitmap,OcrEngine engine)
+    private static async Task<IReadOnlyList<VisualLabel>> Recognize(
+        Bitmap bitmap,OcrEngine engine,bool postPlay=false)
     {
         using var enlarged=bitmap.Width*2<=OcrEngine.MaxImageDimension&&bitmap.Height*2<=OcrEngine.MaxImageDimension?
             new Bitmap(bitmap.Width*2,bitmap.Height*2):null;
@@ -299,6 +327,16 @@ internal sealed class VisualStartup:IDisposable
             .Select(w=>new VisualLabel(w.Text,Map(w.BoundingRect),Regex.IsMatch(w.Text,@"^\d+$")?
                 VisualLabelKind.Number:VisualLabelKind.Text)));
         labels=labels.Distinct().ToList();
+        if(postPlay)
+        {
+            // Full-frame OCR often misses the next native login prompt.
+            // Only add exact, centered UI phrases from a focused second pass.
+            var focused=await PostPlayScreenReader.Read(bitmap,engine,labels);
+            foreach(var phrase in focused)
+                if(!labels.Any(l=>l.Text.Equals(phrase.Text,StringComparison.OrdinalIgnoreCase)&&
+                    l.Bounds.IntersectsWith(phrase.Bounds)))
+                    labels.Add(phrase);
+        }
         // A separate enlarged footer pass avoids the tiny native bitmap font
         // being merged with copyright text by full-frame OCR.
         if(labels.Any(l=>l.Text.Contains("Welcome to Old School RuneScape",StringComparison.OrdinalIgnoreCase)))
@@ -479,6 +517,42 @@ internal sealed class VisualStartup:IDisposable
             "success_requires_next_observation=true");
         return true;
     }
+    private void ResetEnter()
+    {
+        pendingEnterBounds=null;
+        pendingEnterFrame=default;
+    }
+    private bool EnterConfirmed(Rectangle bounds,DateTimeOffset captured)
+    {
+        if(pendingEnterBounds==bounds&&captured>pendingEnterFrame.AddMilliseconds(500)&&
+           captured-pendingEnterFrame<TimeSpan.FromSeconds(10))return true;
+        pendingEnterBounds=bounds;
+        pendingEnterFrame=captured;
+        return false;
+    }
+    private void DiagnosePostPlay(VisualFrame observed)
+    {
+        if(previousAction is not ("PLAY_SELECTED_CHARACTER" or "ENTER_GAME"))return;
+        // Privacy rule: only known UI booleans and counts; no arbitrary OCR,
+        // chat, character names, screenshots or image hashes in log output.
+        var labels=observed.Labels;
+        bool welcome=labels.Any(l=>l.Text.Contains("Welcome",StringComparison.OrdinalIgnoreCase));
+        bool enter=labels.Any(l=>l.Text.Equals(PostPlayScreenReader.ClickText,StringComparison.OrdinalIgnoreCase));
+        bool connecting=labels.Any(l=>l.Text.Contains("Connecting to server",StringComparison.OrdinalIgnoreCase)||
+            l.Text.Equals("Please wait",StringComparison.OrdinalIgnoreCase));
+        bool chat=labels.Any(l=>l.Text.Equals("Public",StringComparison.OrdinalIgnoreCase))&&
+            labels.Any(l=>l.Text.Equals("Private",StringComparison.OrdinalIgnoreCase));
+        string result=$"stage={Game.LastObservation?.Stage} welcome_marker={welcome} "+
+            $"enter_marker={enter} connecting_marker={connecting} chat_controls={chat} "+
+            $"labels={labels.Count} decision_source=VISIBLE_OCR auth_verified=false";
+        DateTimeOffset now=DateTimeOffset.UtcNow;
+        if(result==lastPostPlayDiagnostic&&now-lastPostPlayDiagnosticAt<TimeSpan.FromSeconds(20))
+            return;
+        lastPostPlayDiagnostic=result;
+        lastPostPlayDiagnosticAt=now;
+        log.Add(Severity.INFO,"VISUAL_STARTUP","POST_PLAY_SCREEN_DIAGNOSTIC",result);
+    }
+
     private void ResetPlayButton()
     {
         pendingPlayBounds=null;
@@ -668,6 +742,12 @@ internal static class VisualStartupTests
         Require(WorldPageReader.Read(arrowImage,pageLabels).Count==0,"flat grey patch is not an arrow");
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),Label("CLICK HERE TO PLAY",80)},417,true).State=="ENTER_GAME",
             "welcome transition");
+        Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),
+            new VisualLabel(PostPlayScreenReader.ClickText,new Rectangle(410,267,170,24))},553,true)
+            .State=="ENTER_GAME","focused post-play text allows the separately verified second entry");
+        Require(VisualStartupPolicy.Decide(new[]{new VisualLabel(PostPlayScreenReader.ClickText,
+            new Rectangle(410,267,170,24))},553,true).Click is null,
+            "second-stage command alone never clicks without Welcome anchor");
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),Label("CLICK HERE TO PLAY",80)},417).Click is null,
             "resumed welcome requires independently observed selected world");
         Require(VisualStartupPolicy.Decide(grid.Select(l=>l.Text=="397"?l with {Bounds=new Rectangle(500,80,50,25)}:l).ToArray(),397).Click is null,
