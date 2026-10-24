@@ -17,7 +17,8 @@ internal sealed record InventoryState(IReadOnlyList<InventoryItem> Items,int Emp
     }
     internal InventoryItem? Find(string name)=>Items.FirstOrDefault(i=>i.Name.Equals(name,StringComparison.OrdinalIgnoreCase));
 }
-internal sealed record ExecutionPixels(IReadOnlyList<ObservedSlot> Slots,ulong SceneSignature,NavigationPixels? Navigation=null);
+internal sealed record ExecutionPixels(IReadOnlyList<ObservedSlot> Slots,ulong SceneSignature,NavigationPixels? Navigation=null,
+    bool InventoryTabActive=false,ulong InventoryPanelSignature=0);
 internal sealed record MenuEntry(string Text,Rectangle Bounds);
 internal sealed record ContextMenu(IReadOnlyList<MenuEntry> Entries)
 {
