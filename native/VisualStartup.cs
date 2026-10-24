@@ -37,6 +37,16 @@ internal static class VisualStartupPolicy
     // The native footer may put the world and "Click to switch" on one OCR
     // line, and the pixel font's lowercase l is often read as I/1/i.
     private static readonly Regex World=new(@"^W[o0]r[lI1i]d\s*([3-8]\d{2})(?:\s+Click to switch)?$",RegexOptions.IgnoreCase);
+    internal static bool PageCoverageVerified(IReadOnlyList<VisualLabel> cells)
+    {
+        // Calibrated 1000x600 native world table. Require validated cells from
+        // both edges AND the middle before claiming that a page boundary has
+        // been reached. This is deliberately stricter than target selection.
+        if(cells.Count<20)return false;
+        var xs=cells.Select(c=>c.Bounds.Left).ToArray();
+        return xs.Min()<260&&xs.Max()>690&&
+            cells.GroupBy(c=>c.Bounds.Left/40).Count()>=5;
+    }
     internal static VisualDecision Decide(IReadOnlyList<VisualLabel> labels,int? preferredWorld,
         bool selectedWorldPreviouslyObserved=false)
     {
@@ -57,12 +67,19 @@ internal static class VisualStartupPolicy
         {
             var gridTarget=Unique(l=>l.Kind==VisualLabelKind.WorldCell&&l.Text==preferredWorld.Value.ToString());
             if(gridTarget is not null)return new("SELECT_F2P_WORLD",gridTarget.Bounds);
-            var worldIds=normalized.Where(l=>l.Kind==VisualLabelKind.WorldCell).Select(l=>int.Parse(l.Text)).ToArray();
+            var verifiedCells=normalized.Where(l=>l.Kind==VisualLabelKind.WorldCell).ToArray();
+            var worldIds=verifiedCells.Select(l=>int.Parse(l.Text)).ToArray();
             if(worldIds.Length>0)
             {
                 string direction=preferredWorld>worldIds.Max()?"NEXT":preferredWorld<worldIds.Min()?"PREVIOUS":"";
+                // A few cells from the leftmost column do NOT establish the
+                // maximum world on the page. World 399 can be visible even if
+                // OCR only reads 301-325. Never paginate on partial coverage.
+                if(direction.Length>0&&!PageCoverageVerified(verifiedCells))
+                    return new("WORLD_PAGE_COVERAGE_INSUFFICIENT_NO_BLIND_ARROW");
                 var arrow=Unique(l=>l.Kind==VisualLabelKind.WorldNavigation&&l.Text==direction);
-                if(arrow is not null)return new($"WORLD_PAGE_{direction}_{worldIds.Min()}_{worldIds.Max()}",arrow.Bounds);
+                if(direction.Length>0&&arrow is not null)
+                    return new($"WORLD_PAGE_{direction}_{worldIds.Min()}_{worldIds.Max()}",arrow.Bounds);
                 return new("TARGET_WORLD_NOT_UNAMBIGUOUSLY_VISIBLE");
             }
             var headers=normalized.Where(l=>l.Text.Equals("World",StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -538,12 +555,27 @@ internal static class VisualStartupTests
         Require(VisualStartupPolicy.Decide(grid.Append(Label("397",120)).ToArray(),397).Click is null,
             "ambiguous player counts cannot become a world click");
         Require(VisualStartupPolicy.Decide(grid,417).Click is null,"offscreen world never gets guessed");
-        var paged=new[]{Label("Select a world",10),new VisualLabel("397",new(180,40,25,12),VisualLabelKind.WorldCell),
-            new VisualLabel("472",new(730,500,25,12),VisualLabelKind.WorldCell),
+        var partialPage=new[]{Label("Select a world",10),
+            new VisualLabel("301",new(180,40,25,12),VisualLabelKind.WorldCell),
+            new VisualLabel("325",new(180,490,25,12),VisualLabelKind.WorldCell),
             new VisualLabel("NEXT",new(835,282,48,42),VisualLabelKind.WorldNavigation)};
-        Require(VisualStartupPolicy.Decide(paged,553).State=="WORLD_PAGE_NEXT_397_472","next page for a higher measured world");
-        Require(VisualStartupPolicy.Decide(paged,417).Click is null,"missing OCR inside current range does not page blindly");
-        Require(VisualStartupPolicy.Decide(paged.Take(3).ToArray(),553).Click is null,"no page click without image evidence");
+        Require(VisualStartupPolicy.Decide(partialPage,399).State==
+            "WORLD_PAGE_COVERAGE_INSUFFICIENT_NO_BLIND_ARROW",
+            "partially read left column cannot page away from visible world 399");
+        var fullPageCells=Enumerable.Range(0,5).SelectMany(col=>
+            Enumerable.Range(0,5).Select(row=>new VisualLabel(
+                (397+col*17+row).ToString(),
+                new Rectangle(180+col*130,40+row*19,25,12),VisualLabelKind.WorldCell))).ToArray();
+        var paged=new[]{Label("Select a world",10)}
+            .Concat(fullPageCells).Append(new VisualLabel("NEXT",new(835,282,48,42),
+                VisualLabelKind.WorldNavigation)).ToArray();
+        Require(VisualStartupPolicy.PageCoverageVerified(fullPageCells),"complete world-page coverage confirmed");
+        Require(VisualStartupPolicy.Decide(paged,553).State.StartsWith("WORLD_PAGE_NEXT_"),
+            "next page requires verified columns across full table");
+        Require(VisualStartupPolicy.Decide(paged,417).Click is null,
+            "missing OCR within displayed range does not page blindly");
+        Require(VisualStartupPolicy.Decide(paged.Take(paged.Length-1).ToArray(),553).Click is null,
+            "no page click without independently identified arrow");
         // Regression: a partial OCR contact-sheet pass must not erase the
         // original verified column; a missing world may be added only after
         // the combined ascending sequence is checked.
