@@ -64,7 +64,7 @@ internal static class PostPlayScreenReader
             return Array.Empty<VisualLabel>();
         // Only this bounded region is enlarged. This avoids inventory, private
         // chat, account name and footer content being sent into this OCR pass.
-        int factor=Math.Clamp(OcrEngine.MaxImageDimension/Region.Width,1,3);
+        int factor=(int)Math.Clamp((long)OcrEngine.MaxImageDimension/Region.Width,1L,3L);
         using var enlarged=new Bitmap(Region.Width*factor,Region.Height*factor);
         using(var g=Graphics.FromImage(enlarged))
         {
