@@ -809,6 +809,7 @@ internal static class SelfTest
             OfficialF2PWorldTests.Run();
             PublicOsrsHiscoresTests.Run();
             VisualStartupTests.Run();
+            NativeWorldDigitReader.SelfTest();
             AccountGoalPlannerTests.Run();
             F2PProgressionTests.Run();
             ExecutionRoutinesTests.Run();
