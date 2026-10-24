@@ -113,7 +113,7 @@ internal static class NativeSkillFontReader
             read.Single(v=>v.Text.StartsWith("Hitpoints=",StringComparison.Ordinal)).Text!="Hitpoints=24")
             throw new Exception("Native P11 base-level extraction failed");
         // A damaged glyph must stay unread; a total-level difference cannot fill it.
-        b.SetPixel(layout.Bounds.Left+62+41,layout.Bounds.Top+18,Color.Black);
+        b.SetPixel(layout.Bounds.Left+62+42,layout.Bounds.Top+18,Color.Black);
         if(ReadLevel(b,layout,1) is not null)
             throw new Exception("Damaged Hitpoints glyph must not be accepted");
     }
