@@ -86,10 +86,10 @@ internal sealed class GameInteractions
     }
     internal async Task OpenInventory(CancellationToken ct)
     {
-        // The official 1000x600 game has two rows of side-panel tabs.
-        // Inventory (backpack/door icon) is in the BOTTOM row at y~582.
-        // The former 7x8 search stopped at y=545 and could click Equipment or
-        // another top-row tab when broad OCR spuriously returned "Inventory".
+        // Inventory is the backpack icon in the TOP row at y~282.
+        // The door-shaped icon in the bottom row at y~582 is Logout.
+        // Never search the full panel, and demand the actual hover tooltip
+        // before clicking this verified icon.
         var points=inventoryTab is Point p?new[]{p}:InventoryTabPolicy.Candidates;
         foreach(var point in points)
         {
