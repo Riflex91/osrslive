@@ -69,6 +69,8 @@ internal sealed class MainWindow : Form
     private readonly CancellationTokenSource closing=new();
     private readonly System.Windows.Forms.Timer uiTimer=new(){Interval=250};
     private readonly System.Windows.Forms.Timer diagnosticsTimer=new(){Interval=10000};
+    private readonly System.Windows.Forms.Timer periodicUpdateTimer=new(){Interval=30*60*1000};
+    private bool periodicUpdateRunning;
     private readonly Stopwatch uptime=Stopwatch.StartNew();
     private OfficialClientWindowHost windowHost=null!;
     private readonly OfficialLiveRenderObserver liveObserver=new();
@@ -187,6 +189,11 @@ internal sealed class MainWindow : Form
             PersistLog();
         };
         diagnosticsTimer.Start();
+        if(startAutomatically&&!observeOnly)
+        {
+            periodicUpdateTimer.Tick+=async (_,_)=>await CheckForIdleUpdateAsync();
+            periodicUpdateTimer.Start();
+        }
         if(startAutomatically)Shown+=async (_,_)=>await StartAutomaticallyAsync();
         else Shown+=(_,_)=>
         {
@@ -197,6 +204,7 @@ internal sealed class MainWindow : Form
         {
             stopping=true;followWindows=false;
             closing.Cancel();uiTimer.Stop();diagnosticsTimer.Stop();
+            periodicUpdateTimer.Stop();periodicUpdateTimer.Dispose();
             liveObservationTimer.Stop();liveObservationTimer.Dispose();
             visualStartup.Dispose();windowHost.Dispose();liveObserver.Reset();
             log.Add(Severity.INFO,"CORE","SHUTDOWN",
@@ -394,6 +402,43 @@ internal sealed class MainWindow : Form
                 else{StartOfficialLauncherIfNeeded();_=MeasureF2PAutomatically();}
             }
         }
+    }
+
+    private async Task CheckForIdleUpdateAsync()
+    {
+        if(periodicUpdateRunning||stopping||!followWindows||visualStartup.ObserveOnly)return;
+        // A running OSRS or Jagex login session must not be interrupted by an
+        // unattended release. Check again when the client is closed or on the
+        // next application start (which already checks before launching).
+        if(windowHost.Attached||visualTickRunning||
+           OfficialClientWindowHost.FindRunningClients().Count>0||
+           OfficialClientWindowHost.LauncherProcessRunning())
+        {
+            log.Add(Severity.INFO,"UPDATER","PERIODIC_UPDATE_DEFERRED",
+                "official_client_or_launcher_active=true retry_in_minutes=30 next_start_checks=true");
+            return;
+        }
+        periodicUpdateRunning=true;
+        try
+        {
+            log.Add(Severity.INFO,"UPDATER","PERIODIC_CHECK_START",
+                "no_official_session=true verified_release_only=true");
+            bool updated=await Updater.CheckAndUpdateAsync(message=>
+                log.Add(Severity.INFO,"UPDATER","STATUS",message),closing.Token);
+            if(updated&&!stopping)
+            {
+                log.Add(Severity.INFO,"UPDATER","RESTART_REQUESTED",
+                    "reason=NEW_VERIFIED_RELEASE_IDLE_SESSION official_session_active=false");
+                Close();
+            }
+        }
+        catch(OperationCanceledException) when(stopping){}
+        catch(Exception ex)
+        {
+            log.Add(Severity.WARN,"UPDATER","PERIODIC_CHECK_FAILED",
+                "reason="+ex.GetType().Name);
+        }
+        finally{periodicUpdateRunning=false;}
     }
 
     private void ObserveOfficialGame()
