@@ -39,6 +39,19 @@ internal static class ExecutionRoutinesTests
         var menu=new[]{L("Choose Option",30,30),L("Use Logs",30,50),L("Drop Logs",30,66),L("Examine Logs",30,82),L("Cancel",30,98),
             L("Deposit-All Logs",400,50)};
         ContextMenuOcr.SelfTest();
+        InventoryTabPolicy.SelfTest();
+        var tabDriver=new InventoryTabDriver();
+        await new GameInteractions(tabDriver).OpenInventory(CancellationToken.None);
+        Require(tabDriver.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==1&&
+            tabDriver.Inputs.Where(i=>i.Kind==GameInputKind.LeftClick)
+                .All(i=>i.Bounds.Top>=565&&i.Bounds.Top<595),
+            "Inventory opening must click the confirmed bottom-row icon, not Equipment");
+        var wrongTooltip=new InventoryTabDriver(misplacedTooltip:true);
+        bool noWrongClick=false;
+        try {await new GameInteractions(wrongTooltip).OpenInventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex) {noWrongClick=ex.Message=="INVENTORY_TAB_NOT_VERIFIED";}
+        Require(noWrongClick&&wrongTooltip.Inputs.All(i=>i.Kind!=GameInputKind.LeftClick),
+            "misleading Inventory text inside a panel must not authorize a tab click");
         var focusedMenu=menu.Where(l=>l.Bounds.Left<300)
             .Select(l=>l with {Kind=VisualLabelKind.ContextMenuLine}).ToArray();
         var conflictingFrame=focusedMenu.Concat(new[]{
@@ -113,6 +126,29 @@ internal static class ExecutionRoutinesTests
         }
         finally{if(Directory.Exists(directory))Directory.Delete(directory,true);}
         Console.WriteLine("EXECUTION ROUTINES PASS: context selection, independent yields, recipe deltas, supply gates, GE invoices/receipts/partial fills, durable deduplication");
+    }
+    private sealed class InventoryTabDriver:IVisualGameDriver
+    {
+        private readonly bool misplacedTooltip;
+        internal readonly List<GameInput> Inputs=new();
+        public VisualFrame Current {get;private set;}=
+            new(new IntPtr(1),new Rectangle(0,0,1000,600),DateTimeOffset.UtcNow,
+                Array.Empty<VisualLabel>());
+        internal InventoryTabDriver(bool misplacedTooltip=false)
+        {this.misplacedTooltip=misplacedTooltip;}
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)=>
+            Task.FromResult(Current);
+        public Task InputAsync(GameInput input,CancellationToken ct)
+        {
+            Inputs.Add(input);
+            if(input.Kind==GameInputKind.Hover)
+                Current=Current with{
+                    Labels=new VisualLabel[]{new("Inventory",
+                        misplacedTooltip?new Rectangle(800,320,75,12):new Rectangle(11,8,65,12))}
+                };
+            Current=Current with{CapturedUtc=DateTimeOffset.UtcNow};
+            return Task.CompletedTask;
+        }
     }
     private sealed class ScriptedDriver:IVisualGameDriver
     {
