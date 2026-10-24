@@ -1,4 +1,8 @@
-# OSRS Play 1.6.0 – visuelle Trainings-, Bank- und Handelsroutinen
+# OSRS Play 1.6.1 – visuelle Trainings-, Bank- und Handelsroutinen
+
+**Neu in 1.6.1:** Das Programm prüft bei fehlendem Fenster erneut, ob der offizielle Jagex Launcher läuft, startet bzw. öffnet ihn bei Bedarf und stellt einen minimierten Launcher für die Play-Button-Erkennung wieder her. Der Launcher bleibt nach dem Clientstart geöffnet und erhält erst nach frischer, wiederholt konsistenter visueller Charakter- und 24-Skills-Erkennung einen regulären Schließauftrag. Kein erzwungenes Beenden; bei fehlender Schließbestätigung wird gewarnt. [Details und Live-Testgrenzen](docs/LAUNCHER-LIFECYCLE-1.6.1.md).
+
+**Testbuild:** Solange PR #18 nicht gemergt ist, bietet der erfolgreiche Windows-CI-Lauf unter „Artifacts“ eine `OSRS-Play-18-win-x64-test`-ZIP mit der neuen EXE. Der bestehende 1.6.0-Release bleibt unverändert.
 
 Windows-Oberfläche für den unveränderten offiziellen Jagex Launcher und `osclient.exe`.
 Die Anwendung ist **noch kein vollständig selbstständig spielender Maxing-Agent**.
