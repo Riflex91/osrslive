@@ -85,6 +85,10 @@ internal sealed class MainWindow : Form
     private bool followWindows,starting,scanning,stopping;
     private bool loggedBlockedAgent;
     private long lastWindowCheckMs;
+    private DateTimeOffset lastLauncherOpenRequest=DateTimeOffset.MinValue;
+    private DateTimeOffset launcherCloseRequestTime=DateTimeOffset.MinValue;
+    private bool launcherCloseRequested,launcherCloseConfirmed,launcherCloseWarningLogged;
+    private bool launcherRestoreFailureLogged;
     private string f2pSummary="F2P-Welt: noch nicht gemessen";
     private int? preferredWorld;
     private bool changePending=true;
@@ -159,7 +163,12 @@ internal sealed class MainWindow : Form
             finally
             {
                 visualTickRunning=false;changePending=true;
-                if(!stopping){ObserveOfficialGame();ReportGameObservation();}
+                if(!stopping)
+                {
+                    ObserveOfficialGame();
+                    ReportGameObservation();
+                    CloseLauncherAfterVisualSessionConfirmation();
+                }
             }
         };
         liveObservationTimer.Start();
@@ -404,45 +413,67 @@ internal sealed class MainWindow : Form
     }
     private void StartOfficialLauncherIfNeeded()
     {
-        if(windowHost.Attached)return;
+        if(stopping||visualStartup.ObserveOnly||windowHost.Attached)return;
         try
         {
             var games=OfficialClientWindowHost.FindRunningClients();
             var launchers=OfficialClientWindowHost.FindRunningLauncherWindows();
-            log.Add(Severity.INFO,"OFFICIAL_CLIENT","AUTO_LOGIN_START",
-                $"games={games.Count} launchers={launchers.Count} "+
-                "login_owner=JAGEX_LAUNCHER");
             if(games.Count>0||launchers.Count>0)
             {
                 FollowOfficialWindows();
                 return;
             }
+            // A launcher may already be running in the tray without a usable
+            // top-level HWND. Reopening its official executable normally asks
+            // the single-instance launcher to show its UI.
+            if(DateTimeOffset.UtcNow-lastLauncherOpenRequest<TimeSpan.FromSeconds(25))return;
+            lastLauncherOpenRequest=DateTimeOffset.UtcNow;
+            bool running=OfficialClientWindowHost.LauncherProcessRunning();
+            log.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_AVAILABILITY_CHECK",
+                $"games={games.Count} windows={launchers.Count} process_running={running}");
             if(OfficialClientWindowHost.TryOpenJagexLauncher())
             {
-                log.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_START_REQUESTED",
-                    "automatic=true credentials_handled_by_jagex=true");
-                FollowOfficialWindows();
+                log.Add(Severity.INFO,"OFFICIAL_CLIENT",
+                    running?"LAUNCHER_REOPEN_REQUESTED":"LAUNCHER_START_REQUESTED",
+                    "official_executable=true credentials_handled_by_jagex=true");
             }
             else
             {
                 log.Add(Severity.WARN,"OFFICIAL_CLIENT","LAUNCHER_NOT_FOUND",
-                    "official_jagex_launcher_must_be_installed=true");
+                    $"running_process={running} official_installation_path_missing=true");
                 footer.Text="Jagex Launcher nicht gefunden – offizielle Installation erforderlich.";
             }
         }
         catch(Exception ex)
         {
-            log.Add(Severity.ERROR,"OFFICIAL_CLIENT","AUTO_START_FAILED",
+            log.Add(Severity.WARN,"OFFICIAL_CLIENT","AUTO_START_FAILED",
                 "reason="+ex.GetType().Name);
             footer.Text="Jagex Launcher konnte nicht automatisch geöffnet werden.";
         }
+    }
+
+    private void EnsureLauncherRestored(OfficialClientWindow launcher)
+    {
+        if(visualStartup.ObserveOnly)return;
+        if(!OfficialClientWindowHost.TryRestoreLauncher(launcher))
+        {
+            if(!launcherRestoreFailureLogged)
+            {
+                launcherRestoreFailureLogged=true;
+                log.Add(Severity.WARN,"OFFICIAL_CLIENT","LAUNCHER_RESTORE_FAILED",
+                    $"pid={launcher.ProcessId} valid_official_window_required=true");
+            }
+            return;
+        }
+        if(!launcherRestoreFailureLogged)
+            launcherRestoreFailureLogged=false;
     }
 
     private void FollowOfficialWindows()
     {
         if(stopping || windowHost is null)return;
         if(windowHost.Attached && windowHost.CurrentKind==OfficialWindowKind.Game)
-            return; // Never reattach launcher after a game has become a child HWND.
+            return; // Embedded game is absent from top-level enumeration.
         try
         {
             var games=OfficialClientWindowHost.FindRunningClients();
@@ -455,6 +486,9 @@ internal sealed class MainWindow : Form
                 if(windowHost.Attach(chosen))
                 {
                     emptyHint.Visible=false;
+                    launcherCloseRequested=false;
+                    launcherCloseConfirmed=false;
+                    launcherCloseWarningLogged=false;
                     log.Add(Severity.INFO,"OFFICIAL_CLIENT","GAME_WINDOW_READY",
                         $"pid={chosen.ProcessId} kind=Game official_osrs=true "+
                         "login_state=UNVERIFIED world_selection=NOT_VERIFIED");
@@ -475,7 +509,12 @@ internal sealed class MainWindow : Form
                 return;
             }
             if(windowHost.Attached && windowHost.CurrentKind==OfficialWindowKind.Launcher)
+            {
+                var tracked=OfficialClientWindowHost.FindRunningLauncherWindows()
+                    .FirstOrDefault(c=>c.Handle==windowHost.VisibleWindowHandle);
+                if(tracked is not null)EnsureLauncherRestored(tracked);
                 return;
+            }
             var launchers=OfficialClientWindowHost.FindRunningLauncherWindows();
             if(launchers.Count>0)
             {
@@ -490,14 +529,51 @@ internal sealed class MainWindow : Form
                     log.Add(Severity.INFO,"OFFICIAL_CLIENT","LOGIN_WINDOW_READY",
                         $"pid={chosen.ProcessId} login=JAGEX "+
                         "automatic_window_tracking=true embedding=false original_size_preserved=true");
+                    EnsureLauncherRestored(chosen);
                     changePending=true;
                 }
             }
+            else StartOfficialLauncherIfNeeded();
         }
         catch(Exception ex)
         {
             log.Add(Severity.WARN,"OFFICIAL_CLIENT","AUTO_WINDOW_ATTACH_FAILED",
                 "reason="+ex.GetType().Name);
+        }
+    }
+
+    private void CloseLauncherAfterVisualSessionConfirmation()
+    {
+        if(visualStartup.ObserveOnly||stopping||!windowHost.Attached||
+           windowHost.CurrentKind!=OfficialWindowKind.Game)return;
+        if(!LauncherLifecyclePolicy.MayClose(windowHost.CurrentKind,
+            visualStartup.Game.Confirmed,DateTimeOffset.UtcNow))return;
+        if(!launcherCloseRequested)
+        {
+            launcherCloseRequested=true;
+            launcherCloseRequestTime=DateTimeOffset.UtcNow;
+            var result=windowHost.RequestTrackedLauncherClose();
+            log.Add(result==LauncherCloseResult.Failed||result==LauncherCloseResult.WindowMismatch?
+                Severity.WARN:Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_CLOSE_AFTER_VISUAL_LOGIN",
+                $"result={result} character_and_24_skills_consistent=true "+
+                "server_auth_verified=false force_terminate=false");
+            launcherCloseConfirmed=result is LauncherCloseResult.NotTracked or LauncherCloseResult.AlreadyClosed or
+                LauncherCloseResult.Failed or LauncherCloseResult.WindowMismatch;
+            return;
+        }
+        if(launcherCloseConfirmed)return;
+        if(!windowHost.TrackedLauncherWindowOpen)
+        {
+            launcherCloseConfirmed=true;
+            log.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_WINDOW_CLOSED_CONFIRMED",
+                "window_gone=true process_exit_not_assumed=true official_game_retained=true");
+        }
+        else if(!launcherCloseWarningLogged &&
+                DateTimeOffset.UtcNow-launcherCloseRequestTime>TimeSpan.FromSeconds(10))
+        {
+            launcherCloseWarningLogged=true;
+            log.Add(Severity.WARN,"OFFICIAL_CLIENT","LAUNCHER_CLOSE_NOT_CONFIRMED",
+                "launcher_window_still_present=true no_forced_termination=true");
         }
     }
 
