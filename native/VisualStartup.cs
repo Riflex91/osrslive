@@ -572,7 +572,7 @@ internal static class VisualStartupTests
         Require(VisualStartupPolicy.PageCoverageVerified(fullPageCells),"complete world-page coverage confirmed");
         Require(VisualStartupPolicy.Decide(paged,553).State.StartsWith("WORLD_PAGE_NEXT_"),
             "next page requires verified columns across full table");
-        Require(VisualStartupPolicy.Decide(paged,417).Click is null,
+        Require(VisualStartupPolicy.Decide(paged,405).Click is null,
             "missing OCR within displayed range does not page blindly");
         Require(VisualStartupPolicy.Decide(paged.Take(paged.Length-1).ToArray(),553).Click is null,
             "no page click without independently identified arrow");
