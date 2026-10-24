@@ -103,6 +103,7 @@ internal sealed class MainWindow : Form
         autoStartupEnabled=startAutomatically;
         visualStartup=new VisualStartup(log,liveObserver);
         visualStartup.ObserveOnly=observeOnly;
+        visualStartup.VisuallyConfirmedSession=CloseLauncherAfterVisualSessionConfirmation;
         runtimeLogFile=Path.Combine(logDirectory,
             !startAutomatically?"ui-smoke-test.log":observeOnly?"observation-session.log":"last-session.log");
         Text=$"OSRS Play {Diagnostics.Version} – offizielles OSRS";
