@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.1.0";
+    internal const string Version="1.6.2";
     private const int Capacity=10000;
     private readonly object sync=new();
     private readonly List<LogEvent> entries=new();
@@ -71,18 +71,16 @@ internal sealed class Diagnostics
         sb.AppendLine("Modus: "+Mode);
         sb.AppendLine($"Events: {counters.Events} | Warnungen: {counters.Warnings} | Fehler: {counters.Errors}");
         sb.AppendLine($"Puffer-Überlauf: {counters.Dropped} | RAM: {proc.WorkingSet64/1024/1024} MiB");
-        sb.AppendLine("Offizielle Spielansicht: Jagex Launcher / osclient.exe als Originalfenster eingebettet.");
-        sb.AppendLine("Spielzustand und Authentifizierung: durch OSRS Play NICHT verifiziert.");
-        sb.AppendLine("Live-Agent: NICHT VERFÜGBAR – keine offizielle Spielzustands-/Aktionsschnittstelle.");
+        sb.AppendLine("Offizieller Launcher bleibt im Originalfenster; osclient.exe wird in die Spielansicht eingebettet.");
+        sb.AppendLine("Serverseitige Authentifizierung: NICHT verifiziert. Skilldaten benötigen wiederholte, konsistente OCR-Lesungen.");
+        sb.AppendLine("Hintergrundaufnahme: Windows Graphics Capture; Eingaben: gezielte Fensternachrichten; F8 pausiert.");
+        sb.AppendLine("Hintergrundtransport im Testfenster geprüft; Annahme durch osclient.exe noch nicht bestätigt. Minimiert pausiert die Aufnahme.");
+        sb.AppendLine("Spielansicht: fest 1000x600 Pixel; Log dockt darunter an und verkleinert das Spiel nicht.");
+        sb.AppendLine("Routinen: visuelles Sammeln, Produktion, Bank und GE implementiert; Live-Ende-zu-Ende noch nicht verifiziert. Kampf und globale Navigation fehlen.");
         sb.AppendLine("Keine Offline-Sitzungen, Sandbox-Welt oder künstliche Game-Ticks.");
         sb.AppendLine("--- LOG ---");
-        foreach(var ev in Snapshot().TakeLast(1600))
+        foreach(var ev in Snapshot())
         {
-            if(sb.Length+ev.Line.Length>190000)
-            {
-                sb.AppendLine("... gekürzt; JSON-/ZIP-Export verwenden");
-                break;
-            }
             sb.AppendLine(ev.Line);
         }
         return sb.ToString();
@@ -93,9 +91,10 @@ internal sealed class Diagnostics
         using var proc=Process.GetCurrentProcess();
         return JsonSerializer.Serialize(new
         {
-            schemaVersion=3,clientVersion=Version,exportedAt=DateTimeOffset.UtcNow,
-            mode=Mode,executionMode="OFFICIAL_WINDOW_ONLY",
-            liveAgentAvailable=false,verifiedOfficialGameState=false,
+            schemaVersion=4,clientVersion=Version,exportedAt=DateTimeOffset.UtcNow,
+            mode=Mode,executionMode="OFFICIAL_WINDOW_WGC",inputTransport="WINDOW_MESSAGES",
+            backgroundTransportImplemented=true,officialBackgroundInputVerified=false,
+            liveAgentAvailable=false,visualActivityRoutinesImplemented=true,officialExecutionEndToEndVerified=false,verifiedOfficialGameState=false,
             officialAuthenticationHandledBy="JAGEX_LAUNCHER",
             statistics=new{s.Events,s.Dropped,s.Errors,s.Warnings,
                 processWorkingSetBytes=proc.WorkingSet64},

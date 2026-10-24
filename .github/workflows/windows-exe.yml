@@ -30,6 +30,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Verify release version and diagnostic version agree
+        shell: pwsh
+        run: |
+          $declared = ([xml](Get-Content native/OSRSLiveDiagnostics.csproj -Raw)).Project.PropertyGroup.Version
+          $source = Get-Content native/Diagnostics.cs -Raw
+          $match = [regex]::Match($source, 'internal const string Version="([^"]+)";')
+          if (-not $match.Success -or $match.Groups[1].Value -ne $declared) {
+            throw "Diagnostic version does not match project release version $declared"
+          }
       - name: Build
         shell: pwsh
         run: dotnet build native/OSRSLiveDiagnostics.csproj -c Release -r win-x64 --nologo
@@ -38,6 +47,27 @@ jobs:
         run: |
           dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --self-test
           if ($LASTEXITCODE -ne 0) { throw "Self-test failed: $LASTEXITCODE" }
+      - name: OCR fixture test (Windows language availability reported separately)
+        shell: pwsh
+        run: |
+          dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --ocr-self-test
+          if ($LASTEXITCODE -eq 2) { Write-Warning 'OCR fixture not run: no Windows OCR language on runner'; exit 0 }
+          if ($LASTEXITCODE -ne 0) { throw 'Windows OCR fixture failed' }
+      - name: Verify fixed viewport and docked log
+        shell: pwsh
+        run: |
+          $test = Start-Process -FilePath 'native/bin/Release/net10.0-windows10.0.19041.0/win-x64/OSRS-Play.exe' -ArgumentList '--layout-self-test' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput layout-test.log -RedirectStandardError layout-test.err
+          Get-Content layout-test.log
+          Get-Content layout-test.err
+          if ($test.ExitCode -ne 0) { throw "Layout test failed: $($test.ExitCode)" }
+      - name: Verify background capture and input transport
+        shell: pwsh
+        run: |
+          $test = Start-Process -FilePath 'native/bin/Release/net10.0-windows10.0.19041.0/win-x64/OSRS-Play.exe' -ArgumentList '--background-self-test' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput background-test.log -RedirectStandardError background-test.err
+          Get-Content background-test.log
+          Get-Content background-test.err
+          if ($test.ExitCode -eq 2) { Write-Warning 'Windows Graphics Capture unavailable on this runner; real background operation not validated here'; exit 0 }
+          if ($test.ExitCode -ne 0) { throw "Background transport test failed: $($test.ExitCode)" }
       - name: Publish single self-contained EXE
         shell: pwsh
         run: |
@@ -50,6 +80,14 @@ jobs:
           if ($size -lt 10000000) { throw "EXE unexpectedly small: $size" }
           Write-Host "Single EXE verified: $size bytes"
           Write-Host (Get-FileHash $exe -Algorithm SHA256).Hash
+      - name: Upload Windows test EXE for pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OSRS-Play-${{ github.event.pull_request.number }}-win-x64-test
+          path: publish/OSRS-Play.exe
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish verified GitHub release
         if: github.event_name != 'pull_request'
         shell: pwsh
@@ -70,7 +108,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag (LIVE ONLY)" --notes "Live-only shell for original Jagex Launcher and official osclient.exe. Synthetic game server, offline bot and campaign removed. Live bot remains disabled until genuine world-state and action adapters exist. The legacy-named asset serves only auto-update compatibility."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "OSRS Play $tag for the official Windows client. Includes bounded visual startup and F2P-world selection, diagnostics, launcher lifecycle management, conservative execution routines, and SHA-256-checked automatic updates at startup or in the idle state. Built and regression-tested by Windows CI. The full login, training, banking and Grand Exchange flows on the official client are not yet end-to-end verified. Combat and global navigation remain unimplemented. See README and docs for details."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
