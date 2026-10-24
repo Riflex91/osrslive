@@ -552,8 +552,11 @@ internal sealed class MainWindow : Form
     {
         if(visualStartup.ObserveOnly||stopping||!windowHost.Attached||
            windowHost.CurrentKind!=OfficialWindowKind.Game)return;
-        if(!LauncherLifecyclePolicy.MayClose(windowHost.CurrentKind,
-            visualStartup.Game.Confirmed,DateTimeOffset.UtcNow))return;
+        // Once WM_CLOSE was sent, checking whether its HWND disappears must
+        // not depend on the Skills panel remaining visible in later frames.
+        if(!launcherCloseRequested &&
+           !LauncherLifecyclePolicy.MayClose(windowHost.CurrentKind,
+               visualStartup.Game.Confirmed,DateTimeOffset.UtcNow))return;
         if(!launcherCloseRequested)
         {
             launcherCloseRequested=true;
