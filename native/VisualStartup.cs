@@ -603,7 +603,7 @@ internal static class VisualStartupTests
         {
             paint.Clear(Color.Black);
             for(int col=0;col<7;col++)
-            for(int row=0;row<25;row++)
+            for(int row=0;row<24;row++)
             {
                 var bounds=WorldGridOcr.NativeNumberRegion(col,row);
                 paint.FillRectangle(Brushes.LightGray,bounds);

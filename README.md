@@ -1,4 +1,6 @@
-# OSRS Play 1.6.3 – visuelle Trainings-, Bank- und Handelsroutinen
+# OSRS Play 1.6.4 – visuelle Trainings-, Bank- und Handelsroutinen
+
+**Neu in 1.6.4:** Der anhand eines echten Weltlisten-Screenshots bestätigte Zeilenabstand beträgt 19 Pixel statt 18,25. Das Programm liest die dunkle native Ziffernschrift zusätzlich mit einem bildgestützten Font-Matcher. Erforderlich bleiben die aufsteigend validierte Spalte, eine eindeutige Welt und zwei unabhängige Bildschirmbeobachtungen vor einem Klick. [Ursache, Umsetzung und Prüfgrenzen](docs/NATIVE-WORLD-GRID-1.6.4.md).
 
 **Neu in 1.6.3:** Die native F2P-Weltliste erhält eine separate Schwarz-auf-Weiß-Ziffern-OCR für die Spielansicht 1000×600. Der visuell bestätigte Eintrag W399 liegt bereits auf der ersten sichtbaren Seite; es wird daher nicht blind nach rechts geblättert. Vor einer Weltwahl werden verifizierte aufsteigende Spalten und zwei zeitlich unabhängige Beobachtungen derselben Zielzelle verlangt. [Analyse und Grenzen](docs/NATIVE-WORLD-GRID-OCR-1.6.3.md).
 
