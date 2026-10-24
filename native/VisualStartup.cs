@@ -594,6 +594,10 @@ internal sealed class VisualStartup:IDisposable
             var contextLabels=await Recognize(contextFixture,engine);
             if(ExecutionUi.Menu(contextLabels)?.Exact("Use Logs") is null)
                 throw new InvalidOperationException("Context-menu OCR regression");
+            var focusedContext=await ContextMenuOcr.Read(contextFixture,engine,new Point(60,72));
+            if(ExecutionUi.Menu(focusedContext)?.Exact("Use Logs") is null||
+                !focusedContext.All(l=>l.Kind==VisualLabelKind.ContextMenuLine))
+                throw new InvalidOperationException("Right-click anchored focused context-menu OCR regression");
             using var inventoryFixture=new Bitmap(1000,600);
             using(var g=Graphics.FromImage(inventoryFixture))
             using(var font=new Font("Segoe UI",8))
