@@ -41,6 +41,13 @@ internal static class ExecutionRoutinesTests
         ContextMenuOcr.SelfTest();
         InventoryTabPolicy.SelfTest();
         NativeInventoryEmptyReader.SelfTest();
+        var wrongPanel=new InventoryGridDriver(true,active:false);
+        bool panelBlocked=false;
+        try {await new GameInteractions(wrongPanel).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {panelBlocked=ex.Message=="INVENTORY_TAB_NOT_VISUALLY_OPEN";}
+        Require(panelBlocked&&wrongPanel.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "Inventory panel must be independently verified before reading slots or right-clicking");
         var emptyDriver=new InventoryGridDriver(true);
         var fullyEmpty=await new GameInteractions(emptyDriver).Inventory(CancellationToken.None);
         Require(fullyEmpty.EmptySlots==28&&fullyEmpty.Items.Count==0&&
@@ -144,13 +151,13 @@ internal static class ExecutionRoutinesTests
     {
         internal readonly List<GameInput> Inputs=new();
         public VisualFrame Current {get;private set;}
-        internal InventoryGridDriver(bool pixelVerifiedEmpty)
+        internal InventoryGridDriver(bool pixelVerifiedEmpty,bool active=true)
         {
             var slots=Enumerable.Range(0,28).Select(i=>
                 new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,pixelVerifiedEmpty)).ToArray();
             Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
                 DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),
-                new ExecutionPixels(slots,1));
+                new ExecutionPixels(slots,1,InventoryTabActive:active));
         }
         public Task<VisualFrame> ObserveAsync(CancellationToken ct)
         {
