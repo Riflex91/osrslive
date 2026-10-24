@@ -76,7 +76,7 @@ internal static class WorldGridOcr
         if(column is <0 or >=7||row is <0 or >=25)
             throw new ArgumentOutOfRangeException();
         int y=34+(int)Math.Round(row*18.25,MidpointRounding.AwayFromZero);
-        return new Rectangle(NativeColumns[column]+4,y+3,26,12);
+        return new Rectangle(NativeColumns[column]+4,y+3,24,12);
     }
 
     internal static bool HasNativeTable(Bitmap bitmap,IReadOnlyList<VisualLabel> labels)
@@ -154,7 +154,12 @@ internal static class WorldGridOcr
         var numbers=hits.Where(h=>h.Value.Distinct().Count()==1)
             .Select(h=>new VisualLabel(h.Value[0].ToString(),
                 NativeNumberRegion(h.Key.Item1,h.Key.Item2),VisualLabelKind.Number)).ToArray();
-        var verified=WorldGridReader.Classify(labels.Concat(numbers).ToArray());
+        // Ignore unrelated three-digit player counts from the broad OCR.
+        // This pass only trusts its own isolated number cells plus the observed
+        // native world-selection title.
+        var headers=labels.Where(l=>l.Text.Contains("Select a world",
+            StringComparison.OrdinalIgnoreCase)).Take(1);
+        var verified=WorldGridReader.Classify(headers.Concat(numbers).ToArray());
         // A lone "399" is NOT enough. Require a validated ascending column,
         // the same guard used by ordinary world-grid recognition.
         return verified.Count>=6?verified:Array.Empty<VisualLabel>();
