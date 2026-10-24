@@ -811,6 +811,7 @@ internal static class SelfTest
             VisualStartupTests.Run();
             WelcomePlayButtonReader.SelfTest();
             PostPlayScreenReader.SelfTest();
+            NativeWelcomePanelReader.SelfTest();
             NativeWorldDigitReader.SelfTest();
             AccountGoalPlannerTests.Run();
             F2PProgressionTests.Run();

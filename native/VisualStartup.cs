@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -88,6 +88,17 @@ internal static class VisualStartupPolicy
             return target is null?new("TARGET_WORLD_NOT_UNAMBIGUOUSLY_VISIBLE"):
                 new("SELECT_F2P_WORLD",target.Bounds);
         }
+        // The second native entry screen has a parchment welcome banner and
+        // a red center tile. Process it BEFORE the first Play Now screen, since
+        // both can contain "Welcome to Old School RuneScape" in OCR results.
+        var nativeEnter=Unique(l=>l.Kind==VisualLabelKind.EnterButton);
+        if(nativeEnter is not null)
+            return selectedWorldPreviouslyObserved?
+                new("ENTER_GAME",nativeEnter.Bounds):new("WELCOME_WORLD_NOT_VERIFIED");
+        var secondEntry=Unique(l=>l.Text.Equals("CLICK HERE TO PLAY",StringComparison.OrdinalIgnoreCase));
+        if(secondEntry is not null&&Has("Welcome")&&!Has("Play Now"))
+            return selectedWorldPreviouslyObserved?
+                new("ENTER_GAME",secondEntry.Bounds):new("WELCOME_WORLD_NOT_VERIFIED");
         bool welcome=Has("Welcome to Old School RuneScape");
         if(welcome)
         {
@@ -106,9 +117,6 @@ internal static class VisualStartupPolicy
             return play is null?new("PLAY_BUTTON_NOT_RECOGNIZED"):
                 new("PLAY_SELECTED_CHARACTER",play.Bounds);
         }
-        var enter=Unique(l=>l.Text.Equals("CLICK HERE TO PLAY",StringComparison.OrdinalIgnoreCase));
-        if(enter is not null && Has("Welcome"))return selectedWorldPreviouslyObserved?
-            new("ENTER_GAME",enter.Bounds):new("WELCOME_WORLD_NOT_VERIFIED");
         return new("WAITING_FOR_RECOGNIZED_SCREEN");
     }
 }
@@ -336,6 +344,14 @@ internal sealed class VisualStartup:IDisposable
                 if(!labels.Any(l=>l.Text.Equals(phrase.Text,StringComparison.OrdinalIgnoreCase)&&
                     l.Bounds.IntersectsWith(phrase.Bounds)))
                     labels.Add(phrase);
+            if(NativeWelcomePanelReader.Read(bitmap,labels) is VisualLabel native)
+            {
+                labels.Add(native);
+                // The banner itself is image-confirmed. This marker is
+                // intentionally generic; no account text is interpreted.
+                if(!labels.Any(l=>l.Text.Equals("Welcome",StringComparison.OrdinalIgnoreCase)))
+                    labels.Add(new("Welcome",new Rectangle(300,20,400,35)));
+            }
         }
         // A separate enlarged footer pass avoids the tiny native bitmap font
         // being merged with copyright text by full-frame OCR.
@@ -538,12 +554,13 @@ internal sealed class VisualStartup:IDisposable
         var labels=observed.Labels;
         bool welcome=labels.Any(l=>l.Text.Contains("Welcome",StringComparison.OrdinalIgnoreCase));
         bool enter=labels.Any(l=>l.Text.Equals(PostPlayScreenReader.ClickText,StringComparison.OrdinalIgnoreCase));
+        bool nativeCard=labels.Any(l=>l.Kind==VisualLabelKind.EnterButton);
         bool connecting=labels.Any(l=>l.Text.Contains("Connecting to server",StringComparison.OrdinalIgnoreCase)||
             l.Text.Equals("Please wait",StringComparison.OrdinalIgnoreCase));
         bool chat=labels.Any(l=>l.Text.Equals("Public",StringComparison.OrdinalIgnoreCase))&&
             labels.Any(l=>l.Text.Equals("Private",StringComparison.OrdinalIgnoreCase));
         string result=$"stage={Game.LastObservation?.Stage} welcome_marker={welcome} "+
-            $"enter_marker={enter} connecting_marker={connecting} chat_controls={chat} "+
+            $"enter_marker={enter} native_enter_card={nativeCard} connecting_marker={connecting} chat_controls={chat} "+
             $"labels={labels.Count} decision_source=VISIBLE_OCR auth_verified=false";
         DateTimeOffset now=DateTimeOffset.UtcNow;
         if(result==lastPostPlayDiagnostic&&now-lastPostPlayDiagnosticAt<TimeSpan.FromSeconds(20))
@@ -745,6 +762,17 @@ internal static class VisualStartupTests
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),
             new VisualLabel(PostPlayScreenReader.ClickText,new Rectangle(410,267,170,24))},553,true)
             .State=="ENTER_GAME","focused post-play text allows the separately verified second entry");
+        var nativeEntry=new VisualLabel(PostPlayScreenReader.ClickText,
+            NativeWelcomePanelReader.ButtonTextBounds,VisualLabelKind.EnterButton);
+        Require(VisualStartupPolicy.Decide(new[]{Label("Welcome to Old School RuneScape",10),
+            nativeEntry},553,true).State=="ENTER_GAME",
+            "native second entry takes precedence over Play Now welcome screen without world footer");
+        Require(VisualStartupPolicy.Decide(new[]{Label("Welcome to Old School RuneScape",10),
+            nativeEntry},553,false).Click is null,
+            "native second entry never skips previously verified world guard");
+        Require(VisualStartupPolicy.Decide(new[]{Label("Welcome to Old School RuneScape",10),
+            nativeEntry,Label("password",100)},553,true).Click is null,
+            "manual auth screen overrides native second entry tile");
         Require(VisualStartupPolicy.Decide(new[]{new VisualLabel(PostPlayScreenReader.ClickText,
             new Rectangle(410,267,170,24))},553,true).Click is null,
             "second-stage command alone never clicks without Welcome anchor");
