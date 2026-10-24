@@ -15,12 +15,17 @@ internal static class BackgroundIntegrationTests
     private sealed class PassiveInputPanel:Panel
     {
         internal Action? Pressed;
+        internal Action? RightPressed;
+        internal Action<char>? Character;
         protected override void WndProc(ref Message m)
         {
             // A passive receiver isolates the message transport from WinForms'
             // normal selectable-control focus policy.
             if(m.Msg==0x201){Pressed?.Invoke();return;}
             if(m.Msg==0x202)return;
+            if(m.Msg==0x204){RightPressed?.Invoke();return;}
+            if(m.Msg==0x205)return;
+            if(m.Msg==0x102){Character?.Invoke((char)m.WParam);return;}
             base.WndProc(ref m);
         }
     }
@@ -43,7 +48,10 @@ internal static class BackgroundIntegrationTests
             var target=new PassiveInputPanel{Bounds=new Rectangle(20,20,100,80),BackColor=Color.Blue};
             Controls.Add(target);
             int clicks=0;
+            int rightClicks=0;string typed="";
             target.Pressed=()=>{clicks++;target.BackColor=Color.LimeGreen;};
+            target.RightPressed=()=>rightClicks++;
+            target.Character=c=>typed+=c;
             try
             {
                 cover.Show();
@@ -65,10 +73,13 @@ internal static class BackgroundIntegrationTests
                 var foreground=GetForegroundWindow();GetCursorPos(out var cursor);
                 var inputBefore=new LASTINPUTINFO{Size=(uint)Marshal.SizeOf<LASTINPUTINFO>()};GetLastInputInfo(ref inputBefore);
                 bool queued=await BackgroundWindowInput.ClickAsync(Handle,new Point(50,50),()=>false,timeout.Token);
+                bool rightQueued=await BackgroundWindowInput.ClickAsync(Handle,new Point(50,50),()=>false,timeout.Token,true);
+                bool textQueued=await BackgroundWindowInput.TypeTextAsync(Handle,new Point(50,50),"125",false,()=>false,timeout.Token);
                 await Task.Delay(150,timeout.Token);
                 GetCursorPos(out var after);
                 var inputAfter=new LASTINPUTINFO{Size=(uint)Marshal.SizeOf<LASTINPUTINFO>()};GetLastInputInfo(ref inputAfter);
                 if(!queued||clicks!=1)throw new Exception("Background child did not receive exactly one click");
+                if(!rightQueued||rightClicks!=1||!textQueued||typed!="125")throw new Exception("Background right-click/text transport failed");
                 bool userInteracted=inputBefore.Tick!=inputAfter.Tick;
                 if(!userInteracted&&(GetForegroundWindow()!=foreground||cursor.X!=after.X||cursor.Y!=after.Y))
                     throw new Exception($"Foreground/cursor changed: focus_same={GetForegroundWindow()==foreground} "+
@@ -83,7 +94,7 @@ internal static class BackgroundIntegrationTests
                     var pixel=frame.Image.GetPixel(50,50);
                     green=pixel.G>150&&pixel.R<100&&pixel.B<100;
                 }
-                Console.WriteLine("BACKGROUND TRANSPORT PASS: occluded surface, child-directed click, observed pixel confirmation; "+
+                Console.WriteLine("BACKGROUND TRANSPORT PASS: occluded surface, child-directed left/right clicks and text, observed pixel confirmation; "+
                     (userInteracted?"cursor/focus comparison inconclusive due to concurrent user input":"cursor/focus unchanged"));
                 ExitCode=0;
             }

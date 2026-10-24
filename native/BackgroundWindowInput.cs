@@ -27,7 +27,7 @@ internal static class BackgroundWindowInput
         }
         return destination;
     }
-    internal static async Task<bool> ClickAsync(IntPtr window,Point position,Func<bool> shouldStop,CancellationToken ct)
+    internal static async Task<bool> ClickAsync(IntPtr window,Point position,Func<bool> shouldStop,CancellationToken ct,bool right=false)
     {
         if(shouldStop()||!IsWindow(window)||IsIconic(GetAncestor(window,2))||
             !GetClientRect(window,out var bounds)||position.X<0||position.Y<0||
@@ -39,15 +39,32 @@ internal static class BackgroundWindowInput
         if(expectedPid==0||expectedPid!=actualPid||shouldStop())return false;
         IntPtr coordinates=new((point.Y&0xFFFF)<<16|(point.X&0xFFFF));
         if(!PostMessage(destination,0x200,IntPtr.Zero,coordinates))return false;
-        if(!PostMessage(destination,0x201,new IntPtr(1),coordinates))return false;
+        if(!PostMessage(destination,right?0x204u:0x201u,new IntPtr(right?2:1),coordinates))return false;
         bool released=false;
         try
         {
             await Task.Delay(65,ct);
-            released=PostMessage(destination,0x202,IntPtr.Zero,coordinates);
+            released=PostMessage(destination,right?0x205u:0x202u,IntPtr.Zero,coordinates);
         }
-        finally{if(!released)PostMessage(destination,0x202,IntPtr.Zero,coordinates);}
+        finally{if(!released)PostMessage(destination,right?0x205u:0x202u,IntPtr.Zero,coordinates);}
         return released;
+    }
+    internal static bool Escape(IntPtr window)=>IsWindow(window)&&!IsIconic(GetAncestor(window,2))&&
+        PostMessage(window,0x100,new IntPtr(0x1B),IntPtr.Zero)&&PostMessage(window,0x101,new IntPtr(0x1B),IntPtr.Zero);
+    internal static async Task<bool> TypeTextAsync(IntPtr window,Point anchor,string text,bool submit,Func<bool> stop,CancellationToken ct)
+    {
+        if(stop()||!IsWindow(window)||IsIconic(GetAncestor(window,2))||text.Length is <1 or >50||text.Any(c=>c<32||c>126))return false;
+        var point=new POINT{X=anchor.X,Y=anchor.Y};var target=Resolve(window,ref point);
+        GetWindowThreadProcessId(window,out uint expected);GetWindowThreadProcessId(target,out uint actual);
+        if(expected==0||expected!=actual)return false;
+        foreach(char c in text)
+        {
+            ct.ThrowIfCancellationRequested();if(stop())return false;
+            if(!PostMessage(target,0x102,new IntPtr(c),IntPtr.Zero))return false;
+            await Task.Delay(20,ct);
+        }
+        if(!submit)return true;
+        return !stop()&&PostMessage(target,0x100,new IntPtr(0x0D),IntPtr.Zero)&&PostMessage(target,0x101,new IntPtr(0x0D),IntPtr.Zero);
     }
     [StructLayout(LayoutKind.Sequential)]private struct POINT{internal int X,Y;}
     [StructLayout(LayoutKind.Sequential)]private struct RECT{internal int Left,Top,Right,Bottom;}

@@ -9,11 +9,11 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
-    DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels);
-internal sealed record VisualDecision(string State,Rectangle? Click=null,bool MoveOnly=false);
+    DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
+internal sealed record VisualDecision(string State,Rectangle? Click=null,bool MoveOnly=false,GameInput? RuntimeInput=null);
 
 internal static class WorldFooterPolicy
 {
@@ -110,12 +110,14 @@ internal sealed class VisualStartup:IDisposable
     internal string CaptureGeometry=>backgroundCapture.Geometry;
     internal readonly OfficialLiveRenderObserver RenderObserver;
     internal readonly GameObservationTracker Game=new();
+    internal readonly GameplayCoordinator Gameplay;
     internal bool Paused {get;set;}
     internal bool ObserveOnly {get;set;}
     internal string State {get;private set;}="WAITING_FOR_WINDOW";
     internal VisualStartup(Diagnostics log,OfficialLiveRenderObserver? renderObserver=null)
     {
         this.log=log;
+        Gameplay=new(log);
         RenderObserver=renderObserver??new();
         try{ocr=OcrEngine.TryCreateFromLanguage(new Language("en-US")) ??
             OcrEngine.TryCreateFromUserProfileLanguages();}
@@ -131,7 +133,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();previousAction="";repeatedActions=0;pageActions=0;}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();previousAction="";repeatedActions=0;pageActions=0;}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromSeconds(4))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -160,6 +162,12 @@ internal sealed class VisualStartup:IDisposable
         if(ObserveOnly){SetState("OBSERVATION_ONLY_"+Game.LastObservation?.Stage);return;}
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
         {
+            if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
+            {
+                if(Paused||ObserveOnly)throw new OperationCanceledException(token);
+                return await Capture(target,owner,token);
+            },(frame,input,token)=>Dispatch(frame,new("GAMEPLAY_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),ct))
+            {SetState("AGENT_"+Gameplay.State);return;}
             if(Game.LastObservation.TotalLevel is null&&observed.ScreenBounds.Size==DockedWindowLayout.GameSize)
             {
                 var button=new Rectangle(DockedWindowLayout.GameSize.Width-230,DockedWindowLayout.GameSize.Height-322,10,10);
@@ -210,7 +218,7 @@ internal sealed class VisualStartup:IDisposable
         var bounds=new Rectangle(point.X,point.Y,captured.Image.Width,captured.Image.Height);
         var labels=await Recognize(captured.Image,ocr!);
         ct.ThrowIfCancellationRequested();
-        return new(target,bounds,captured.CapturedUtc,labels);
+        return new(target,bounds,captured.CapturedUtc,labels,ExecutionVision.Read(captured.Image,labels));
     }
     private static async Task<IReadOnlyList<VisualLabel>> Recognize(Bitmap bitmap,OcrEngine engine)
     {
@@ -243,6 +251,8 @@ internal sealed class VisualStartup:IDisposable
         labels.AddRange(focusedWorlds.Count>0?focusedWorlds:WorldGridReader.Classify(labels));
         labels.AddRange(WorldPageReader.Read(bitmap,labels));
         labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
+        if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
+            labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
         return labels;
     }
     private static async Task<IReadOnlyList<VisualLabel>> ReadWorldFooter(Bitmap bitmap,OcrEngine engine)
@@ -336,30 +346,69 @@ internal sealed class VisualStartup:IDisposable
             }
             var worldRead=await WorldGridOcr.Read(worldGrid,engine,gridLabels);
             if(!worldRead.Any(l=>l.Text=="399"))throw new InvalidOperationException("Focused world-grid OCR regression");
+            using var contextFixture=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(contextFixture))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,40,40);
+                g.DrawString("Use Logs",font,Brushes.White,40,68);
+                g.DrawString("Examine Logs",font,Brushes.White,40,96);
+                g.DrawString("Cancel",font,Brushes.White,40,124);
+            }
+            var contextLabels=await Recognize(contextFixture,engine);
+            if(ExecutionUi.Menu(contextLabels)?.Exact("Use Logs") is null)
+                throw new InvalidOperationException("Context-menu OCR regression");
+            using var inventoryFixture=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(inventoryFixture))
+            using(var font=new Font("Segoe UI",8))
+            {
+                g.Clear(Color.Black);
+                var b=ExecutionUi.InventorySlot(0);g.DrawString("125",font,Brushes.Yellow,b.Location);
+                var other=ExecutionUi.InventorySlot(1);g.DrawString("12K",font,Brushes.Yellow,other.Location);
+            }
+            var quantities=await ExecutionVision.ReadQuantities(inventoryFixture,engine);
+            if(!quantities.Any(l=>l.Text=="0=125")||quantities.Any(l=>l.Text.StartsWith("1=")))
+                throw new InvalidOperationException("Exact inventory quantity OCR regression");
             Console.WriteLine("OCR FIXTURE PASS: Windows OCR -> known-screen policy, no capture or input");
             return 0;
         }
         catch(Exception ex){Console.Error.WriteLine("OCR FIXTURE FAIL: "+ex);return 1;}
     }
-    private async Task Dispatch(VisualFrame frame,VisualDecision decision,IntPtr owner,CancellationToken ct)
+    private async Task<bool> Dispatch(VisualFrame frame,VisualDecision decision,IntPtr owner,CancellationToken ct)
     {
         if(decision.State.StartsWith("WORLD_PAGE_")&&pageActions>=12)
-        {SetState("WORLD_PAGE_LIMIT_REACHED");return;}
-        if(previousAction==decision.State&&repeatedActions>=3)
-        {SetState("ACTION_RETRY_LIMIT_"+decision.State);return;}
+        {SetState("WORLD_PAGE_LIMIT_REACHED");return false;}
+        if(decision.RuntimeInput is null&&previousAction==decision.State&&repeatedActions>=3)
+        {SetState("ACTION_RETRY_LIMIT_"+decision.State);return false;}
         var box=decision.Click!.Value;
-        if(box.Width<2||box.Height<2||!new Rectangle(Point.Empty,frame.ScreenBounds.Size).Contains(box))return;
-        if(Paused||ObserveOnly||GetAncestor(frame.Window,2)!=owner)return;
+        if(box.Width<2||box.Height<2||!new Rectangle(Point.Empty,frame.ScreenBounds.Size).Contains(box))return false;
+        if(Paused||ObserveOnly||GetAncestor(frame.Window,2)!=owner)return false;
         if(DateTimeOffset.UtcNow-frame.CapturedUtc>TimeSpan.FromSeconds(2))
-        {SetState("INPUT_FRAME_TOO_OLD");return;}
+        {SetState("INPUT_FRAME_TOO_OLD");return false;}
         var currentOrigin=new POINT();
         if(!GetClientRect(frame.Window,out var currentRect)||!ClientToScreen(frame.Window,ref currentOrigin)||
-           new Rectangle(currentOrigin.X,currentOrigin.Y,currentRect.Right,currentRect.Bottom)!=frame.ScreenBounds)return;
+           new Rectangle(currentOrigin.X,currentOrigin.Y,currentRect.Right,currentRect.Bottom)!=frame.ScreenBounds)return false;
         var point=new Point(box.X+box.Width/2,box.Y+box.Height/2);
-        bool queued=decision.MoveOnly?BackgroundWindowInput.Move(frame.Window,point):
-            await BackgroundWindowInput.ClickAsync(frame.Window,point,()=>Paused||ObserveOnly,ct);
+        var kind=decision.RuntimeInput?.Kind??(decision.MoveOnly?GameInputKind.Hover:GameInputKind.LeftClick);
+        if(kind==GameInputKind.Text)
+        {
+            var input=decision.RuntimeInput!;
+            bool allowed=input.Submit?ExecutionUi.AmountPrompt(frame.Labels)&&Regex.IsMatch(input.Text??"",@"^[1-9]\d{0,8}$"):
+                (ExecutionUi.ItemSearchPrompt(frame.Labels)||ExecutionUi.BankSearchPrompt(frame.Labels))&&
+                Regex.IsMatch(input.Text??"",@"^[a-zA-Z0-9 ()'\-]{1,50}$");
+            if(!allowed)return false;
+        }
+        bool queued=kind switch
+        {
+            GameInputKind.Hover=>BackgroundWindowInput.Move(frame.Window,point),
+            GameInputKind.Escape=>BackgroundWindowInput.Escape(frame.Window),
+            GameInputKind.Text=>await BackgroundWindowInput.TypeTextAsync(frame.Window,point,decision.RuntimeInput!.Text!,
+                decision.RuntimeInput.Submit,()=>Paused||ObserveOnly,ct),
+            _=>await BackgroundWindowInput.ClickAsync(frame.Window,point,()=>Paused||ObserveOnly,ct,kind==GameInputKind.RightClick)
+        };
         if(!queued)
-        {Paused=true;SetState("INPUT_DISPATCH_FAILED");return;}
+        {Paused=true;SetState("INPUT_DISPATCH_FAILED");return false;}
         repeatedActions=previousAction==decision.State?repeatedActions+1:1;
         if(decision.State.StartsWith("WORLD_PAGE_"))pageActions++;
         previousAction=decision.State;
@@ -368,6 +417,7 @@ internal sealed class VisualStartup:IDisposable
         log.Add(Severity.INFO,"VISUAL_INPUT","ACTION_DISPATCHED",
             $"action={decision.State} input=WINDOW_MESSAGE background=true global_cursor_moved=false "+
             "success_requires_next_observation=true");
+        return true;
     }
     private void SetState(string state)
     {
@@ -380,7 +430,7 @@ internal sealed class VisualStartup:IDisposable
         if(state=="WORLD_LABEL_NOT_RECOGNIZED")log.Add(Severity.WARN,"VISUAL_STARTUP","WORLD_FOOTER_OCR",
             footerDiagnostic);
     }
-    public void Dispose()=>backgroundCapture.Dispose();
+    public void Dispose(){backgroundCapture.Dispose();Gameplay.Dispose();}
     [StructLayout(LayoutKind.Sequential)]private struct POINT{internal int X,Y;}
     [StructLayout(LayoutKind.Sequential)]private struct RECT{internal int Left,Top,Right,Bottom;}
     [DllImport("user32.dll")]private static extern bool IsWindow(IntPtr h);

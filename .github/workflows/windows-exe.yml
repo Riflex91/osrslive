@@ -91,7 +91,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "Fixed 1000x600 official-client viewport with bottom-docked hide/copy log controls. Windows Graphics Capture and window-message input implement a background transport verified on a covered test window; official osclient input acceptance remains unverified. Consistent repeated visual skill readings feed goal proposals and local progress checkpoints. Skill training, banking, trading and crafting executors are not implemented. Minimization pauses capture. F8 pauses automation."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "Fixed 1000x600 viewport and docked hide/copy log. Visual executors for gathering, production, banking and bounded GE orders are integrated, with result checks and durable trade deduplication. End-to-end operation of these new routines on the official client remains unverified; combat and global navigation are not implemented. Background left/right click and text transport are tested on covered owned windows. Minimization pauses capture; F8 pauses automation."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()

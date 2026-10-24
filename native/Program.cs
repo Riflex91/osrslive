@@ -118,7 +118,7 @@ internal sealed class MainWindow : Form
         log.Add(Severity.INFO,"CORE","PRIVACY",
             "credentials_and_oauth_handled_only_by_jagex=true");
         log.Add(Severity.INFO,"LIVE_AGENT","CAPABILITIES",
-            "startup_input=WINDOW_MESSAGES capture=WINDOWS_GRAPHICS_CAPTURE gameplay_routines=MISSING "+
+            "startup_input=WINDOW_MESSAGES capture=WINDOWS_GRAPHICS_CAPTURE gameplay_routines=VISUAL_LOCAL_EXECUTORS "+
             "goal=MAX_ALL_SKILLS_THEN_WEALTH_AND_GEAR");
         if(Updater.TakeLastOutcome() is string result)
             log.Add(Severity.INFO,"UPDATER","PREVIOUS_UPDATE",result);
@@ -172,7 +172,7 @@ internal sealed class MainWindow : Form
                 $"frame_sample_age_s={(DateTimeOffset.UtcNow-liveObserver.Last.ObservedUtc).TotalSeconds:0.0} "+
                 $"working_set_mib={p.WorkingSet64/1024/1024} "+
                 $"uptime_s={uptime.Elapsed.TotalSeconds:0} capture={visualStartup.CaptureState} "+
-                "authenticated=false_unverified agent_actions=DISABLED");
+                $"authenticated=false_unverified agent_state={visualStartup.Gameplay.State}");
             PersistLog();
         };
         diagnosticsTimer.Start();
@@ -212,7 +212,7 @@ internal sealed class MainWindow : Form
             $"phase={plan.Phase} skill={plan.Skill??"none"} reason={plan.Reason} "+
             $"activity={visualStartup.Game.Activity?.Method?.Id??"none"} prerequisites={visualStartup.Game.Activity?.State??"none"} "+
             $"recommended_tool={visualStartup.Game.Activity?.RecommendedTool?.Item.Replace(' ','_')??"none"} "+
-            "scope=F2P_PROPOSAL executor=NOT_IMPLEMENTED";
+            $"scope=F2P_PROPOSAL executor={visualStartup.Gameplay.State}";
         if(goal!=lastGoalDiagnostic)
         {lastGoalDiagnostic=goal;log.Add(Severity.INFO,"ACCOUNT_GOAL","DECISION",goal);}
         if(confirmed is not null&&plan is not null)
@@ -253,9 +253,10 @@ internal sealed class MainWindow : Form
         eventLog.Font=new Font("Consolas",9);
         layout.Controls.Add(eventLog,0,3);
         footer.Dock=DockStyle.Fill;footer.TextAlign=ContentAlignment.MiddleLeft;
-        footer.Text="Live-Agent wartet auf echte Daten-/Aktionsschnittstelle";
-        var toolbar=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=4,RowCount=1};
+        footer.Text="Live-Agent wartet auf konsistente Skills und sichtbare Interaktionen";
+        var toolbar=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=5,RowCount=1};
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -271,6 +272,14 @@ internal sealed class MainWindow : Form
         toolbar.Controls.Add(pauseAutomation,1,0);
         toolbar.Controls.Add(toggleLog,2,0);
         toolbar.Controls.Add(copyLog,3,0);
+        var jobButton=new Button{Text="Aufgabe …",AutoSize=true};
+        jobButton.Click+=(_,_)=>
+        {
+            visualStartup.Paused=true;changePending=true;
+            using var dialog=new AgentJobDialog();
+            if(dialog.ShowDialog(this)==DialogResult.OK)visualStartup.Gameplay.Reset();
+        };
+        toolbar.Controls.Add(jobButton,4,0);
         layout.Controls.Add(toolbar,0,4);
         AdjustLogLayout();
     }
@@ -455,11 +464,11 @@ internal sealed class MainWindow : Form
                         loggedBlockedAgent=true;
                         log.Add(Severity.INFO,"LIVE_AGENT","AUTO_START_EVALUATED",
                             "goal=MAX_ALL_SKILLS_THEN_WEALTH_AND_GEAR "+
-                            "state=WAITING_FOR_VERIFIED_SKILLS_AND_ACTIVITY_RUNNERS "+
+                            "state=WAITING_FOR_CONSISTENT_SKILLS_AND_VISIBLE_ACTIONS "+
                             "game_window_visible=true pixel_observation_cannot_verify_login=true");
                         log.Add(Severity.INFO,"VISUAL_STARTUP","AUTO_START",
                             $"input_enabled={!visualStartup.ObserveOnly} transport=WINDOW_MESSAGES "+
-                            "gameplay_routines=MISSING F8=PAUSE");
+                            "gameplay_routines=VISUAL_LOCAL_EXECUTORS F8=PAUSE");
                     }
                     changePending=true;
                 }
@@ -568,7 +577,7 @@ internal sealed class MainWindow : Form
         else footer.Text=windowHost.Attached &&
             windowHost.CurrentKind==OfficialWindowKind.Game?
             visualStartup.ObserveOnly?"Nur Beobachtung: keine Mauseingaben. Zielvorschläge führen noch keine Spielaktionen aus.":
-            "Hintergrundstart per Fensternachrichten; Zielvorschlag aus Skills. Spielroutinen fehlen.":
+            "Visuelle Routinen: "+visualStartup.Gameplay.State+" | F8 pausiert. Live-Prüfung ausstehend.":
             "Jagex-Anmeldung erfolgt im Original-Launcher. OSRS Play fordert kein Passwort an.";
         if(!eventLog.Visible)return;
         var events=log.Snapshot().TakeLast(420);
@@ -672,6 +681,7 @@ internal static class SelfTest
             VisualStartupTests.Run();
             AccountGoalPlannerTests.Run();
             F2PProgressionTests.Run();
+            ExecutionRoutinesTests.Run();
             GameScreenReaderTests.Run();
             const string manifest="version=0.9.1\n"+
                 "exeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.9.1/OSRS-Play.exe\n"+

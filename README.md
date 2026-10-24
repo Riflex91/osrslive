@@ -1,7 +1,9 @@
-# OSRS Play 1.5.0 – Login-Erkennung und F2P-Fortschrittsplanung
+# OSRS Play 1.6.0 – visuelle Trainings-, Bank- und Handelsroutinen
 
 Windows-Oberfläche für den unveränderten offiziellen Jagex Launcher und `osclient.exe`.
 Die Anwendung ist **noch kein vollständig selbstständig spielender Maxing-Agent**.
+
+Neu: An den Fenstertransport angeschlossene Routinen für Sammeln, Kochen, Firemaking, Lederverarbeitung, Smithing, Prayer, Runecraft, einzelne Rezepte und GE-Aufträge. Die vollständige Funktion auf dem offiziellen Client ist noch nicht Ende-zu-Ende bestätigt. [Bedienung, unterstützte Abläufe und Grenzen](docs/VISUELLE-AUSFUEHRUNG-1.6.0.md).
 
 ## Fenster und Log
 
@@ -39,7 +41,13 @@ Der Zielplaner schlägt den nächsten zugänglichen F2P-Skill unter 99 vor; erst
 
 Der neue F2P-Katalog enthält Basismethoden für alle 15 freien Skills und jeden trainierbaren Levelbereich, neun Quest-XP-Gelegenheiten, Werkzeug-Upgrades und erste Rezeptketten. Aus bestätigten Skills entsteht ein Aktivitätsvorschlag mit offen ausgewiesenen Voraussetzungen. Unbekannte Inventar-/Bank-/Questdaten werden nicht als erfüllt behandelt.
 
-Die Beschaffungspolicy bevorzugt vorhandene Gegenstände, bindet Angebote an Produkt und fehlende Menge, prüft die vollständige Charge, frische Gesamtkosten und die Münzreserve. Kontomodus, GE-Slots, neue F2P-Verkaufsbeschränkungen sowie fehlende Ausführer werden berücksichtigt. **Navigation, Skill-Aktivitäten, Inventar-/Bank-/Questerkennung, Live-Preise und tatsächliche Bank-/Handels-/Herstellungsroutinen fehlen weiterhin.** Die Anwendung trainiert, kauft und fertigt deshalb noch nicht selbstständig.
+Die Ausführer untersuchen Inventarslots über Bildsignaturen, Mengen-OCR und Kontextmenüs. Nach einer Eingabe benötigen sie ein neueres Bild und passende Bestandsänderungen. Ressourcen, Produktionsdialoge, Bank und GE werden über lesbare Aktionshinweise bedient; unbekannte oder mehrdeutige Anzeigen halten den Ablauf an.
+
+Die Beschaffungspolicy bevorzugt vorhandene Gegenstände, bindet Angebote an Produkt und fehlende Menge, prüft frische Gesamtkosten und die Münzreserve. Die neue Laufzeit kann ausgewählte Produkte ablegen, Material entnehmen und nach bestätigter leerer Banksuche einen nötigen Gegenstand kaufen. Aktuelle F2P-Preise kommen von der Wiki-Preis-API. Ein dauerhaftes Angebotsjournal verhindert blindes Wiedereinstellen bei Teilfüllung oder Neustart. Ein vollständiger automatischer Vergleich aller Beschaffungswege ist noch nicht angebunden.
+
+**Aufgabe …** pausiert die Automatik und öffnet Einzelaufträge für Training, Herstellung, Kaufen/Verkaufen und Bank. Nach dem Einreihen **Automatik fortsetzen** wählen. Ohne Einzelauftrag wählt die Automatik eine versorgte, unterstützte Trainingsaktivität. Der Kontotyp ist eine Einstellung, keine automatische Ironman-Erkennung; die anfängliche Münzreserve beträgt 500.
+
+**Noch offen:** Kalibrierung und vollständiger Live-Test der neuen Routinen, Kampf, globale Navigation, Quest-Ausführung und Gefahrenmanagement. Ein sichtbarer Szenenausschnitt ersetzt keine Route zwischen Bank, Ressourcen, Altar und GE. Minimiert bleibt die Aufnahme pausiert. Die Anwendung wird weiterhin nicht als fertiger Langzeit-Maxing-Agent ausgegeben.
 
 [Gründliche F2P-Auswertung, konkrete Loginbefunde, Quellen und Implementierungsgrenzen](docs/F2P-PROGRESSION-UND-LOGIN-2026-10-24.md).
 
