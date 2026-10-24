@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.1.0";
+    internal const string Version="1.2.0";
     private const int Capacity=10000;
     private readonly object sync=new();
     private readonly List<LogEvent> entries=new();
@@ -73,16 +73,12 @@ internal sealed class Diagnostics
         sb.AppendLine($"Puffer-Überlauf: {counters.Dropped} | RAM: {proc.WorkingSet64/1024/1024} MiB");
         sb.AppendLine("Offizielle Spielansicht: Jagex Launcher / osclient.exe als Originalfenster eingebettet.");
         sb.AppendLine("Spielzustand und Authentifizierung: durch OSRS Play NICHT verifiziert.");
-        sb.AppendLine("Live-Agent: NICHT VERFÜGBAR – keine offizielle Spielzustands-/Aktionsschnittstelle.");
+        sb.AppendLine("Visueller Start: Launcher, erkennbare Weltenauswahl und Play per Maus; F8 pausiert.");
+        sb.AppendLine("Spielender Agent: NICHT VERFÜGBAR – Aktivitäts-, Bank-, Handels- und Herstellungsroutinen fehlen.");
         sb.AppendLine("Keine Offline-Sitzungen, Sandbox-Welt oder künstliche Game-Ticks.");
         sb.AppendLine("--- LOG ---");
-        foreach(var ev in Snapshot().TakeLast(1600))
+        foreach(var ev in Snapshot())
         {
-            if(sb.Length+ev.Line.Length>190000)
-            {
-                sb.AppendLine("... gekürzt; JSON-/ZIP-Export verwenden");
-                break;
-            }
             sb.AppendLine(ev.Line);
         }
         return sb.ToString();

@@ -1,61 +1,55 @@
-# OSRS Play v1.1.0 – echtes Spielbild beobachten (Live-only)
+# OSRS Play 1.2.0 – visueller Start und Diagnose
 
-## Neue Live-Beobachtung
+Windows-Oberfläche für den unveränderten Jagex Launcher und `osclient.exe`.
+Diese Version ist **noch kein selbstständig spielender Maxing-Agent**.
 
-Ab v1.1.0 beobachtet OSRS Play **alle zwei Sekunden ausschließlich
-das tatsächlich sichtbare, eingebettete offizielle `osclient.exe`-Fenster**.
-Es werden 96 Farbproben aus einem kleinen mittleren Bildausschnitt analysiert,
-um sichtbare Fensterzustände zu unterscheiden:
+## Bedienung
 
-- `NoGameWindow`: kein originales OSRS-Spielfenster eingebettet
-- `NotForeground` / `Minimized`: Spiel verdeckt oder Fenster minimiert;
-  **keine Bildaufnahme**
-- `TooSmall` / `CaptureUnavailable`: keine zuverlässige Aufnahme möglich
-- `UniformPixels`: weitgehend gleichfarbiger Ausschnitt, z. B. Ladebildschirm
-- `VisibleStatic`: ein echtes, sichtbares Spielbild mit wenig Veränderung
-- `VisibleChanging`: im Spielausschnitt sichtbare Bildänderungen
+- **Log ausblenden / einblenden:** gibt Platz an die Spielansicht zurück; Protokollierung läuft weiter.
+- **Log kopieren** und **Strg+Umschalt+C:** derselbe bereinigte Bericht mit allen bis zu 10.000 gepufferten Ereignissen, auch bei verborgenem Log. Die Vorschau zeigt nur 420 Ereignisse; Pufferüberläufe stehen im Bericht.
+- **Automatik pausieren / fortsetzen**, **F8:** Eingabeautomatik anhalten. F8 wird auch während der Mausbewegung geprüft.
+- Bei belegter Zwischenablage folgen begrenzte Wiederholungen und gegebenenfalls „Erneut kopieren“.
 
-Der Bericht erzeugt `OFFICIAL_OBSERVER RENDER_STATE_CHANGED` und
-`RUNTIME HEALTH render_state=...`. Die App speichert **keine Screenshots,
-keine extrahierten Chattexte und keine Pixelinhalte**. Der Launcher wird
-ausdrücklich nicht aufgenommen, sodass Login- und MFA-Dialoge nicht durch
-den Beobachter verarbeitet werden.
+Logdatei: `%LOCALAPPDATA%\OSRSPlay\live-logs\last-session.log`.
+Passwörter, übliche Token-Felder und E-Mail-Adressen werden im Ereignislog redigiert.
+Keine Screenshot- oder OCR-Text-Exporte.
 
-**Grenze:** Sichtbares oder veränderliches Spielbild ist **kein Beweis
-für einen tatsächlich angemeldeten Charakter**, eine bestätigte OSRS-Welt,
-Gold-/Inventarwerte oder einen funktionierenden Aktionskanal. Das Log und
-die Statusanzeige behalten `Login: NICHT VERIFIZIERT`.
+## Automatischer Einstieg
 
-## Autostart und Agent
+1. Im offiziellen Jagex Launcher anmelden, den gewünschten Charakter und **Offizieller Client** auswählen. Die Anwendung übernimmt diese bestehende Auswahl.
+2. OSRS Play übernimmt ein vorhandenes offizielles Fenster oder öffnet den Launcher. Windows Accessibility identifiziert einen eindeutigen „Spielen“-/„Play“-Button; die Bedienung erfolgt per Maus.
+3. Die vorhandene F2P-Prüfung vergleicht erreichbare uneingeschränkte freie Welten aus Jagex' Weltliste anhand mehrerer TCP-Proben.
+4. Windows OCR liest das sichtbare Spielfenster im Vordergrund. Auf einem erkannten Welcome-Bildschirm öffnet der Ablauf bei abweichender Welt die Weltenauswahl. Die gemessene Zielwelt wird nur angeklickt, wenn ihre Nummer eindeutig sichtbar ist.
+5. Bei passendem sichtbarem Weltlabel bedient der Ablauf „Play Now“ und einen erkannten nachfolgenden Welcome-/„CLICK HERE TO PLAY“-Bildschirm. Jeder Klick benötigt eine neue Beobachtung; Dispatch gilt nicht als Erfolg.
 
-Die bisherige automatische Übernahme des Jagex Launchers bzw. offiziellen
-OSRS-Clients bleibt. Mit einer bereits gültigen Jagex-Sitzung kann der
-Launcher ohne erneute Passworteingabe gestartet werden. Wenn Jagex
-eine Anmeldung, Charakterauswahl oder MFA verlangt, ist dieser offizielle
-Schritt erforderlich; OSRS Play umgeht ihn nicht.
+**Grenzen:** nicht sichtbare Weltseiten werden noch nicht automatisch durchgeblättert. Mehrdeutige OCR-Treffer, unbekannte Bildschirme, fehlende OCR-Sprachen und Anmeldung/MFA benötigen einen manuellen Schritt. Es werden keine Zugangsdaten eingegeben. Die Oberfläche muss im Vordergrund bleiben. Nutzerinteraktion hat Vorrang; entgegenlaufende Mausbewegung während der Ausführung pausiert. Pro unverändertem Aktionstyp gibt es maximal drei Eingabeversuche. Keine Zusage zur Nichterkennung.
 
-Der Agentstart wird nach Erscheinen des offiziellen Spielclientfensters
-automatisch **geprüft**, jedoch noch nicht freigegeben:
-`LIVE_AGENT AUTO_START_EVALUATED gate=OFFICIAL_ADAPTER_MISSING`.
-Ein künftiger Adapter müsste unabhängig Authentifizierung, Charakter,
-tatsächliche freie Welt und eine von Jagex zugelassene Aktionsschnittstelle
-nachweisen. Bis dahin bleibt `LIVE_AGENT START_BLOCKED` und es
-werden **keine automatisierten Aktionen** an den offiziellen Server gesendet.
+Sichtbare Login-Elemente sind kein serverseitiger Authentifizierungsnachweis. Die vorhandene Farbproben-Beobachtung bleibt erhalten und wird nicht als Skill-, Inventar- oder Bankdaten ausgegeben.
 
-Automatisch ermittelter F2P-Ping bleibt eine **Empfehlung**, keine
-automatische Weltenwahl im Spiel. Die Oberfläche hat keine eigenen Buttons;
-die Spielcontrols gehören vollständig Jagex.
+## Langfristiges Ziel und Beschaffung
 
-## Test
+`AccountGoalPlanner` enthält separat testbare Regeln:
 
-EXE neu starten. Nach der Updateprüfung startet OSRS Play den offiziellen
-Jagex Launcher, übernimmt das Spiel nach `Play Now` und zeichnet alle
-zwei Sekunden das Bildstatus-Ergebnis auf. Betrachte den Bereich mindestens
-15 Sekunden ohne andere Fenster darüber zu legen. Anschließend Logdatei
-`%LOCALAPPDATA%\OSRSPlay\live-logs\last-session.log`
-prüfen oder **Strg+Umschalt+C** drücken.
+- Verfügbare Skills bis 99 trainieren; erst bei **allen 24** bekannten Skills auf 99 auf Vermögen/Ausrüstung umschalten.
+- Mitglieder-Skills auf F2P nicht als erledigt behandeln.
+- Bestätigten Eigenbestand vor Beschaffung verwenden.
+- Kaufen und Herstellen anhand übergebener aktueller Gesamtkosten, erfüllter Voraussetzungen und Ausführbarkeit vergleichen; übergebene Münzreserve erhalten.
+- Bei unbekanntem Bestand/Kontostand oder veralteten Preisen warten.
 
-Die Windows-CI prüft Klassifikation von farbigen, leeren und geänderten
-Bildproben sowie die Verweigerung des Botstarts ohne gültige Schnittstelle.
-Die tatsächliche Bildaufnahme der GPU-gerenderten Original-`osclient.exe`
-muss auf deinem Rechner verifiziert werden.
+**Diese Regeln sind noch nicht an einen spielenden Executor angeschlossen.** Aktive Charakter-/Skilldaten, Inventar-/Bankerkennung, Navigation, Aktivitäten je Skill, Rezept-/Upgrade-Katalog, Preisdaten und Handels-/Herstellungsroutinen mit Ergebnisbestätigung fehlen. Die Anwendung kauft, fertigt und trainiert deshalb noch nichts automatisch. Öffentliche Hiscores ersetzen die fehlenden Sitzungsdaten nicht.
+
+## Entwicklung und Prüfung
+
+Windows x64 mit .NET 10 SDK und Windows OCR-Sprachunterstützung:
+
+```powershell
+dotnet build native/OSRSLiveDiagnostics.csproj -c Release
+dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --self-test
+dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --ocr-self-test
+dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --ui-smoke-test
+dotnet publish native/OSRSLiveDiagnostics.csproj -c Release -r win-x64 -o publish
+```
+
+`--ui-smoke-test` startet weder Updates noch Jagex noch Eingaben und schreibt `ui-smoke-test.log`. `--ocr-self-test` prüft lokale OCR auf einem generierten Bild ohne Bildschirmaufnahme oder Eingaben.
+
+[Recherche, Umsetzung und Verifizierungslücken](docs/OSRS-VISUAL-STARTUP-2026-10-24.md).

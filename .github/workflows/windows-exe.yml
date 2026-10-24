@@ -38,6 +38,12 @@ jobs:
         run: |
           dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --self-test
           if ($LASTEXITCODE -ne 0) { throw "Self-test failed: $LASTEXITCODE" }
+      - name: OCR fixture test (Windows language availability reported separately)
+        shell: pwsh
+        run: |
+          dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --ocr-self-test
+          if ($LASTEXITCODE -eq 2) { Write-Warning 'OCR fixture not run: no Windows OCR language on runner'; exit 0 }
+          if ($LASTEXITCODE -ne 0) { throw 'Windows OCR fixture failed' }
       - name: Publish single self-contained EXE
         shell: pwsh
         run: |
@@ -70,7 +76,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag (LIVE ONLY)" --notes "Live-only shell for original Jagex Launcher and official osclient.exe. Synthetic game server, offline bot and campaign removed. Live bot remains disabled until genuine world-state and action adapters exist. The legacy-named asset serves only auto-update compatibility."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "Official-client window host with hide/copy log controls, visual mouse startup for recognized screens, and F8 pause. World selection requires the measured F2P world to be visible and unambiguous. Goal/procurement policies are tested but not connected to gameplay executors; training, banking, trading and crafting are not implemented. The legacy-named asset serves only auto-update compatibility."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
