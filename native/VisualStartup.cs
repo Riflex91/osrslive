@@ -111,6 +111,9 @@ internal sealed class VisualStartup:IDisposable
     internal readonly OfficialLiveRenderObserver RenderObserver;
     internal readonly GameObservationTracker Game=new();
     internal readonly GameplayCoordinator Gameplay;
+    // Called immediately after independent in-game OCR confirmation, before
+    // potentially long-running inventory/production executor work.
+    internal Action? VisuallyConfirmedSession;
     internal bool Paused {get;set;}
     internal bool ObserveOnly {get;set;}
     internal string State {get;private set;}="WAITING_FOR_WINDOW";
@@ -159,6 +162,8 @@ internal sealed class VisualStartup:IDisposable
         if(observed is null)
         {SetState("CAPTURE_"+backgroundCapture.State);return;}
         Game.Observe(GameScreenReader.Read(observed),DateTimeOffset.UtcNow);
+        if(!ObserveOnly&&Game.Confirmed is not null)
+            VisuallyConfirmedSession?.Invoke();
         if(ObserveOnly){SetState("OBSERVATION_ONLY_"+Game.LastObservation?.Stage);return;}
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
         {
