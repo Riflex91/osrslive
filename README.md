@@ -1,4 +1,6 @@
-# OSRS Play 1.6.6 – visuelle Trainings-, Bank- und Handelsroutinen
+# OSRS Play 1.6.7 – visuelle Trainings-, Bank- und Handelsroutinen
+
+**Neu in 1.6.7:** Die zweite Spieleinstiegsseite wird über das Pergamentbanner, die drei Informationskacheln und den rot-weißen „CLICK HERE TO PLAY“-Button auch dann identifiziert, wenn Windows OCR den grafischen Text nicht lesen kann. Erst nach zwei zeitlich unabhängigen Bestätigungen und zuvor geprüfter Welt folgt ein Eingabeversuch; Passwort- und unbekannte Bildschirme bleiben gesperrt. [Analyse, Testgrenzen und neue Logereignisse](docs/NATIVE-SECOND-ENTRY-1.6.7.md).
 
 **Neu in 1.6.6:** Der auf den bestätigten Play-Now-Klick folgende Bildschirm wird durch zusätzliche, eng begrenzte OCR auf erkennbare Welcome-/Connecting-/Click-here-to-play-Texte geprüft. Bei unklarer Anzeige werden ausschließlich datensparsame Statusinformationen protokolliert und keine angenommenen UI-Ziele geklickt. Ein klar erkannter zweiter Spieleinstieg verlangt erneut zwei unabhängige Bestätigungen und die vorherige Weltkontrolle. [Erklärung und Live-Testgrenzen](docs/POST-PLAY-OBSERVATION-1.6.6.md).
 
