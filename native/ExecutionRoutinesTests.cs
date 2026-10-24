@@ -62,6 +62,17 @@ internal static class ExecutionRoutinesTests
         fake=new ScriptedDriver(menu);
         await new GameInteractions(fake).Choose(new(100,100,5,5),"Use Logs",CancellationToken.None);
         Require(fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{GameInputKind.RightClick,GameInputKind.LeftClick}),"observe menu before exact selection");
+        var late=new ScriptedDriver(menu,delayObservations:2);
+        var lateResult=await new GameInteractions(late).OpenMenu(new(100,100,5,5),CancellationToken.None);
+        Require(lateResult.Exact("Use Logs") is not null&&late.Observations>=2&&
+            late.Inputs.Count==1&&late.Inputs[0].Kind==GameInputKind.RightClick,
+            "menu may appear in a later independently observed frame without another right-click");
+        var never=new ScriptedDriver(menu,delayObservations:10);
+        blocked=false;
+        try{await new GameInteractions(never).OpenMenu(new(100,100,5,5),CancellationToken.None);}
+        catch(RoutineBlockedException ex){blocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
+        Require(blocked&&never.Inputs.Count==1&&never.Observations==3,
+            "unreadable context menu blocks after bounded observation without repeating click");
         var order=new TradeOrder("test-buy","iron axe",1,100,false,500,now);
         var facts=new ProgressionFacts(Ironman:false,FreeGeSlots:1);
         Require(TradeRoutine.Validate(order,facts,Stock(now,("coins",600)),now) is null,"bounded affordable purchase");
@@ -107,9 +118,35 @@ internal static class ExecutionRoutinesTests
     {
         public VisualFrame Current {get;private set;}
         internal readonly List<GameInput> Inputs=new();
-        internal ScriptedDriver(IReadOnlyList<VisualLabel> menu)=>Current=new(new IntPtr(1),new(0,0,1000,600),DateTimeOffset.UtcNow,menu);
-        public Task<VisualFrame> ObserveAsync(CancellationToken ct)=>Task.FromResult(Current);
+        private readonly IReadOnlyList<VisualLabel> menu;
+        private readonly int delayObservations;
+        private bool waitingForMenu;
+        internal int Observations {get;private set;}
+        internal ScriptedDriver(IReadOnlyList<VisualLabel> menu,int delayObservations=0)
+        {
+            this.menu=menu;this.delayObservations=delayObservations;
+            Current=new(new IntPtr(1),new(0,0,1000,600),DateTimeOffset.UtcNow,menu);
+        }
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)
+        {
+            Observations++;
+            if(waitingForMenu&&Observations>=delayObservations)
+            {
+                waitingForMenu=false;
+                Current=Current with {Labels=menu,CapturedUtc=DateTimeOffset.UtcNow};
+            }
+            return Task.FromResult(Current);
+        }
         public Task InputAsync(GameInput input,CancellationToken ct)
-        {Inputs.Add(input);Current=Current with{CapturedUtc=DateTimeOffset.UtcNow};return Task.CompletedTask;}
+        {
+            Inputs.Add(input);
+            if(input.Kind==GameInputKind.RightClick&&delayObservations>0)
+            {
+                waitingForMenu=true;Observations=0;
+                Current=Current with {Labels=Array.Empty<VisualLabel>()};
+            }
+            Current=Current with{CapturedUtc=DateTimeOffset.UtcNow};
+            return Task.CompletedTask;
+        }
     }
 }
