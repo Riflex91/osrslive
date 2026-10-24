@@ -152,6 +152,7 @@ internal sealed class VisualStartup:IDisposable
     private string lastWorldGridDiagnostic="";
     private string lastSkillOcrDiagnostic="";
     private Point? contextMenuAnchor;
+    private ulong? contextMenuPanelBefore;
     private string lastContextDiagnostic="";
     private int? pendingWorldChoice;
     private Rectangle? pendingWorldChoiceBounds;
@@ -198,7 +199,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";lastSkillOcrDiagnostic="";contextMenuAnchor=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -246,7 +247,7 @@ internal sealed class VisualStartup:IDisposable
             if(recoveryDecision.ResetSubject)
             {
                 Game.Reset();Gameplay.Reset();observedSelectedWorld=null;previousAction="";repeatedActions=0;
-                ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();
+                ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();
             }
             if(lastRecoveryState!=recoveryDecision.State)
             {lastRecoveryState=recoveryDecision.State;log.Add(Severity.INFO,"RECONNECT","STATE","state="+lastRecoveryState+" pending_transactions_preserved=true");}
@@ -394,23 +395,31 @@ internal sealed class VisualStartup:IDisposable
             postPlay: recovery.Recovering||previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME",
             contextAnchor:contextMenuAnchor);
         ct.ThrowIfCancellationRequested();
+        var pixels=ExecutionVision.Read(captured.Image,labels);
         if(contextMenuAnchor is Point anchor)
         {
             var menu=ExecutionUi.Menu(labels);
-            var focused=labels.Count(l=>l.Kind==VisualLabelKind.ContextMenuLine);
-            var headers=labels.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
-            var cancels=labels.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
-            // Counts and positions only; item names and menu contents remain private.
+            int focused=labels.Count(l=>l.Kind==VisualLabelKind.ContextMenuLine);
+            int headers=labels.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
+            int cancels=labels.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
+            // The panel hash is from the frame BEFORE the right-click. A
+            // changed image indicates rendering changed, NOT that a game
+            // action succeeded. Never expose raw screenshots or item text.
+            bool? changed=contextMenuPanelBefore is ulong hash&&pixels is not null?
+                pixels.InventoryPanelSignature!=hash:null;
+            int empty=pixels?.Slots.Count(slot=>slot.Empty)??0;
+            bool slotZero=pixels?.Slots.FirstOrDefault()?.Empty??false;
             string diagnostic=$"anchor_x={anchor.X} anchor_y={anchor.Y} focused_lines={focused} "+
                 $"header_candidates={headers} cancel_candidates={cancels} parsed={menu is not null} "+
-                $"entries={menu?.Entries.Count??0}";
+                $"entries={menu?.Entries.Count??0} inventory_tab_active={pixels?.InventoryTabActive??false} "+
+                $"empty_candidates={empty} slot0_empty={slotZero} panel_changed={changed?.ToString()??"unknown"}";
             if(diagnostic!=lastContextDiagnostic)
             {
                 lastContextDiagnostic=diagnostic;
                 log.Add(Severity.INFO,"GAMEPLAY","CONTEXT_MENU_DIAGNOSTIC",diagnostic);
             }
         }
-        return new(target,bounds,captured.CapturedUtc,labels,ExecutionVision.Read(captured.Image,labels));
+        return new(target,bounds,captured.CapturedUtc,labels,pixels);
     }
     private static async Task<IReadOnlyList<VisualLabel>> Recognize(
         Bitmap bitmap,OcrEngine engine,bool postPlay=false,Point? contextAnchor=null)
@@ -687,6 +696,7 @@ internal sealed class VisualStartup:IDisposable
         // the anchor is invalidated by the very next non-right-click input.
         // Captured frames are always independent of the dispatched input.
         contextMenuAnchor=kind==GameInputKind.RightClick?point:null;
+        contextMenuPanelBefore=kind==GameInputKind.RightClick?frame.Pixels?.InventoryPanelSignature:null;
         lastContextDiagnostic="";
         // A click on the Skills tab leaves the game mouse over the tab.
         // Clear the hover BEFORE the next capture; never click in the world.
