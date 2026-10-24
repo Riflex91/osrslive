@@ -30,6 +30,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Verify release version and diagnostic version agree
+        shell: pwsh
+        run: |
+          $declared = ([xml](Get-Content native/OSRSLiveDiagnostics.csproj -Raw)).Project.PropertyGroup.Version
+          $source = Get-Content native/Diagnostics.cs -Raw
+          $match = [regex]::Match($source, 'internal const string Version="([^"]+)";')
+          if (-not $match.Success -or $match.Groups[1].Value -ne $declared) {
+            throw "Diagnostic version does not match project release version $declared"
+          }
       - name: Build
         shell: pwsh
         run: dotnet build native/OSRSLiveDiagnostics.csproj -c Release -r win-x64 --nologo
@@ -99,7 +108,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "Fixed 1000x600 viewport and docked hide/copy log. Visual executors for gathering, production, banking and bounded GE orders are integrated, with result checks and durable trade deduplication. End-to-end operation of these new routines on the official client remains unverified; combat and global navigation are not implemented. Background left/right click and text transport are tested on covered owned windows. Minimization pauses capture; F8 pauses automation."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "OSRS Play $tag for the official Windows client. Includes bounded visual startup and F2P-world selection, diagnostics, launcher lifecycle management, conservative execution routines, and SHA-256-checked automatic updates at startup or in the idle state. Built and regression-tested by Windows CI. The full login, training, banking and Grand Exchange flows on the official client are not yet end-to-end verified. Combat and global navigation remain unimplemented. See README and docs for details."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
