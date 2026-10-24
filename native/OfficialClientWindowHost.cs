@@ -16,6 +16,20 @@ internal enum OfficialWindowKind { Launcher, Game }
 internal sealed record OfficialClientWindow(
     int ProcessId,IntPtr Handle,string Title,OfficialWindowKind Kind);
 
+internal enum LauncherCloseResult { NotReady, NotTracked, AlreadyClosed, WindowMismatch, Requested, Failed }
+
+// Visual agreement on the player and all 24 skills is required. This is not
+// proof of server-side authentication.
+internal static class LauncherLifecyclePolicy
+{
+    internal static bool MayClose(OfficialWindowKind? kind,VisibleGameObservation? confirmed,DateTimeOffset now)=>
+        kind==OfficialWindowKind.Game&&confirmed is not null&&
+        confirmed.Stage==VisibleGameStage.InGame&&
+        !string.IsNullOrWhiteSpace(confirmed.Character)&&confirmed.Skills?.Count==24&&
+        confirmed.RecognizedSkills==24&&confirmed.TotalLevel==confirmed.Skills.Sum(s=>s.Level)&&
+        confirmed.ObservedUtc<=now&&now-confirmed.ObservedUtc<=TimeSpan.FromSeconds(3);
+}
+
 internal sealed class OfficialClientWindowHost : IDisposable
 {
     private const int GWL_STYLE=-16,GWL_EXSTYLE=-20;
@@ -25,7 +39,8 @@ internal sealed class OfficialClientWindowHost : IDisposable
     private const uint SWP_NOZORDER=0x0004,SWP_NOACTIVATE=0x0010,SWP_FRAMECHANGED=0x0020;
     private readonly Control panel;
     private readonly Diagnostics diagnostics;
-    private IntPtr attached,originalParent;
+    private IntPtr attached,originalParent,trackedLauncherHandle;
+    private int trackedLauncherPid;
     private long originalStyle,originalExStyle;
     private Rectangle originalBounds;
     private Size lastHostedSize=Size.Empty;
@@ -34,10 +49,11 @@ internal sealed class OfficialClientWindowHost : IDisposable
     // This never returns the Jagex login/MFA/launcher HWND.
     internal IntPtr VisibleGameHandle =>
         Attached && CurrentKind==OfficialWindowKind.Game?attached:IntPtr.Zero;
+    internal IntPtr VisibleWindowHandle=>Attached?attached:IntPtr.Zero;
     // The game remains our child even though it disappears from EnumWindows
     // top-level enumeration. Don't infer that it has exited from that list.
     internal bool Attached => attached!=IntPtr.Zero && IsWindow(attached) &&
-        GetParent(attached)==panel.Handle;
+        (CurrentKind==OfficialWindowKind.Launcher?GetParent(attached)==originalParent:GetParent(attached)==panel.Handle);
     internal OfficialClientWindowHost(Control panel,Diagnostics diagnostics)
     {
         this.panel=panel;
@@ -55,6 +71,52 @@ internal sealed class OfficialClientWindowHost : IDisposable
         FindRunningWindows(OfficialWindowKind.Game);
     internal static IReadOnlyList<OfficialClientWindow> FindRunningLauncherWindows()=>
         FindRunningWindows(OfficialWindowKind.Launcher);
+    internal static bool LauncherProcessRunning()
+    {
+        bool found=false;
+        foreach(string name in new[]{"JagexLauncher","Jagex Launcher"})
+            foreach(var process in Process.GetProcessesByName(name))
+            {
+                using(process){found=true;}
+            }
+        return found;
+    }
+    private static bool IsMatchingLauncherWindow(IntPtr window,int pid)
+    {
+        if(!IsWindow(window)||pid<=0)return false;
+        GetWindowThreadProcessId(window,out uint actual);
+        if(actual!=(uint)pid)return false;
+        try
+        {
+            using var process=Process.GetProcessById(pid);
+            return SupportedLauncherProcessName(process.ProcessName);
+        }
+        catch(ArgumentException){return false;}
+        catch(System.ComponentModel.Win32Exception){return false;}
+        catch(InvalidOperationException){return false;}
+    }
+    // ShowWindowAsync avoids blocking on another process's window thread.
+    internal static bool LauncherIsMinimized(OfficialClientWindow launcher)=>
+        launcher.Kind==OfficialWindowKind.Launcher&&
+        IsMatchingLauncherWindow(launcher.Handle,launcher.ProcessId)&&IsIconic(launcher.Handle);
+    internal static bool TryRestoreLauncher(OfficialClientWindow launcher)
+    {
+        if(launcher.Kind!=OfficialWindowKind.Launcher||
+            !IsMatchingLauncherWindow(launcher.Handle,launcher.ProcessId))return false;
+        return !IsIconic(launcher.Handle)||ShowWindowAsync(launcher.Handle,9); // SW_RESTORE
+    }
+    internal bool TrackedLauncherWindowOpen=>
+        IsMatchingLauncherWindow(trackedLauncherHandle,trackedLauncherPid);
+    internal LauncherCloseResult RequestTrackedLauncherClose()
+    {
+        if(!Attached||CurrentKind!=OfficialWindowKind.Game)return LauncherCloseResult.NotReady;
+        if(trackedLauncherHandle==IntPtr.Zero)return LauncherCloseResult.NotTracked;
+        if(!IsWindow(trackedLauncherHandle))return LauncherCloseResult.AlreadyClosed;
+        if(!IsMatchingLauncherWindow(trackedLauncherHandle,trackedLauncherPid))return LauncherCloseResult.WindowMismatch;
+        // WM_CLOSE only. Never terminate the launcher process or its game child.
+        return PostMessage(trackedLauncherHandle,0x0010,IntPtr.Zero,IntPtr.Zero)?
+            LauncherCloseResult.Requested:LauncherCloseResult.Failed;
+    }
     private static IReadOnlyList<OfficialClientWindow> FindRunningWindows(
         OfficialWindowKind kind)
     {
@@ -113,17 +175,29 @@ internal sealed class OfficialClientWindowHost : IDisposable
             FindRunningClients().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId):
             FindRunningLauncherWindows().Any(c=>c.Handle==window.Handle&&c.ProcessId==window.ProcessId);
         if(window.Handle==IntPtr.Zero||!IsWindow(window.Handle)||!valid)return false;
-        var formerLauncher=CurrentKind==OfficialWindowKind.Launcher?attached:IntPtr.Zero;
         Detach();
         var hwnd=window.Handle;
         originalParent=GetParent(hwnd);
+        if(window.Kind==OfficialWindowKind.Launcher)
+        {
+            // Chromium's launcher has its own minimum width. Squeezing it into
+            // the game viewport clips its right-hand Play button and UIA marks
+            // that button offscreen. Track it at its original size instead.
+            attached=hwnd;CurrentKind=window.Kind;
+            trackedLauncherHandle=hwnd;trackedLauncherPid=window.ProcessId;
+            diagnostics.SetMode("OFFIZIELLER JAGEX LAUNCHER (ORIGINALFENSTER)");
+            diagnostics.Add(Severity.INFO,"OFFICIAL_CLIENT","LAUNCHER_TRACKED",
+                "embedding=false original_geometry_preserved=true login_owner=JAGEX_LAUNCHER");
+            return true;
+        }
         originalStyle=GetWindowLongPtr(hwnd,GWL_STYLE).ToInt64();
         originalExStyle=GetWindowLongPtr(hwnd,GWL_EXSTYLE).ToInt64();
         GetWindowRect(hwnd,out var bounds);
         originalBounds=Rectangle.FromLTRB(bounds.Left,bounds.Top,bounds.Right,bounds.Bottom);
-        long embedded=(originalStyle&~(WS_POPUP|WS_CAPTION|WS_THICKFRAME))|WS_CHILD;
+        long embedded=(originalStyle&~(WS_POPUP|WS_CAPTION|WS_THICKFRAME|0x01000000L|0x20000000L))|WS_CHILD;
         try
         {
+            ShowWindow(hwnd,4); // normal layout without activating the foreign window
             SetWindowLongPtr(hwnd,GWL_STYLE,new IntPtr(embedded));
             // Strip independent taskbar-window hint WHILE EMBEDDED only.
             // Restore original flags when the official client is detached.
@@ -135,10 +209,9 @@ internal sealed class OfficialClientWindowHost : IDisposable
             CurrentKind=window.Kind;
             lastHostedSize=Size.Empty;
             Resize();
-            ShowWindow(hwnd,5);
-            if(window.Kind==OfficialWindowKind.Game &&
-               formerLauncher!=IntPtr.Zero && IsWindow(formerLauncher))
-                ShowWindow(formerLauncher,6); // Hide original launcher after "Play Now"
+            ShowWindow(hwnd,4);
+            // Keep the launcher at its original size and visibility until the
+            // character and complete skill panel are independently observed.
             diagnostics.SetMode(window.Kind==OfficialWindowKind.Game?
                 "OFFIZIELLES OSRS (SPIELFENSTER EINGEBETTET)":
                 "OFFIZIELLER JAGEX LAUNCHER (ANMELDUNG EINGEBETTET)");
@@ -166,15 +239,23 @@ internal sealed class OfficialClientWindowHost : IDisposable
     }
     internal void Resize()
     {
-        if(!Attached)return;
+        if(!Attached||CurrentKind!=OfficialWindowKind.Game)return;
         var desired=new Size(Math.Max(1,panel.ClientSize.Width),
             Math.Max(1,panel.ClientSize.Height));
         // Avoid unnecessarily resizing a GPU-accelerated foreign HWND each
         // UI refresh. Only act when the hosting panel actually changes size.
-        if(desired==lastHostedSize)return;
-        if(SetWindowPos(attached,IntPtr.Zero,0,0,desired.Width,desired.Height,
+        if(desired==lastHostedSize&&GetClientRect(attached,out var current)&&
+            current.Right==desired.Width&&current.Bottom==desired.Height)return;
+        var frame=new RECT{Left=0,Top=0,Right=desired.Width,Bottom=desired.Height};
+        AdjustWindowRectEx(ref frame,(uint)GetWindowLongPtr(attached,GWL_STYLE).ToInt64(),false,
+            (uint)GetWindowLongPtr(attached,GWL_EXSTYLE).ToInt64());
+        if(SetWindowPos(attached,IntPtr.Zero,frame.Left,frame.Top,frame.Right-frame.Left,frame.Bottom-frame.Top,
             SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED))
+        {
+            if(GetClientRect(attached,out var actual))diagnostics.Add(Severity.DEBUG,"OFFICIAL_CLIENT","HOST_GEOMETRY",
+                $"desired={desired.Width}x{desired.Height} client={actual.Right}x{actual.Bottom}");
             lastHostedSize=desired;
+        }
     }
     private void RestoreBounds(IntPtr hwnd)
     {
@@ -190,7 +271,7 @@ internal sealed class OfficialClientWindowHost : IDisposable
         var previousKind=CurrentKind;
         CurrentKind=null;
         lastHostedSize=Size.Empty;
-        if(IsWindow(hwnd))
+        if(IsWindow(hwnd)&&previousKind==OfficialWindowKind.Game)
         {
             SetParent(hwnd,originalParent);
             SetWindowLongPtr(hwnd,GWL_STYLE,new IntPtr(originalStyle));
@@ -209,6 +290,9 @@ internal sealed class OfficialClientWindowHost : IDisposable
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowProc callback,IntPtr state);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr hwnd,int command);
+    [DllImport("user32.dll",EntryPoint="PostMessageW",SetLastError=true)] private static extern bool PostMessage(IntPtr hwnd,uint msg,IntPtr wParam,IntPtr lParam);
     [DllImport("user32.dll",SetLastError=true)] private static extern IntPtr GetWindow(IntPtr hwnd,uint command);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd,StringBuilder text,int capacity);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr hwnd);
@@ -221,6 +305,8 @@ internal sealed class OfficialClientWindowHost : IDisposable
     [DllImport("user32.dll",SetLastError=true)] private static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int width,int height,uint flags);
     [StructLayout(LayoutKind.Sequential)] private struct RECT {internal int Left,Top,Right,Bottom;}
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out RECT rect);
+    [DllImport("user32.dll")] private static extern bool AdjustWindowRectEx(ref RECT rect,uint style,bool menu,uint extendedStyle);
+    [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd,out RECT rect);
 }
 
 internal static class OfficialClientWindowHostTests
@@ -238,6 +324,17 @@ internal static class OfficialClientWindowHostTests
            OfficialClientWindowHost.SupportedLauncherProcessName("osclient"))
             throw new Exception("Only official launcher and game processes may be hosted.");
         OfficialWindowTransitionTests.Run();
+        var now=DateTimeOffset.UtcNow;
+        var skills=Enumerable.Range(0,24).Select(i=>new PublicOsrsSkill("skill"+i,2,0,0)).ToArray();
+        var confirmed=new VisibleGameObservation(VisibleGameStage.InGame,"Test Player",skills,48,24,now);
+        if(!LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed,now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Launcher,confirmed,now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{Stage=VisibleGameStage.Welcome},now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{Skills=null},now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{Character=null},now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{TotalLevel=49},now)||
+           LauncherLifecyclePolicy.MayClose(OfficialWindowKind.Game,confirmed with{ObservedUtc=now.AddSeconds(-5)},now))
+            throw new Exception("Launcher must remain open until fresh, complete, consistent in-game OCR.");
         Console.WriteLine("OFFICIAL WINDOW HOST PASS: process filter, exclusive embedded HWND, original styles restored");
     }
 }

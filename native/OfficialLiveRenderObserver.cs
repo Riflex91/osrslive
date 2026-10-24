@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
+
+
 using System.Windows.Forms;
 
 namespace OSRSLiveDiagnostics;
 
-// Read-only, in-memory sampling of the VISIBLE official game HWND. It never
+// Read-only sampling of compositor frames from the official game. It never
 // captures the Jagex Launcher, password/MFA windows, or background desktops.
 // Pixels are never stored or exported. A rendered picture does NOT prove login.
 internal enum LiveRenderState
@@ -71,51 +71,20 @@ internal sealed class OfficialLiveRenderObserver
     private int[]? lastPixels;
     internal LiveRenderSample Last {get;private set;}=
         new(LiveRenderState.NoGameWindow,0,0,0,DateTimeOffset.UtcNow);
-    internal LiveRenderSample Observe(IntPtr gameHwnd, IntPtr ownFormHwnd)
+    internal void MarkUnavailable(LiveRenderState state)=>Set(state,DateTimeOffset.UtcNow);
+    internal void ObserveBitmap(Bitmap bitmap,DateTimeOffset capturedUtc)
     {
-        var timestamp=DateTimeOffset.UtcNow;
-        if(gameHwnd==IntPtr.Zero || !IsWindow(gameHwnd))
-            return Set(LiveRenderState.NoGameWindow,timestamp);
-        if(IsIconic(ownFormHwnd))
-            return Set(LiveRenderState.Minimized,timestamp);
-        // Cross-process HWND is reparented into our WinForms form. Do not
-        // read the pixels if another app or Windows login/MFA overlays it.
-        IntPtr foreground=GetForegroundWindow();
-        if(foreground==IntPtr.Zero || GetAncestor(foreground,2)!=ownFormHwnd)
-            return Set(LiveRenderState.NotForeground,timestamp);
-        if(!GetClientRect(gameHwnd,out var bounds) ||
-           bounds.Right-bounds.Left<160 || bounds.Bottom-bounds.Top<120)
-            return Set(LiveRenderState.TooSmall,timestamp);
-        var origin=new POINT{X=0,Y=0};
-        if(!ClientToScreen(gameHwnd,ref origin))
-            return Set(LiveRenderState.CaptureUnavailable,timestamp);
-        const int width=112,height=72;
-        int x=origin.X+(bounds.Right-bounds.Left-width)/2;
-        int y=origin.Y+(bounds.Bottom-bounds.Top-height)/2;
-        try
-        {
-            using var bitmap=new Bitmap(width,height,PixelFormat.Format32bppArgb);
-            using(var graphics=Graphics.FromImage(bitmap))
-                graphics.CopyFromScreen(x,y,0,0,new Size(width,height),
-                    CopyPixelOperation.SourceCopy);
-            var colors=new int[12*8];
-            int n=0;
-            for(int row=0;row<8;row++)
-            for(int col=0;col<12;col++)
-                colors[n++]=bitmap.GetPixel(col*9+5,row*9+4).ToArgb()&0xFFFFFF;
-            int changed=LiveRenderClassifier.CountChanged(colors,lastPixels);
-            var state=LiveRenderClassifier.Classify(colors,lastPixels);
-            int[] luminosity=colors.Select(rgb=>(
-                (((rgb>>16)&255)*299+((rgb>>8)&255)*587+
-                    (rgb&255)*114)/1000)).ToArray();
-            double mean=luminosity.Average();
-            int variance=(int)Math.Round(luminosity.Average(v=>(v-mean)*(v-mean)));
-            lastPixels=colors;
-            Last=new(state,variance,changed,colors.Length,timestamp);
-            return Last;
-        }
-        catch(ExternalException){return Set(LiveRenderState.CaptureUnavailable,timestamp);}
-        catch(ArgumentException){return Set(LiveRenderState.CaptureUnavailable,timestamp);}
+        var colors=new int[96];
+        for(int row=0;row<8;row++)
+        for(int col=0;col<12;col++)
+            colors[row*12+col]=bitmap.GetPixel(bitmap.Width/4+(col*2+1)*bitmap.Width/48,
+                bitmap.Height/4+(row*2+1)*bitmap.Height/32).ToArgb()&0xFFFFFF;
+        int changed=LiveRenderClassifier.CountChanged(colors,lastPixels);
+        var state=LiveRenderClassifier.Classify(colors,lastPixels);
+        var values=colors.Select(rgb=>(((rgb>>16)&255)*299+((rgb>>8)&255)*587+(rgb&255)*114)/1000d).ToArray();
+        double mean=values.Average();
+        Last=new(state,(int)Math.Round(values.Average(v=>(v-mean)*(v-mean))),changed,96,capturedUtc);
+        lastPixels=colors;
     }
     internal void Reset()
     {
@@ -130,16 +99,7 @@ internal sealed class OfficialLiveRenderObserver
         Last=new(state,0,0,0,when);
         return Last;
     }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RECT{internal int Left,Top,Right,Bottom;}
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT{internal int X,Y;}
-    [DllImport("user32.dll")]private static extern bool IsWindow(IntPtr hwnd);
-    [DllImport("user32.dll")]private static extern bool IsIconic(IntPtr hwnd);
-    [DllImport("user32.dll")]private static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")]private static extern IntPtr GetAncestor(IntPtr hwnd,uint flags);
-    [DllImport("user32.dll")]private static extern bool GetClientRect(IntPtr hwnd,out RECT rect);
-    [DllImport("user32.dll")]private static extern bool ClientToScreen(IntPtr hwnd,ref POINT point);
+
 }
 
 // Auto-start is guarded by independent evidence from an APPROVED game adapter.
