@@ -53,7 +53,25 @@ internal static class GameplayHudOcr
         static Rectangle Rect(Windows.Foundation.Rect r)=>new((int)r.X,(int)r.Y,(int)Math.Ceiling(r.Width),(int)Math.Ceiling(r.Height));
         static Rectangle Map(Rectangle b,(Rectangle Source,Rectangle Sheet,int Scale) r)=>new(r.Source.Left+(b.Left-r.Sheet.Left)/r.Scale,
             r.Source.Top+(b.Top-r.Sheet.Top)/r.Scale,Math.Max(1,(int)Math.Ceiling(b.Width/(double)r.Scale)),Math.Max(1,(int)Math.Ceiling(b.Height/(double)r.Scale)));
-        return found;
+        // Read the own-character input line on its own. Mixing it into a
+        // large contact sheet can make OCR merge its colon/cursor with names.
+        var promptBox=new Rectangle(0,554,260,21);
+        using var prompt=Contrast(image,promptBox);
+        using var promptSheet=new Bitmap(promptBox.Width*4+40,promptBox.Height*4+40);
+        using(var graphics=Graphics.FromImage(promptSheet))
+        {
+            graphics.Clear(Color.White);graphics.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            graphics.DrawImage(prompt,new Rectangle(20,20,prompt.Width*4,prompt.Height*4));
+        }
+        var promptRead=await VisualStartup.RecognizeRaw(promptSheet,engine);
+        foreach(var line in promptRead.Lines.Where(l=>l.Words.Count>0))
+        {
+            var b=line.Words.Select(w=>Rect(w.BoundingRect)).Aggregate(Rectangle.Union);
+            var mapped=new Rectangle((b.X-20)/4,promptBox.Y+(b.Y-20)/4,Math.Max(1,(int)Math.Ceiling(b.Width/4d)),Math.Max(1,(int)Math.Ceiling(b.Height/4d)));
+            if(mapped.Left<30&&mapped.Top>=554&&mapped.Bottom<=575)
+                found.Add(new(line.Text,mapped));
+        }
+        return found.Distinct().ToArray();
     }
     internal static Bitmap Contrast(Bitmap image,Rectangle box)
     {

@@ -27,8 +27,9 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
         if(next is null||next.Window!=Current.Window||next.ScreenBounds!=Current.ScreenBounds||
             DateTimeOffset.UtcNow-next.CapturedUtc>TimeSpan.FromSeconds(2))
             throw new RoutineBlockedException("FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED");
-        if(GameScreenReader.Read(next).Stage is VisibleGameStage.Login or VisibleGameStage.WorldSelection or VisibleGameStage.Welcome or VisibleGameStage.Connecting)
-            throw new RoutineBlockedException("GAME_SESSION_LEFT_EXECUTION_SCREEN");
+        var stage=GameScreenReader.Read(next).Stage;
+        if(stage!=VisibleGameStage.InGame)
+            throw new RoutineBlockedException(stage==VisibleGameStage.Unknown?"GAMEPLAY_HUD_NOT_VERIFIED":"GAME_SESSION_LEFT_EXECUTION_SCREEN");
         Current=next;Guard?.Invoke(next);return next;
     }
     public async Task InputAsync(GameInput input,CancellationToken ct)

@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -142,6 +142,10 @@ internal sealed class VisualStartup:IDisposable
     private int? observedSelectedWorld;
     private IntPtr observedWindow;
     private readonly BackgroundWindowCapture backgroundCapture=new();
+    private readonly SessionRecovery recovery=new();
+    private readonly ConnectivityWatch connectivity=new();
+    private string lastRecoveryState="";
+    private DateTimeOffset lastVerifiedHud;
     internal string CaptureState=>backgroundCapture.State;
     internal string CaptureGeometry=>backgroundCapture.Geometry;
     internal string CaptureAlpha=>backgroundCapture.AlphaState;
@@ -173,8 +177,8 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();previousAction="";repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";ResetWorldChoice();ResetPlayButton();ResetEnter();}
-        if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromSeconds(4))return;
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
             backgroundCapture.Release();
@@ -195,10 +199,15 @@ internal sealed class VisualStartup:IDisposable
             return;
         }
         if(ocr is null){SetState("OCR_LANGUAGE_UNAVAILABLE");return;}
+        bool networkLost=!ObserveOnly&&await connectivity.Lost(observedSelectedWorld??preferredWorld,recovery.HasEstablished,ct);
         var observed=await Capture(target,owner,ct);
         if(observed is null)
         {SetState("CAPTURE_"+backgroundCapture.State);return;}
+        observed=ConnectivityWatch.Signal(observed,networkLost);
         Game.Observe(GameScreenReader.Read(observed),DateTimeOffset.UtcNow);
+        if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
+        else if(lastVerifiedHud!=default&&DateTimeOffset.UtcNow-lastVerifiedHud>TimeSpan.FromSeconds(3))
+        {Gameplay.Reset();lastVerifiedHud=default;}
         DiagnosePostPlay(observed);
         if(!ObserveOnly&&Game.Confirmed is not null)
             VisuallyConfirmedSession?.Invoke();
@@ -207,6 +216,24 @@ internal sealed class VisualStartup:IDisposable
             SetState("OBSERVATION_ONLY_"+Game.LastObservation?.Stage);
             await Gameplay.InspectNavigation(observed,ct);return;
         }
+        var recoveryDecision=await recovery.Evaluate(observed,Game.LastObservation!.Stage,preferredWorld,DateTimeOffset.UtcNow,SessionRecovery.Probe,ct);
+        if(recoveryDecision is not null)
+        {
+            if(recoveryDecision.ResetSubject)
+            {
+                Game.Reset();Gameplay.Reset();observedSelectedWorld=null;previousAction="";repeatedActions=0;
+                ResetWorldChoice();ResetPlayButton();ResetEnter();
+            }
+            if(lastRecoveryState!=recoveryDecision.State)
+            {lastRecoveryState=recoveryDecision.State;log.Add(Severity.INFO,"RECONNECT","STATE","state="+lastRecoveryState+" pending_transactions_preserved=true");}
+            if(recoveryDecision.Click is Rectangle retry)
+            {
+                await Dispatch(observed,new("RECONNECT_VISIBLE_BUTTON",retry,RuntimeInput:new(GameInputKind.LeftClick,retry)),owner,ct);return;
+            }
+            if(!recoveryDecision.ResumeLogin){SetState(recoveryDecision.State);return;}
+        }
+        else if(lastRecoveryState.Length>0)
+        {lastRecoveryState="";log.Add(Severity.INFO,"RECONNECT","RETURNED_TO_GAME","skills_and_character_must_be_reconfirmed=true");}
         if(Game.LastObservation?.Stage==VisibleGameStage.Connecting)
         {
             SetState("POST_PLAY_CONNECTING");
@@ -217,18 +244,22 @@ internal sealed class VisualStartup:IDisposable
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
             {
                 if(Paused||ObserveOnly)throw new OperationCanceledException(token);
-                return await Capture(target,owner,token);
+                bool lost=await connectivity.Lost(observedSelectedWorld??preferredWorld,true,token);
+                var next=await Capture(target,owner,token);
+                return next is null?null:ConnectivityWatch.Signal(next,lost);
             },(frame,input,token)=>Dispatch(frame,new("GAMEPLAY_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),ct))
             {SetState("AGENT_"+Gameplay.State);return;}
             if(Game.LastObservation.TotalLevel is null&&observed.ScreenBounds.Size==DockedWindowLayout.GameSize)
             {
-                var button=new Rectangle(DockedWindowLayout.GameSize.Width-230,DockedWindowLayout.GameSize.Height-322,10,10);
+                var nativeSkills=observed.Labels.SingleOrDefault(l=>l.Kind==VisualLabelKind.SkillsButton);
+                var button=nativeSkills?.Bounds??new Rectangle(DockedWindowLayout.GameSize.Width-230,DockedWindowLayout.GameSize.Height-322,10,10);
                 bool tooltip=observed.Labels.Any(l=>l.Text.Equals("Skills",StringComparison.OrdinalIgnoreCase)&&
                     l.Bounds.Left<200&&l.Bounds.Top<50);
-                await Dispatch(observed,new(tooltip?"OPEN_SKILLS":"HOVER_SKILLS",button,!tooltip),owner,ct);
+                bool identified=tooltip||nativeSkills is not null;
+                await Dispatch(observed,new(identified?"OPEN_SKILLS":"HOVER_SKILLS",button,!identified),owner,ct);
                 return;
             }
-            SetState(Game.Plan is null?"IN_GAME_READING_SKILLS":"IN_GAME_GOAL_PLANNED");return;
+            SetState(Game.Confirmed is null?"IN_GAME_"+GameScreenReader.ReadinessReason(Game.LastObservation):"IN_GAME_GOAL_PLANNED");return;
         }
         var decision=VisualStartupPolicy.Decide(observed.Labels,preferredWorld,
             preferredWorld is not null&&observedSelectedWorld==preferredWorld);
@@ -312,7 +343,7 @@ internal sealed class VisualStartup:IDisposable
         if(!ClientToScreen(target,ref point))return null;
         var bounds=new Rectangle(point.X,point.Y,captured.Image.Width,captured.Image.Height);
         var labels=await Recognize(captured.Image,ocr!,
-            postPlay: previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME");
+            postPlay: recovery.Recovering||previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME");
         ct.ThrowIfCancellationRequested();
         return new(target,bounds,captured.CapturedUtc,labels,ExecutionVision.Read(captured.Image,labels));
     }
@@ -377,6 +408,8 @@ internal sealed class VisualStartup:IDisposable
         labels=labels.Distinct().ToList();
         labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
         labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
+        if(NativeGameHudReader.Skills(bitmap) is VisualLabel skillsButton)labels.Add(skillsButton);
+        if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel hud)labels.Add(hud);
         if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
             labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
         return labels;
@@ -503,13 +536,29 @@ internal sealed class VisualStartup:IDisposable
                 g.Clear(Color.FromArgb(48,56,35));
                 foreach(var item in new[]{("Public",120),("Private",182),("Trade",368),("Report",430)})
                     g.DrawString(item.Item1,font,Brushes.White,item.Item2,575);
-                g.DrawString("Example: *",font,Brushes.White,10,550);
+                g.DrawString("Example: *",font,Brushes.White,10,556);
             }
             var focusedHud=await GameplayHudOcr.Read(hudFixture,engine);
             var hudObservation=GameScreenReader.Read(new(new(1),new(0,0,1000,600),DateTimeOffset.UtcNow,focusedHud));
             if(hudObservation.Stage!=VisibleGameStage.InGame||hudObservation.Character!="Example"||hudObservation.Skills is not null)
                 throw new InvalidOperationException("Focused chat controls / character prompt OCR regression: "+hudObservation.Stage+" fixture="+
                     string.Join(";",focusedHud.Select(l=>l.Text+"@"+l.Bounds)));
+            using var skillFixture=new Bitmap(1000,600);
+            int[] nativeLevels={23,24,1,23,1,1,23,1,2,1,1,7,11,1,2,1,1,1,1,1,1,1,1,1};
+            using(var g=Graphics.FromImage(skillFixture))
+            using(var font=new Font("Segoe UI",8))
+            {
+                g.Clear(Color.FromArgb(100,90,60));
+                for(int i=0;i<24;i++)
+                {
+                    g.DrawString("99",font,Brushes.Yellow,786+i%3*62,304+i/3*30);
+                    g.DrawString(nativeLevels[i].ToString(),font,Brushes.Yellow,794+i%3*62,316+i/3*30);
+                }
+            }
+            var skillLabels=new[]{new VisualLabel("Total level: 131",new(805,550,80,10))};
+            var readSkills=await SkillGridOcr.Read(skillFixture,engine,skillLabels);
+            if(readSkills.Count!=24||readSkills.Sum(l=>int.Parse(l.Text[(l.Text.IndexOf('=')+1)..]))!=131)
+                throw new InvalidOperationException("Yellow base-skill digit contact sheet regression: "+readSkills.Count+"/24");
             Console.WriteLine("OCR FIXTURE PASS: Windows OCR -> known-screen policy, no capture or input");
             return 0;
         }
@@ -517,6 +566,8 @@ internal sealed class VisualStartup:IDisposable
     }
     private async Task<bool> Dispatch(VisualFrame frame,VisualDecision decision,IntPtr owner,CancellationToken ct)
     {
+        if(decision.RuntimeInput is null&&!StartupTiming.CanDispatch(previousAction,decision.State,lastAction,DateTimeOffset.UtcNow))
+        {SetState("WAITING_FOR_TRANSITION_"+decision.State);return false;}
         if(decision.State.StartsWith("WORLD_PAGE_")&&pageActions>=12)
         {SetState("WORLD_PAGE_LIMIT_REACHED");return false;}
         if(decision.RuntimeInput is null&&previousAction==decision.State&&repeatedActions>=3)
@@ -548,7 +599,7 @@ internal sealed class VisualStartup:IDisposable
             _=>await BackgroundWindowInput.ClickAsync(frame.Window,point,()=>Paused||ObserveOnly,ct,kind==GameInputKind.RightClick)
         };
         if(!queued)
-        {Paused=true;SetState("INPUT_DISPATCH_FAILED");return false;}
+        {SetState("INPUT_DISPATCH_FAILED_REOBSERVING");return false;}
         repeatedActions=previousAction==decision.State?repeatedActions+1:1;
         if(decision.State.StartsWith("WORLD_PAGE_"))pageActions++;
         previousAction=decision.State;
@@ -566,8 +617,8 @@ internal sealed class VisualStartup:IDisposable
     }
     private bool EnterConfirmed(Rectangle bounds,DateTimeOffset captured)
     {
-        if(pendingEnterBounds==bounds&&captured>pendingEnterFrame.AddMilliseconds(500)&&
-           captured-pendingEnterFrame<TimeSpan.FromSeconds(10))return true;
+        if(pendingEnterBounds==bounds&&captured-pendingEnterFrame<TimeSpan.FromSeconds(10))
+            return captured-pendingEnterFrame>=TimeSpan.FromMilliseconds(250);
         pendingEnterBounds=bounds;
         pendingEnterFrame=captured;
         return false;
@@ -583,7 +634,7 @@ internal sealed class VisualStartup:IDisposable
         bool nativeCard=labels.Any(l=>l.Kind==VisualLabelKind.EnterButton);
         bool connecting=labels.Any(l=>l.Text.Contains("Connecting to server",StringComparison.OrdinalIgnoreCase)||
             l.Text.Equals("Please wait",StringComparison.OrdinalIgnoreCase));
-        bool chat=labels.Any(l=>l.Text.Equals("Public",StringComparison.OrdinalIgnoreCase))&&
+        bool chat=labels.Any(l=>l.Kind==VisualLabelKind.GameHud)||labels.Any(l=>l.Text.Equals("Public",StringComparison.OrdinalIgnoreCase))&&
             labels.Any(l=>l.Text.Equals("Private",StringComparison.OrdinalIgnoreCase));
         string result=$"stage={Game.LastObservation?.Stage} welcome_marker={welcome} "+
             $"enter_marker={enter} native_enter_card={nativeCard} connecting_marker={connecting} chat_controls={chat} "+
@@ -603,9 +654,8 @@ internal sealed class VisualStartup:IDisposable
     }
     private bool PlayButtonConfirmed(Rectangle bounds,DateTimeOffset captured)
     {
-        if(pendingPlayBounds==bounds&&captured>pendingPlayFrame.AddMilliseconds(500)&&
-           captured-pendingPlayFrame<TimeSpan.FromSeconds(10))
-            return true;
+        if(pendingPlayBounds==bounds&&captured-pendingPlayFrame<TimeSpan.FromSeconds(10))
+            return captured-pendingPlayFrame>=TimeSpan.FromMilliseconds(250);
         pendingPlayBounds=bounds;
         pendingPlayFrame=captured;
         return false;
@@ -620,9 +670,8 @@ internal sealed class VisualStartup:IDisposable
     private bool WorldCellConfirmed(int? world,Rectangle bounds,DateTimeOffset frameTime)
     {
         if(world is null)return false;
-        if(pendingWorldChoice==world&&pendingWorldChoiceBounds==bounds&&
-           frameTime>pendingWorldChoiceFrame.AddMilliseconds(500))
-            return true;
+        if(pendingWorldChoice==world&&pendingWorldChoiceBounds==bounds&&frameTime-pendingWorldChoiceFrame<TimeSpan.FromSeconds(10))
+            return frameTime-pendingWorldChoiceFrame>=TimeSpan.FromMilliseconds(250);
         // Always keep the most recent unconfirmed candidate, including when
         // the screenshot timestamp or cell changed.
         pendingWorldChoice=world;

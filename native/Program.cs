@@ -90,7 +90,7 @@ internal sealed class MainWindow : Form
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","progress"));
     private string lastGameDiagnostic="",lastGoalDiagnostic="";
     private bool logRequestedVisible=true;
-    private readonly System.Windows.Forms.Timer liveObservationTimer=new(){Interval=2000};
+    private readonly System.Windows.Forms.Timer liveObservationTimer=new(){Interval=400};
     private LiveRenderState lastReportedRenderState=LiveRenderState.NoGameWindow;
     private bool followWindows,starting,scanning,stopping;
     private bool loggedBlockedAgent;
@@ -817,6 +817,7 @@ internal static class SelfTest
             ExecutionRoutinesTests.Run();
             CombatNavigationTests.Run();
             GameScreenReaderTests.Run();
+            SessionRecoveryTests.Run();
             const string manifest="version=0.9.1\n"+
                 "exeUrl=https://github.com/Riflex91/osrslive/releases/download/v0.9.1/OSRS-Play.exe\n"+
                 "exeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

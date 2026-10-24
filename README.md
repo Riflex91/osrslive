@@ -1,4 +1,6 @@
-# OSRS Play 1.7.1 – Kampf und automatische Kartennavigation
+# OSRS Play 1.7.2 – schneller Einstieg und Wiederverbindung
+
+**Neu in 1.7.2:** Häufigere, weiterhin serielle Bildschirmbeobachtung und sofortige Weiterverarbeitung neu erkannter Login-Schritte. Wiederholte Klicks auf denselben Bildschirm bleiben zeitlich begrenzt. Ein Session-Controller erkennt Logout/Verbindungsverlust, stoppt Spielaktionen, prüft die Spielwelt-Verbindung und setzt den bekannten Einstieg mit Backoff fort. Die native Spielansicht kann zusätzlich über Minimap, Skills-Symbol und mehrere Bereiche der Chat-Bedienleiste erkannt werden. Charakter und vollständige Skillwerte müssen anschließend weiterhin neu bestätigt werden. [Ursache des Stillstands, Verhalten und Grenzen](docs/LOGIN-UND-RECONNECT-1.7.2.md).
 
 **Neu in 1.7.1:** Der manuelle Aufgabenbutton ist entfernt. Die native HUD-Schrift wird in isolierten, kontrastverstärkten Ausschnitten gelesen; Chat-Schaltflächen werden getrennt von ihren On/Off-Anzeigen verarbeitet. Das behebt die im 1.7.0-Log belegte OCR-Schwachstelle nach dem Spieleinstieg. Die Wirkung im vollständigen Spielablauf wird separat geprüft; unbekannte oder unvollständige Skills geben weiterhin keine Spielaktionen frei. [Analyse und Prüfstand](docs/HUD-ERKENNUNG-1.7.1.md).
 
