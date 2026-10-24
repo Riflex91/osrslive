@@ -32,6 +32,48 @@ internal static class CharacterSummaryReader
         return red>=80&&gold>=40;
     }
 
+    internal static void SelfTest()
+    {
+        using var bitmap=new Bitmap(1000,600);
+        using(var g=Graphics.FromImage(bitmap))
+        {
+            g.Clear(Color.FromArgb(50,44,38));
+            g.FillRectangle(new SolidBrush(Color.FromArgb(106,36,27)),Tab);
+            g.FillRectangle(new SolidBrush(Color.FromArgb(255,152,31)),
+                new Rectangle(NameRegion.X+20,NameRegion.Y+7,75,5));
+        }
+        if(!IsOpen(bitmap))throw new Exception("Verified native summary panel not detected");
+        bitmap.SetPixel(NameRegion.X+20,NameRegion.Y+7,Color.FromArgb(50,44,38));
+        if(ParseName("Example_29")!="Example_29"||
+            ParseName("Example_29: *") is not null||
+            ParseName("MuchTooLongAccountName") is not null)
+            throw new Exception("Summary identity must be an isolated OSRS display name");
+        var tracker=new CharacterSummaryIdentity();
+        var now=DateTimeOffset.UtcNow;
+        var summaryLabels=new[]{
+            new VisualLabel("CHARACTER_SUMMARY",Tab,VisualLabelKind.CharacterSummary),
+            new VisualLabel("Example_29",NameRegion,VisualLabelKind.CharacterSummaryName)
+        };
+        var frame=new VisibleGameObservation(VisibleGameStage.InGame,null,null,null,0,now);
+        tracker.Observe(frame,summaryLabels);
+        if(tracker.Verified(now) is not null)throw new Exception("One summary frame cannot verify identity");
+        tracker.Observe(frame,summaryLabels);
+        if(tracker.Verified(now) is not null)throw new Exception("Repeated timestamp cannot verify identity");
+        tracker.Observe(frame with {ObservedUtc=now.AddSeconds(1)},summaryLabels);
+        if(tracker.Apply(frame with {ObservedUtc=now.AddSeconds(2)}).Character!="Example_29")
+            throw new Exception("Independent summary frames not retained across Skills tab");
+        if(tracker.Apply(frame with {ObservedUtc=now.AddSeconds(2),Character="Different"}).Character is not null)
+            throw new Exception("Conflicting identity not rejected");
+        if(tracker.Verified(now.AddSeconds(32)) is not null)
+            throw new Exception("Stale summary identity accepted");
+        tracker.Observe(frame with {Stage=VisibleGameStage.Disconnected},Array.Empty<VisualLabel>());
+        if(tracker.Verified(now.AddSeconds(2)) is not null)
+            throw new Exception("Disconnected account retained summary identity");
+        if(GameScreenReader.LocateSkills(summaryLabels.Append(
+            new VisualLabel("Total level: 131",new Rectangle(840,365,110,12))).ToArray(),new Size(1000,600)) is not null)
+            throw new Exception("Summary total level was confused with a Skills raster");
+    }
+
     internal static string? ParseName(string candidate)
     {
         string name=candidate.Trim();
