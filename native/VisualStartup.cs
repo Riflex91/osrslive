@@ -191,6 +191,7 @@ internal sealed class VisualStartup:IDisposable
     private string lastPostPlayDiagnostic="";
     private DateTimeOffset lastPostPlayDiagnosticAt=DateTimeOffset.MinValue;
     private WelcomePanelPixels lastWelcomePixels;
+    private GameHudFooterPixels lastHudFooterPixels;
     private bool postEnterUnknownDiagnosed;
     private int? observedSelectedWorld;
     private IntPtr observedWindow;
@@ -432,6 +433,7 @@ internal sealed class VisualStartup:IDisposable
         }
         RenderObserver.ObserveBitmap(captured.Image,captured.CapturedUtc);
         lastWelcomePixels=NativeWelcomePanelReader.Inspect(captured.Image);
+        lastHudFooterPixels=NativeGameHudReader.InspectFooter(captured.Image);
         var point=new POINT();
         if(!ClientToScreen(target,ref point))return null;
         var bounds=new Rectangle(point.X,point.Y,captured.Image.Width,captured.Image.Height);
@@ -998,12 +1000,16 @@ internal sealed class VisualStartup:IDisposable
         {
             postEnterUnknownDiagnosed=true;
             var px=lastWelcomePixels;
+            var footer=lastHudFooterPixels;
             log.Add(Severity.INFO,"VISUAL_STARTUP","POST_ENTER_PIXEL_DIAGNOSTIC",
                 $"elapsed_s={(int)(now-lastAction).TotalSeconds} parchment_banner={px.Banner} "+
                 $"red_center={px.RedCenter} side_tiles={px.SideTiles} white_caption={px.Caption} "+
                 $"minimap_marker={labels.Any(l=>l.Kind==VisualLabelKind.Minimap)} "+
                 $"skills_icon_marker={labels.Any(l=>l.Kind==VisualLabelKind.SkillsButton)} "+
                 $"native_hud_marker={labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
+                $"footer_public={footer.Public} footer_private={footer.Private} "+
+                $"footer_trade={footer.Trade} report_background={footer.ReportBackground} "+
+                $"report_caption={footer.ReportCaption} "+
                 "screenshot_persisted=false retry_input=false");
         }
         if(result==lastPostPlayDiagnostic&&now-lastPostPlayDiagnosticAt<TimeSpan.FromSeconds(20))
