@@ -31,7 +31,14 @@ internal static class ExecutionVision
         }
         return new(slots,Signature(image,new Rectangle(30,50,690,300)),navigation,
             inventoryActive,Signature(image,new Rectangle(746,304,220,265)),
-            emptyResult?.FirstSlotDiagnostic??"inventory_inactive");
+            emptyResult?.FirstSlotDiagnostic??"inventory_inactive",
+            emptyResult?.SlotDiagnostics);
+    }
+    internal static string SlotDiagnostic(ExecutionPixels pixels,int slot)
+    {
+        if(slot is <0 or >=28)return "invalid_slot";
+        if(pixels.InventorySlotDiagnostics is { Count:28 } all)return all[slot];
+        return slot==0?pixels.InventorySlot0Diagnostic:"not_sampled";
     }
     internal static async Task<IReadOnlyList<VisualLabel>> ReadHealth(Bitmap image,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {

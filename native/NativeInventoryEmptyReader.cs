@@ -9,7 +9,7 @@ internal static class NativeInventoryEmptyReader
 {
     private sealed record Cell(int Index,Color Background,int StrongPixels,
         int SaturatedPixels,int MeanDeviation,bool PlausiblyBlank);
-    internal sealed record Result(bool[] Empty,string FirstSlotDiagnostic);
+    internal sealed record Result(bool[] Empty,string FirstSlotDiagnostic,IReadOnlyList<string> SlotDiagnostics);
 
     private static int Difference(Color a,Color b)=>
         Math.Max(Math.Abs(a.R-b.R),Math.Max(Math.Abs(a.G-b.G),Math.Abs(a.B-b.B)));
@@ -57,7 +57,7 @@ internal static class NativeInventoryEmptyReader
     {
         var empty=new bool[28];
         if(bitmap.Size!=DockedWindowLayout.GameSize)
-            return new(empty,"wrong_viewport");
+            return new(empty,"wrong_viewport",Array.Empty<string>());
         var cells=Enumerable.Range(0,28).Select(i=>Score(bitmap,i)).ToArray();
         var compatible=cells.Where(c=>c.PlausiblyBlank).ToArray();
         foreach(var cell in compatible)
@@ -69,12 +69,17 @@ internal static class NativeInventoryEmptyReader
                 Math.Abs(other.MeanDeviation-cell.MeanDeviation)<=13);
             if(peers>=8)empty[cell.Index]=true;
         }
-        var first=cells[0];
-        int firstPeers=compatible.Count(other=>
-            Difference(other.Background,first.Background)<=18&&
-            Math.Abs(other.MeanDeviation-first.MeanDeviation)<=13);
-        return new(empty,$"slot0_pixels=strong:{first.StrongPixels},saturated:{first.SaturatedPixels},"+
-            $"mean:{first.MeanDeviation},peers:{firstPeers},plausible:{first.PlausiblyBlank}");
+        // Report the cell under the actual directed right-click, not always
+        // slot zero. This is diagnostic evidence, never proof of an empty item.
+        var samples=cells.Select(cell=>
+        {
+            int peers=compatible.Count(other=>
+                Difference(other.Background,cell.Background)<=18&&
+                Math.Abs(other.MeanDeviation-cell.MeanDeviation)<=13);
+            return $"slot{cell.Index}_pixels=strong:{cell.StrongPixels},saturated:{cell.SaturatedPixels},"+
+                $"mean:{cell.MeanDeviation},peers:{peers},plausible:{cell.PlausiblyBlank}";
+        }).ToArray();
+        return new(empty,samples[0],samples);
     }
 
     internal static bool[] Read(Bitmap bitmap)=>Classify(bitmap).Empty;
@@ -104,6 +109,12 @@ internal static class NativeInventoryEmptyReader
             g.FillRectangle(Brushes.Yellow,new Rectangle(item.X+5,item.Y+4,9,6));
         }
         var read=Read(sample);
+        var metrics=Classify(sample);
+        if(metrics.SlotDiagnostics.Count!=28||
+            metrics.SlotDiagnostics[0]!=metrics.FirstSlotDiagnostic||
+            !metrics.SlotDiagnostics[3].StartsWith("slot3_pixels=",StringComparison.Ordinal)||
+            metrics.SlotDiagnostics[3].Contains("slot0_pixels",StringComparison.Ordinal))
+            throw new Exception("Inventory pixel diagnostics must identify the clicked slot");
         if(read[0]||read.Skip(1).Count(x=>x)!=27)
             throw new Exception("Textured native inventory must reject foreground icons but identify 27 blanks");
         // End-to-end: only the visually selected upper Inventory panel can
@@ -114,6 +125,10 @@ internal static class NativeInventoryEmptyReader
         if(vision is null||!vision.InventoryTabActive||
             vision.Slots[0].Empty||vision.Slots.Skip(1).Count(slot=>slot.Empty)!=27)
             throw new Exception("Native inventory emptiness not plumbed through live ExecutionVision");
+        if(ExecutionVision.SlotDiagnostic(vision,3)!=metrics.SlotDiagnostics[3]||
+            ExecutionVision.SlotDiagnostic(vision,0)!=metrics.FirstSlotDiagnostic||
+            ExecutionVision.SlotDiagnostic(vision,28)!="invalid_slot")
+            throw new Exception("Directed inventory pixel log must describe the clicked slot");
         using(var g=Graphics.FromImage(sample))g.FillRectangle(Brushes.Black,InventoryTabPolicy.Icon);
         var inactive=ExecutionVision.Read(sample,Array.Empty<VisualLabel>());
         if(inactive is null||inactive.InventoryTabActive||inactive.Slots.Any(slot=>slot.Empty))

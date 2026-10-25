@@ -728,8 +728,7 @@ internal sealed class VisualStartup:IDisposable
                 log.Add(Severity.INFO,"GAMEPLAY","INVENTORY_PRE_CLICK_DIAGNOSTIC",
                     $"slot={slot} empty_candidates={baseline.Slots.Count(s=>s.Empty)} "+
                     $"slot_empty={baseline.Slots[slot].Empty} "+
-                    (slot==0?"empty_pixel_quality="+baseline.InventorySlot0Diagnostic:
-                        "empty_pixel_quality=other_slot_not_sampled")+
+                    $"empty_pixel_quality={ExecutionVision.SlotDiagnostic(baseline,slot)}"+
                     " image_phase=BEFORE_RIGHT_CLICK");
         }
         // Context OCR only runs after a successful directed right-click, and

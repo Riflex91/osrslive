@@ -246,6 +246,15 @@ internal sealed class GameInteractions
                 emptyCache[i]=before.Signature;cache.Remove(i);empty++;
                 continue;
             }
+            // PostMessage queues pointer movement and a mouse button press;
+            // the native client may process them in the same input poll.
+            // Stage the cursor over this exact slot and await an independent
+            // frame before the ONE right-click. Keep beforeFrame from the
+            // neutral cursor position for post-Cancel pixel comparison.
+            await Driver.InputAsync(new(GameInputKind.Hover,before.Bounds),ct);
+            if(Driver.Current.Pixels is not { InventoryTabActive:true } hovered||
+                hovered.Slots.Count!=28)
+                throw new RoutineBlockedException("INVENTORY_TAB_LOST_BEFORE_RIGHT_CLICK");
             var menu=await OpenMenu(before.Bounds,ct);
             var examines=menu.Entries.Where(e=>e.Text.StartsWith("Examine ",StringComparison.OrdinalIgnoreCase)).ToArray();
             if(examines.Length==0&&menu.Entries.Count==1&&menu.Exact("Cancel") is not null)

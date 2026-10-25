@@ -59,8 +59,20 @@ internal static class ExecutionRoutinesTests
         bool unknownBlocked=false;
         try{await new GameInteractions(unknownDriver).Inventory(CancellationToken.None);}
         catch(RoutineBlockedException ex){unknownBlocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
-        Require(unknownBlocked&&unknownDriver.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1,
-            "missing context menu alone must NEVER mark an unverified slot empty");
+        int unknownRight=unknownDriver.Inputs.FindIndex(i=>i.Kind==GameInputKind.RightClick);
+        Require(unknownBlocked&&unknownRight>0&&
+            unknownDriver.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
+            unknownDriver.Inputs[unknownRight-1].Kind==GameInputKind.Hover&&
+            ExecutionUi.InventorySlot(0).Contains(new Point(
+                unknownDriver.Inputs[unknownRight-1].Bounds.Left+16,
+                unknownDriver.Inputs[unknownRight-1].Bounds.Top+16)),
+            "unverified slots get one staged hover and one right-click; a missing menu never proves empty");
+        var lostTab=new InventoryGridDriver(false,loseTabOnSlotHover:true);
+        bool lostTabBlocked=false;
+        try{await new GameInteractions(lostTab).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){lostTabBlocked=ex.Message=="INVENTORY_TAB_LOST_BEFORE_RIGHT_CLICK";}
+        Require(lostTabBlocked&&lostTab.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "loss of the selected Inventory tab during staging must prevent the right-click");
         var tabDriver=new InventoryTabDriver();
         await new GameInteractions(tabDriver).OpenInventory(CancellationToken.None);
         Require(tabDriver.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==1&&
@@ -174,8 +186,10 @@ internal static class ExecutionRoutinesTests
         int firstRightClick=cancellable.Inputs.FindIndex(i=>i.Kind==GameInputKind.RightClick);
         int lastNeutralBeforeClick=cancellable.Inputs.FindLastIndex(firstRightClick-1,
             i=>i.Kind==GameInputKind.Hover&&i.Bounds.Contains(new Point(500,400)));
-        Require(firstRightClick>0&&lastNeutralBeforeClick==firstRightClick-1,
-            "inventory slot baseline must be acquired after neutralizing the tab-hover position");
+        Require(firstRightClick>1&&lastNeutralBeforeClick==firstRightClick-2&&
+            cancellable.Inputs[firstRightClick-1].Kind==GameInputKind.Hover&&
+            cancellable.Inputs[firstRightClick-1].Bounds==ExecutionUi.InventorySlot(0),
+            "neutral baseline must precede a target hover and exactly one right-click");
         Require(checkedInventory.Items.Count==1&&checkedInventory.Items[0].Name=="logs"&&
             checkedInventory.EmptySlots==27&&
             cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
@@ -291,8 +305,10 @@ internal static class ExecutionRoutinesTests
     {
         internal readonly List<GameInput> Inputs=new();
         public VisualFrame Current {get;private set;}
-        internal InventoryGridDriver(bool pixelVerifiedEmpty,bool active=true)
+        private readonly bool loseTabOnSlotHover;
+        internal InventoryGridDriver(bool pixelVerifiedEmpty,bool active=true,bool loseTabOnSlotHover=false)
         {
+            this.loseTabOnSlotHover=loseTabOnSlotHover;
             var slots=Enumerable.Range(0,28).Select(i=>
                 new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,pixelVerifiedEmpty)).ToArray();
             Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
@@ -308,7 +324,14 @@ internal static class ExecutionRoutinesTests
         {
             Inputs.Add(input);
             if(input.Kind==GameInputKind.Hover)
+            {
                 Current=Current with{Labels=new[]{new VisualLabel("Inventory",new Rectangle(12,8,80,12))}};
+                if(loseTabOnSlotHover&&input.Bounds==ExecutionUi.InventorySlot(0))
+                {
+                    var pixels=Current.Pixels!;
+                    Current=Current with{Pixels=pixels with{InventoryTabActive=false}};
+                }
+            }
             Current=Current with{CapturedUtc=Current.CapturedUtc.AddSeconds(1)};
             return Task.CompletedTask;
         }
