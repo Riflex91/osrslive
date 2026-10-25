@@ -73,6 +73,18 @@ internal static class NativeMenuHeaderReader
     private static Point? Find(Bitmap image,int minX,int maxX,int minY,int maxY)
     {
         if(minX>maxX||minY>maxY)return null;
+        // Every candidate reuses almost the same pixels. Classify this fresh
+        // screenshot region once, instead of millions of Bitmap.GetPixel
+        // calls during the template search. Matching thresholds and ambiguity
+        // checks below remain identical; no result is reused across frames.
+        int regionWidth=maxX-minX+Width,regionHeight=maxY-minY+Height;
+        var classified=new byte[regionWidth*regionHeight];
+        for(int y=0;y<regionHeight;y++)
+        for(int x=0;x<regionWidth;x++)
+        {
+            var c=image.GetPixel(minX+x,minY+y);
+            classified[y*regionWidth+x]=(byte)((Ink(c)?1:0)|(Backdrop(c)?2:0));
+        }
         int best=int.MinValue,second=int.MinValue,bestX=-1,bestY=-1;
         for(int y=minY;y<=maxY;y++)
         for(int x=minX;x<=maxX;x++)
@@ -81,10 +93,10 @@ internal static class NativeMenuHeaderReader
             for(int dy=0;dy<Height;dy++)
             for(int dx=0;dx<Width;dx++)
             {
-                var c=image.GetPixel(x+dx,y+dy);
+                byte pixel=classified[(y-minY+dy)*regionWidth+x-minX+dx];
                 if(HasInk(dx,dy))
-                {if(Ink(c))matchedInk++;}
-                else if(Backdrop(c))matchedBackground++;
+                {if((pixel&1)!=0)matchedInk++;}
+                else if((pixel&2)!=0)matchedBackground++;
             }
             if(matchedInk<InkPixels*90/100||
                 matchedBackground<(Width*Height-InkPixels)*95/100)continue;

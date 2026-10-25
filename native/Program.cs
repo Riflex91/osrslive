@@ -296,7 +296,12 @@ internal sealed class MainWindow : Form
         copyLog.AccessibleName="Diagnosebericht in die Zwischenablage kopieren";
         copyLog.Click+=(_,_)=>CopyLog();
         pauseAutomation.Text="Automatik pausieren (F8)";pauseAutomation.AutoSize=true;
-        pauseAutomation.Click+=(_,_)=>visualStartup.Paused=!visualStartup.Paused;
+        pauseAutomation.Click+=(_,_)=>
+        {
+            visualStartup.Paused=!visualStartup.Paused;
+            changePending=true;
+            log.Add(Severity.INFO,"VISUAL_INPUT",visualStartup.Paused?"PAUSED":"RESUMED","source=BUTTON");
+        };
         toolbar.Controls.Add(footer,0,0);
         toolbar.Controls.Add(pauseAutomation,1,0);
         toolbar.Controls.Add(toggleLog,2,0);
@@ -818,8 +823,12 @@ internal static class SelfTest
             NativeWorldDigitReader.SelfTest();
             AccountGoalPlannerTests.Run();
             F2PProgressionTests.Run();
+            ActivitySchedulerTests.Run();
+            ItemKnowledgeStoreTests.Run();
             ExecutionRoutinesTests.Run();
             CombatNavigationTests.Run();
+            MinimapZoomTests.Run();
+            SurvivalRoutineTests.Run();
             GameScreenReaderTests.Run();
             SessionRecoveryTests.Run();
             const string manifest="version=0.9.1\n"+

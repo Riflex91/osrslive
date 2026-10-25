@@ -23,6 +23,7 @@ internal static class CombatPolicy
         ((l.Bounds.Top<350&&(Regex.IsMatch(l.Text,@"\bWilderness\b|^Level:\s*\d+",RegexOptions.IgnoreCase)))||
         Regex.IsMatch(l.Text.Trim(),@"^(?:Oh dear, you are dead[!.]?|You have died[!.]?|Death's Office|You have been poisoned[!.]?)$",RegexOptions.IgnoreCase)));
     internal static bool Healthy(int? hp,int max,int percent)=>hp is >0&&max is >=10 and <=99&&hp<=max&&hp*100>=max*percent;
+    internal static int? Hitpoints(ExecutionPixels? pixels)=>pixels?.Hitpoints??pixels?.Navigation?.Hitpoints;
     internal static long? Xp(IReadOnlyList<VisualLabel> labels,string skill)
     {
         var pattern=new Regex("^"+Regex.Escape(skill)+@"\s+XP:\s*([0-9][0-9,]*)$",RegexOptions.IgnoreCase);
@@ -88,8 +89,7 @@ internal sealed class CombatRoutine
     }
     // Pixel-verified red health orb can be read without a Hough minimap;
     // absent navigation still blocks map clicks and travel separately.
-    private int? Hp=>game.Driver.Current.Pixels?.Hitpoints??
-        game.Driver.Current.Pixels?.Navigation?.Hitpoints;
+    private int? Hp=>CombatPolicy.Hitpoints(game.Driver.Current.Pixels);
     private void Check()
     {
         if(CombatPolicy.Danger(game.Driver.Current.Labels))throw new RoutineBlockedException("COMBAT_DANGEROUS_SCREEN_STOPPED");

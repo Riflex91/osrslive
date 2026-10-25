@@ -2,6 +2,9 @@ using Cv=OpenCvSharp;
 
 namespace OSRSLiveDiagnostics;
 
+internal sealed record MapLocalization(MapLocation? Location,string Status,int Features=0,
+    int Candidates=0,int BestInliers=0,int BestRatioMatches=0);
+
 internal sealed class WorldNavigator:IDisposable
 {
     internal WorldMapData? Data{get;private set;}
@@ -11,30 +14,39 @@ internal sealed class WorldNavigator:IDisposable
     {Data??=await WorldMapData.Load(report,ct);}
     internal int Stall(WorldTile from,WorldTile to)
     {var key=(from,to);stalls.TryGetValue(key,out int n);return stalls[key]=n+1;}
-    internal MapLocation? Locate(VisualFrame frame)
+    internal MapLocation? Locate(VisualFrame frame)=>LocateDetailed(frame).Location;
+    // Failure categories contain only feature counts, never the captured
+    // minimap image or unverified coordinates. Navigation must fail closed.
+    internal MapLocalization LocateDetailed(VisualFrame frame)
     {
-        if(Data is null||frame.Pixels?.Navigation is not NavigationPixels pixels)return null;
+        if(Data is null)return new(null,"REFERENCE_MAP_NOT_READY");
+        if(frame.Pixels?.Navigation is not NavigationPixels pixels)return new(null,"MINIMAP_NOT_IDENTIFIED");
+        if(pixels.MinimapPng.Length==0)return new(null,"MINIMAP_IMAGE_INVALID");
         using var image=Cv.Cv2.ImDecode(pixels.MinimapPng,Cv.ImreadModes.Grayscale);
-        if(image.Width is <100 or >190||image.Height!=image.Width)return null;
+        if(image.Empty()||image.Width is <100 or >190||image.Height!=image.Width)
+            return new(null,"MINIMAP_IMAGE_INVALID");
         using var mask=new Cv.Mat(image.Size(),Cv.MatType.CV_8UC1,Cv.Scalar.Black);
         Cv.Cv2.Circle(mask,new(image.Width/2,image.Height/2),image.Width/2-10,Cv.Scalar.White,-1);
         Cv.Cv2.Circle(mask,new(image.Width/2,image.Height/2),8,Cv.Scalar.Black,-1);
         using var sift=Cv.Features2D.SIFT.Create(500,contrastThreshold:.01);
         using var descriptors=new Cv.Mat();sift.DetectAndCompute(image,mask,out var points,descriptors);
-        if(points.Length<8||descriptors.Empty())return null;
+        if(points.Length<8||descriptors.Empty())return new(null,"MINIMAP_FEATURES_INSUFFICIENT",points.Length);
         var candidates=new List<MapLocation>();
+        int bestInliers=0,bestPairs=0;
         using var matcher=new Cv.BFMatcher(Cv.NormTypes.L2);
         foreach(var reference in Data.References)
         {
             if(reference.Descriptors.Rows<8)continue;
             var pairs=matcher.KnnMatch(descriptors,reference.Descriptors,2)
                 .Where(p=>p.Length==2&&p[0].Distance<.65*p[1].Distance).Select(p=>p[0]).ToArray();
+            bestPairs=Math.Max(bestPairs,pairs.Length);
             if(pairs.Length<8)continue;
             var from=pairs.Select(p=>points[p.QueryIdx].Pt).ToArray();var to=pairs.Select(p=>reference.Points[p.TrainIdx].Pt).ToArray();
             using var input=Cv.InputArray.Create(from);using var output=Cv.InputArray.Create(to);using var inliers=new Cv.Mat();
             using var affine=Cv.Cv2.EstimateAffinePartial2D(input,output,inliers,Cv.RobustEstimationAlgorithms.RANSAC,2,3000,.995,20);
             if(affine is null||affine.Empty())continue;
-            int count=Cv.Cv2.CountNonZero(inliers);if(count<8||count<pairs.Length*.65)continue;
+            int count=Cv.Cv2.CountNonZero(inliers);bestInliers=Math.Max(bestInliers,count);
+            if(count<8||count<pairs.Length*.65)continue;
             var accepted=from.Where((_,i)=>inliers.At<byte>(i)!=0).ToArray();
             if(accepted.Max(p=>p.X)-accepted.Min(p=>p.X)<25||accepted.Max(p=>p.Y)-accepted.Min(p=>p.Y)<25)continue;
             var t=new[]{affine.At<double>(0,0),affine.At<double>(0,1),affine.At<double>(0,2),affine.At<double>(1,0),affine.At<double>(1,1),affine.At<double>(1,2)};
@@ -50,7 +62,10 @@ internal sealed class WorldNavigator:IDisposable
             candidates.Add(new(tile,t,pixels.MapBounds,count,frame.CapturedUtc));
         }
         var ranked=candidates.OrderByDescending(c=>c.Inliers).ToArray();
-        return ranked.Length>0&&(ranked.Length==1||ranked[0].Inliers>=ranked[1].Inliers*1.35)?ranked[0]:null;
+        if(ranked.Length==0)return new(null,"NO_VERIFIED_MAP_MATCH",points.Length,0,bestInliers,bestPairs);
+        if(ranked.Length>1&&ranked[0].Inliers<ranked[1].Inliers*1.35)
+            return new(null,"MAP_MATCH_AMBIGUOUS",points.Length,ranked.Length,bestInliers,bestPairs);
+        return new(ranked[0],"VERIFIED",points.Length,ranked.Length,bestInliers,bestPairs);
     }
     private static bool EdgesAgree(Cv.Mat actual,Cv.Mat reference,Cv.Mat mask)
     {
@@ -76,11 +91,28 @@ internal sealed class TravelRoutine
         if(minimumPercent>1)
         {var healing=await SurvivalRoutine.Heal(game,hp,minimumPercent,ct);if(healing is not null)return healing;}
         Health();
-        var first=navigator.Locate(game.Driver.Current);if(first is null)return new(RoutineStatus.Blocked,"AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT");
-        await wait(650,ct);await game.Driver.ObserveAsync(ct);Health();
-        var second=navigator.Locate(game.Driver.Current);
+        // The inventory panel may have just closed, and native HUD/minimap
+        // recognition can take another frame to settle. Re-observe passively
+        // up to twice; never click, guess a map tile or relax SIFT consensus.
+        var firstCheck=await ObserveLocation(0,ct);
+        if(firstCheck.Location is null)
+        {
+            report($"NAVIGATION_LOCALIZATION_{firstCheck.Status} features={firstCheck.Features} "+
+                $"candidates={firstCheck.Candidates} inliers={firstCheck.BestInliers} "+
+                $"best_ratio_matches={firstCheck.BestRatioMatches} phase=initial no_input=true");
+            return new(RoutineStatus.Blocked,"AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT");
+        }
+        var first=firstCheck.Location;
+        var secondCheck=await ObserveLocation(650,ct);
+        var second=secondCheck.Location;
         if(second is null||second.ObservedUtc<=first.ObservedUtc||second.Tile!=first.Tile)
+        {
+            report($"NAVIGATION_LOCALIZATION_{(second is null?secondCheck.Status:"POSITION_CHANGED_OR_FRAME_NOT_FRESH")} "+
+                $"features={secondCheck.Features} candidates={secondCheck.Candidates} "+
+                $"inliers={secondCheck.BestInliers} best_ratio_matches={secondCheck.BestRatioMatches} "+
+                "phase=stationary_confirmation no_input=true");
             return new(RoutineStatus.Blocked,"AUTOMATIC_POSITION_NEEDS_TWO_STATIONARY_FRAMES");
+        }
         string service=NavigationDestinations.Service(target)??target;
         var goals=NavigationDestinations.All.Where(d=>d.Id==target||d.Service==service).OrderBy(d=>Math.Abs(d.Tile.X-second.Tile.X)+Math.Abs(d.Tile.Y-second.Tile.Y)).ToArray();
         if(goals.Length==0)return new(RoutineStatus.Blocked,"UNKNOWN_TRAVEL_DESTINATION");
@@ -112,6 +144,19 @@ internal sealed class TravelRoutine
         if(hop is null||click is null)return new(RoutineStatus.Blocked,"NEXT_PATH_TILE_NOT_INSIDE_VISIBLE_MINIMAP");
         await game.Click(new(click.Value.X-1,click.Value.Y-1,3,3),ct);
         return await Confirm(second,hop.Tile,goal,ct);
+    }
+    private async Task<MapLocalization> ObserveLocation(int initialDelayMs,CancellationToken ct)
+    {
+        if(initialDelayMs>0){await wait(initialDelayMs,ct);await game.Driver.ObserveAsync(ct);Health();}
+        var observation=navigator.LocateDetailed(game.Driver.Current);
+        for(int retry=0;retry<2&&observation.Location is null;retry++)
+        {
+            var previous=game.Driver.Current.CapturedUtc;
+            await wait(450,ct);await game.Driver.ObserveAsync(ct);Health();
+            if(game.Driver.Current.CapturedUtc<=previous)continue;
+            observation=navigator.LocateDetailed(game.Driver.Current);
+        }
+        return observation;
     }
     private async Task<RoutineResult> Confirm(MapLocation before,WorldTile hop,NavigationDestination goal,CancellationToken ct)
     {
@@ -146,7 +191,7 @@ internal sealed class TravelRoutine
     private void Health()
     {
         if(CombatPolicy.Danger(game.Driver.Current.Labels))throw new RoutineBlockedException("TRAVEL_DANGEROUS_SCREEN_STOPPED");
-        if(!CombatPolicy.Healthy(game.Driver.Current.Pixels?.Navigation?.Hitpoints,hp,minimumPercent))
+        if(!CombatPolicy.Healthy(CombatPolicy.Hitpoints(game.Driver.Current.Pixels),hp,minimumPercent))
             throw new RoutineBlockedException("TRAVEL_HEALTH_UNREADABLE_OR_BELOW_THRESHOLD");
     }
 }

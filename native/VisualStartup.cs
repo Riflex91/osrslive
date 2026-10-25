@@ -181,6 +181,7 @@ internal sealed class VisualStartup:IDisposable
     private string lastWorldGridDiagnostic="";
     private string lastSkillOcrDiagnostic="";
     private Point? contextMenuAnchor;
+    private string lastHealthDiagnostic="";
     private ulong? contextMenuPanelBefore;
     private string lastContextDiagnostic="";
     private int? pendingWorldChoice;
@@ -198,6 +199,7 @@ internal sealed class VisualStartup:IDisposable
     private readonly BackgroundWindowCapture backgroundCapture=new();
     private readonly SessionRecovery recovery=new();
     private readonly ConnectivityWatch connectivity=new();
+    private RoutineResult? minimapZoomResult;
     private string lastRecoveryState="";
     private DateTimeOffset lastVerifiedHud;
     internal string CaptureState=>backgroundCapture.State;
@@ -209,7 +211,17 @@ internal sealed class VisualStartup:IDisposable
     // Called immediately after independent in-game OCR confirmation, before
     // potentially long-running inventory/production executor work.
     internal Action? VisuallyConfirmedSession;
-    internal bool Paused {get;set;}
+    private bool paused;
+    internal bool Paused
+    {
+        get=>paused;
+        set
+        {
+            if(paused&&!value&&minimapZoomResult?.Status==RoutineStatus.Blocked)
+                minimapZoomResult=null; // Manual resume can retry after enabling minimap zoom in the client.
+            paused=value;
+        }
+    }
     internal bool ObserveOnly {get;set;}
     internal string State {get;private set;}="WAITING_FOR_WINDOW";
     internal VisualStartup(Diagnostics log,OfficialLiveRenderObserver? renderObserver=null)
@@ -229,9 +241,9 @@ internal sealed class VisualStartup:IDisposable
         if((GetAsyncKeyState(0x77)&0x8000)!=0)Paused=true; // F8 emergency pause
         if(Paused){SetState("PAUSED");return;}
         if(target==IntPtr.Zero||!IsWindow(target))
-        {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
+        {backgroundCapture.Release();minimapZoomResult=null;SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();minimapZoomResult=null;recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -264,7 +276,7 @@ internal sealed class VisualStartup:IDisposable
         DiagnoseSkillOcr(observed);
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
         else if(lastVerifiedHud!=default&&DateTimeOffset.UtcNow-lastVerifiedHud>TimeSpan.FromSeconds(3))
-        {Gameplay.Reset();lastVerifiedHud=default;}
+        {Gameplay.Reset();minimapZoomResult=null;lastVerifiedHud=default;}
         DiagnosePostPlay(observed);
         if(!ObserveOnly&&Game.Confirmed is not null)
             VisuallyConfirmedSession?.Invoke();
@@ -278,7 +290,7 @@ internal sealed class VisualStartup:IDisposable
         {
             if(recoveryDecision.ResetSubject)
             {
-                Game.Reset();Gameplay.Reset();observedSelectedWorld=null;previousAction="";repeatedActions=0;
+                Game.Reset();Gameplay.Reset();minimapZoomResult=null;observedSelectedWorld=null;previousAction="";repeatedActions=0;
                 ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();
             }
             if(lastRecoveryState!=recoveryDecision.State)
@@ -312,6 +324,40 @@ internal sealed class VisualStartup:IDisposable
                 {SetState("SKILLS_BUTTON_NOT_VERIFIED_IN_SUMMARY");return;}
                 await Dispatch(observed,new("OPEN_SKILLS_FROM_SUMMARY",icon[0].Bounds),owner,ct);
                 return;
+            }
+            if(Game.Confirmed is not null)
+            {
+                if(minimapZoomResult is null)
+                {
+                    SetState("MINIMAP_ZOOM_VISUAL_CALIBRATION");
+                    using var zoomBudget=CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    zoomBudget.CancelAfter(TimeSpan.FromSeconds(75));
+                    var zoomDriver=new WindowVisualGameDriver(observed,async token=>
+                    {
+                        if(Paused||ObserveOnly)throw new OperationCanceledException(token);
+                        bool lost=await connectivity.Lost(observedSelectedWorld??preferredWorld,true,token);
+                        var next=await Capture(target,owner,token);
+                        return next is null?null:ConnectivityWatch.Signal(next,lost);
+                    },(f,input,token)=>Dispatch(f,new("MINIMAP_ZOOM_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
+                        action=>SetState("MINIMAP_ZOOM_INPUT_"+action.ToUpperInvariant()));
+                    RoutineResult result;
+                    try{result=await new MinimapZoomRoutine(zoomDriver,()=>Paused||ObserveOnly,
+                        diagnostic:message=>log.Add(Severity.INFO,"MINIMAP_ZOOM","STEP",message)).Run(zoomBudget.Token);}
+                    catch(OperationCanceledException) when(!ct.IsCancellationRequested)
+                    {result=new(RoutineStatus.Blocked,"MINIMAP_ZOOM_TIMED_OUT");}
+                    if(result.Status!=RoutineStatus.Waiting)
+                    {
+                        minimapZoomResult=result;
+                        log.Add(result.Status==RoutineStatus.Completed?Severity.INFO:Severity.WARN,
+                            "MINIMAP_ZOOM","RESULT",$"status={result.Status} reason={result.Reason} "+
+                            $"wheel_down_steps={result.Produced} mouse_global_untouched=true");
+                    }
+                    SetState(result.Status==RoutineStatus.Completed?"MINIMAP_ZOOM_CONFIRMED":
+                        result.Status==RoutineStatus.Waiting?"PAUSED":"BLOCKED_"+result.Reason);
+                    return; // Next tick obtains a fresh frame after zoom calibration.
+                }
+                if(minimapZoomResult.Status!=RoutineStatus.Completed)
+                {SetState("BLOCKED_"+minimapZoomResult.Reason);return;}
             }
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
             {
@@ -451,6 +497,13 @@ internal sealed class VisualStartup:IDisposable
                 $"inventory_active={InventoryTabPolicy.Active(captured.Image)} "+
                 "screenshot_persisted=false");
         var pixels=ExecutionVision.Read(captured.Image,labels);
+        if(contextMenuAnchor is null&&pixels is not null&&labels.Any(l=>l.Kind==VisualLabelKind.GameHud))
+        {
+            string health=$"hp={CombatPolicy.Hitpoints(pixels)?.ToString()??"unknown"} "+
+                $"navigation_available={pixels.Navigation is not null} evidence={pixels.HealthEvidence}";
+            if(health!=lastHealthDiagnostic)
+            {lastHealthDiagnostic=health;log.Add(Severity.INFO,"GAMEPLAY","HEALTH_OBSERVATION",health);}
+        }
         if(contextMenuAnchor is Point anchor)
         {
             var menu=ExecutionUi.Menu(labels);
@@ -826,11 +879,33 @@ internal sealed class VisualStartup:IDisposable
                 throw new InvalidOperationException("Standalone health fixture unexpectedly has a minimap");
             var redHealth=await ExecutionVision.ReadHealth(healthWithoutMap,engine,
                 Array.Empty<VisualLabel>());
+            var offsetMap=new Rectangle(830,25,150,150);
+            var healthCandidates=ExecutionVision.HealthNumberCandidates(healthWithoutMap,
+                Array.Empty<VisualLabel>(),offsetMap);
+            if(healthCandidates.Count!=2||
+                healthCandidates[1]!=HudVision.StandaloneHealthNumber(healthWithoutMap)||
+                HudVision.HeartRightOf(healthWithoutMap,healthCandidates[0]))
+                throw new InvalidOperationException("An unusable map-relative HP crop must retain the independent red-orb fallback");
             var independentHp=ExecutionVision.Read(healthWithoutMap,redHealth);
             if(redHealth.Count(l=>l.Kind==VisualLabelKind.Hitpoints)!=1||
                 redHealth.Single(l=>l.Kind==VisualLabelKind.Hitpoints).Text!="24"||
                 independentHp?.Hitpoints!=24||independentHp.Navigation is not null)
                 throw new InvalidOperationException("Pixel-verified red health icon must independently OCR 24 without minimap navigation");
+            using var compactHealth=new Bitmap(healthWithoutMap);
+            using(var g=Graphics.FromImage(compactHealth))g.FillRectangle(Brushes.Black,700,65,68,45);
+            var compactDigits=new[]{".###./#...#/....#/...#./..#../.#.../#..../#####",
+                "#.../#.../#.../#.#./#.#./####/..#./..#."};
+            int compactX=750;
+            foreach(var pattern in compactDigits)
+            {
+                var rows=pattern.Split('/');
+                for(int y=0;y<rows.Length;y++)for(int x=0;x<rows[y].Length;x++)
+                    if(rows[y][x]=='#')compactHealth.SetPixel(compactX+x,85+y,Color.Lime);
+                compactX+=rows[0].Length+2;
+            }
+            var compactRead=await ExecutionVision.ReadHealth(compactHealth,engine,Array.Empty<VisualLabel>());
+            if(compactRead.SingleOrDefault(l=>l.Kind==VisualLabelKind.Hitpoints)?.Text!="24")
+                throw new InvalidOperationException("Native green P11 HP digits beside the orb must remain complete and decode as 24");
             using var noHealthOrb=new Bitmap(healthWithoutMap);
             using(var g=Graphics.FromImage(noHealthOrb))
                 g.FillRectangle(Brushes.Black,760,75,40,35);
@@ -1048,6 +1123,12 @@ internal sealed class VisualStartup:IDisposable
                 frame.Window,contextMenuAnchor??SkillsHoverPolicy.RestPoint),
             GameInputKind.Text=>await BackgroundWindowInput.TypeTextAsync(frame.Window,point,decision.RuntimeInput!.Text!,
                 decision.RuntimeInput.Submit,()=>Paused||ObserveOnly,ct),
+            GameInputKind.WheelDown or GameInputKind.WheelUp or
+                GameInputKind.WheelDownGameWindow or GameInputKind.WheelUpGameWindow=>
+                BackgroundWindowInput.Wheel(frame.Window,point,
+                    kind is GameInputKind.WheelDown or GameInputKind.WheelDownGameWindow,
+                    ()=>Paused||ObserveOnly,
+                    kind is GameInputKind.WheelDownGameWindow or GameInputKind.WheelUpGameWindow),
             _=>await BackgroundWindowInput.ClickAsync(frame.Window,point,()=>Paused||ObserveOnly,ct,kind==GameInputKind.RightClick)
         };
         if(!queued)

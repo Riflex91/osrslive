@@ -6,14 +6,16 @@ namespace OSRSLiveDiagnostics;
 
 internal sealed record AgentSettings(bool Ironman=false,long ReserveCoins=500,bool Enabled=true,bool CombatEnabled=true);
 internal sealed record AgentJob(string Id,string Kind,string Target,int Quantity=1,long? UnitPrice=null);
-internal sealed record SupplyIntent(string Subject,AgentJob Order);
+internal sealed record SupplyIntent(string Subject,AgentJob Order,string? ActivityId=null);
 
 internal sealed class GameplayCoordinator:IDisposable
 {
     private readonly Diagnostics log;
     private readonly WikiPriceService prices=new();
     private readonly WorldNavigator navigator=new();
+    private readonly ActivityScheduler activities=new();
     private readonly string directory;
+    private readonly ItemKnowledgeStore itemKnowledge;
     private VisibleGameObservation? subject;
     private DateTimeOffset leaseUntil,nextAttempt;
     private bool uncertain;
@@ -21,8 +23,12 @@ internal sealed class GameplayCoordinator:IDisposable
     internal string State {get;private set;}="WAITING_FOR_SKILLS";
     internal bool HasSubject=>subject is not null&&DateTimeOffset.UtcNow<leaseUntil;
     internal GameplayCoordinator(Diagnostics log)
-    {this.log=log;directory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","agent");}
-    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;Set("WAITING_FOR_SKILLS");}
+    {
+        this.log=log;directory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","agent");
+        itemKnowledge=new(Path.Combine(directory,"items.sqlite"),message=>log.Add(
+            message.StartsWith("ITEM_REFERENCE_READY",StringComparison.Ordinal)?Severity.INFO:Severity.WARN,"ITEM_DATABASE","STATUS",message));
+    }
+    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();Set("WAITING_FOR_SKILLS");}
     private void Set(string state)
     {
         if(State==state)return;State=state;
@@ -73,8 +79,10 @@ internal sealed class GameplayCoordinator:IDisposable
         var driver=new WindowVisualGameDriver(frame,capture,async (f,input,ct)=>HasSubject&&
             (GameScreenReader.Read(f).Character is not string name||name==subject.Character)&&await dispatch(f,input,ct),
             action=>Set("INPUT_"+action.ToUpperInvariant()));
-        var game=new GameInteractions(driver);
+        var game=new GameInteractions(driver,itemKnowledge,message=>log.Add(Severity.INFO,"ITEM_DATABASE","INVENTORY_READ",message));
         RoutineResult result;
+        string? activityId=null;
+        bool reconcilingJournal=false;
         int retrySeconds=10;
         try
         {
@@ -83,22 +91,26 @@ internal sealed class GameplayCoordinator:IDisposable
             string hash=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(subject.Character!.ToUpperInvariant())));
             var journal=new TradeJournal(Path.Combine(directory,"pending-trade.json"),hash);
             var combatJournal=new CombatJournal(Path.Combine(directory,"pending-combat.json"),hash);
+            SupplyIntent? pendingSupply=null;
             var atlas=navigator;
             int maxHp=subject.Skills.Single(s=>s.Name=="Hitpoints").Level;
             var training=new TrainingRoutines(game);var bank=new BankRoutine(game);
             if(journal.Pending() is PendingTrade pending)
             {
+                reconcilingJournal=true;
                 Set("RECONCILING_EXISTING_TRADE");result=await new TradeRoutine(game,journal).Resume(budget.Token);
             }
             else if(combatJournal.Pending() is PendingCombat encounter)
             {
                 if(uncertain){Set("UNCERTAIN_COMBAT_REQUIRES_REVIEW");return true;}
+                reconcilingJournal=true;
                 result=await new CombatRoutine(game,combatJournal,atlas,maxHp,Set).Resume(budget.Token);
             }
             else if(uncertain){Set("UNCERTAIN_RESULT_REQUIRES_REVIEW");return true;}
-            else if(Read<SupplyIntent?>("pending-supply.json",null) is SupplyIntent supply)
+            else if((pendingSupply=ReadSupply(hash)) is SupplyIntent supply&&
+                activities.Available(supply.ActivityId??"SUPPLY_"+supply.Order.Id,DateTimeOffset.UtcNow))
             {
-                if(supply.Subject!=hash)throw new RoutineBlockedException("SUPPLY_INTENT_BELONGS_TO_OTHER_CHARACTER");
+                activityId=supply.ActivityId??"SUPPLY_"+supply.Order.Id;
                 var stock=await game.Inventory(budget.Token);
                 if(stock.Count(supply.Order.Target) is int have&&have>=supply.Order.Quantity)
                     result=new(RoutineStatus.Completed,"PENDING_SUPPLY_ALREADY_IN_INVENTORY");
@@ -108,19 +120,19 @@ internal sealed class GameplayCoordinator:IDisposable
             else
             {
                 Set("READING_INVENTORY_FOR_AUTOMATIC_ACTIVITY");
+                await itemKnowledge.EnsureReference(budget.Token);
                 var inventory=await game.Inventory(budget.Token);
-                var candidates=ExecutionCatalog.Training.Where(spec=>F2PProgression.Methods.Any(m=>m.Id==spec.Id&&
-                    subject.Skills.Any(s=>s.Name==m.Skill&&s.Level>=m.MinimumLevel&&s.Level<m.NextLevel)))
-                    .OrderBy(spec=>subject.Skills.Single(s=>s.Name==spec.Skill).Level).ToArray();
-                var ready=candidates.FirstOrDefault(s=>Supplied(s,inventory,subject.Skills));
-                var combat=settings.CombatEnabled?CombatPolicy.Specs
-                    .Where(s=>subject.Skills.Any(level=>level.Name==s.Skill&&level.Level<99))
-                    .OrderBy(s=>subject.Skills.Single(level=>level.Name==s.Skill).Level).FirstOrDefault():null;
+                // An unsubmitted purchase intent may wait while supplied work
+                // proceeds. Never replace it with a second acquisition chain.
+                var candidates=ActivityScheduler.Candidates(subject.Skills,inventory,settings.CombatEnabled,
+                    allowAcquisition:pendingSupply is null);
+                var activity=activities.Select(candidates,DateTimeOffset.UtcNow);
                 var products=new HashSet<string>(ExecutionCatalog.Training.Select(s=>s.Product).Where(p=>p.Length>0),StringComparer.OrdinalIgnoreCase);
                 if(inventory.EmptySlots<2&&inventory.Items.Any(i=>products.Contains(i.Name)))
                     result=await Go(game,atlas,maxHp,"bank",budget.Token)??await bank.Deposit(products,budget.Token);
-                else if(combat is not null&&(ready is null||subject.Skills.Single(s=>s.Name==combat.Skill).Level<=subject.Skills.Single(s=>s.Name==ready.Skill).Level))
+                else if(activity?.Combat is CombatSpec combat)
                 {
+                    activityId=activity.Id;
                     Set("COMBAT_"+combat.Id);
                     if(CombatPolicy.Supply(combat,inventory) is string combatMissing)
                     {
@@ -134,46 +146,70 @@ internal sealed class GameplayCoordinator:IDisposable
                             foreach(var worn in wornCandidates)if(await fighter.RemoveIfEquipped(worn,budget.Token)){recovered=true;break;}
                         }
                         result=recovered?new(RoutineStatus.Progress,"WORN_COMBAT_SUPPLY_RECOVERED_BEFORE_PURCHASE"):
-                            await Replenish(game,journal,atlas,maxHp,combatMissing,settings,hash,budget.Token);
+                            await Replenish(game,journal,atlas,maxHp,combatMissing,settings,hash,activity.Id,budget.Token);
                     }
                     else result=await Go(game,atlas,maxHp,combat.Id,budget.Token)??
                             await new CombatRoutine(game,combatJournal,atlas,maxHp,Set).Run(combat,Guid.NewGuid().ToString("N"),subject.Skills,budget.Token);
                 }
-                else if(ready is not null)
-                {Set("TRAINING_"+ready.Id);result=await Go(game,atlas,maxHp,ready.Id,budget.Token)??await training.Run(ready,subject.Skills,budget.Token);}
+                else if(activity?.Training is TrainingSpec ready&&activity.Supplied)
+                {activityId=activity.Id;Set("TRAINING_"+ready.Id);result=await Go(game,atlas,maxHp,ready.Id,budget.Token)??await training.Run(ready,subject.Skills,budget.Token);}
                 else
                 {
                     if(inventory.EmptySlots==0&&inventory.Items.Any(i=>products.Contains(i.Name)))
                         result=await Go(game,atlas,maxHp,"bank",budget.Token)??await bank.Deposit(products,budget.Token);
                     else
                     {
-                        var next=candidates.FirstOrDefault();
+                        var next=activity?.Training;
                         string? missing=next is null?null:Missing(next,inventory,subject.Skills);
-                        if(missing is null)result=new(RoutineStatus.Blocked,"NO_SUPPORTED_SUPPLIED_ACTIVITY");
+                        if(missing is null)result=new(RoutineStatus.Blocked,
+                            activity is null&&(candidates.Length>0||pendingSupply is not null)?
+                            "ACTIVITIES_DEFERRED_WAITING_FOR_RETRY":"NO_SUPPORTED_SUPPLIED_ACTIVITY");
                         else
                         {
-                            result=await Replenish(game,journal,atlas,maxHp,missing,settings,hash,budget.Token);
+                            activityId=activity!.Id;
+                            result=await Replenish(game,journal,atlas,maxHp,missing,settings,hash,activity.Id,budget.Token);
                         }
                     }
                 }
             }
             uncertain=result.Status==RoutineStatus.UnknownOutcome;
+            if(reconcilingJournal)activities.ReconcileJournal(result);
+            if(activityId is not null)RecordActivity(activityId,result);
             retrySeconds=result.Status==RoutineStatus.Progress?1:result.Status==RoutineStatus.Completed?2:10;
             Set(result.Status.ToString().ToUpperInvariant()+"_"+result.Reason);
+            if(result.Status==RoutineStatus.Blocked&&result.Reason=="HEALING_REQUIRES_READABLE_LIVING_HEALTH")
+                log.Add(Severity.WARN,"GAMEPLAY","HEALTH_EVIDENCE",
+                    $"hp_standalone={driver.Current.Pixels?.Hitpoints?.ToString()??"unknown"} "+
+                    $"hp_navigation={driver.Current.Pixels?.Navigation?.Hitpoints?.ToString()??"unknown"} max_hp={maxHp} "+
+                    $"navigation_available={driver.Current.Pixels?.Navigation is not null} "+
+                    $"evidence={driver.Current.Pixels?.HealthEvidence??"unavailable"}");
             log.Add(result.Status is RoutineStatus.Blocked or RoutineStatus.UnknownOutcome?Severity.WARN:Severity.INFO,
                 "GAMEPLAY","ROUTINE_RESULT",$"status={result.Status} reason={result.Reason} produced={result.Produced}");
         }
         catch(OperationCanceledException) when(!stopping.IsCancellationRequested)
         {Set("ROUTINE_TIMEOUT_STOPPED");uncertain=true;}
-        catch(RoutineBlockedException ex){Set("BLOCKED_"+ex.Message);}
+        catch(RoutineBlockedException ex)
+        {if(activityId is not null)RecordActivity(activityId,new(RoutineStatus.Blocked,ex.Message));Set("BLOCKED_"+ex.Message);}
         catch(IOException){Set("ANOTHER_AGENT_OR_JOURNAL_IO_BUSY");}
         catch(Exception ex)
         {Set("ROUTINE_ERROR_"+ex.GetType().Name);log.Add(Severity.WARN,"GAMEPLAY","ROUTINE_ERROR","reason="+ex.GetType().Name);uncertain=true;}
         nextAttempt=DateTimeOffset.UtcNow.AddSeconds(retrySeconds);
         return true;
     }
+    private void RecordActivity(string id,RoutineResult result)
+    {
+        if(activities.Record(id,result,DateTimeOffset.UtcNow) is DateTimeOffset retry)
+            log.Add(Severity.INFO,"GAMEPLAY","ACTIVITY_DEFERRED",$"activity={id} reason={result.Reason} retry_utc={retry:O}");
+    }
+    private SupplyIntent? ReadSupply(string hash)
+    {
+        var supply=Read<SupplyIntent?>("pending-supply.json",null);
+        if(supply is not null&&supply.Subject!=hash)
+            throw new RoutineBlockedException("SUPPLY_INTENT_BELONGS_TO_OTHER_CHARACTER");
+        return supply;
+    }
     private async Task<RoutineResult> Replenish(GameInteractions game,TradeJournal journal,WorldNavigator atlas,int hp,
-        string item,AgentSettings settings,string hash,CancellationToken ct)
+        string item,AgentSettings settings,string hash,string activityId,CancellationToken ct)
     {
         Set("REPLENISHING_"+item.Replace(' ','_').ToUpperInvariant());
         int quantity=item=="bronze arrow"?50:item is "air rune" or "mind rune"?50:CombatPolicy.Food.Contains(item)?5:1;
@@ -185,7 +221,7 @@ internal sealed class GameplayCoordinator:IDisposable
             var order=new AgentJob(Guid.NewGuid().ToString("N"),"buy",item,quantity);
             string path=Path.Combine(directory,"pending-supply.json");
             string temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
-            try{File.WriteAllText(temp,JsonSerializer.Serialize(new SupplyIntent(hash,order)));File.Move(temp,path,false);}
+            try{File.WriteAllText(temp,JsonSerializer.Serialize(new SupplyIntent(hash,order,activityId)));File.Move(temp,path,false);}
             finally{if(File.Exists(temp))File.Delete(temp);}
             result=await Go(game,atlas,hp,"ge",ct)??await Trade(game,journal,order,settings,ct);
             if(result.Status==RoutineStatus.Completed)File.Delete(path);
@@ -224,5 +260,5 @@ internal sealed class GameplayCoordinator:IDisposable
         if(spec.SecondInput is not null&&(inv.Count(spec.SecondInput) is not int second||second<1))return spec.SecondInput;
         return null;
     }
-    public void Dispose(){prices.Dispose();navigator.Dispose();}
+    public void Dispose(){prices.Dispose();navigator.Dispose();itemKnowledge.Dispose();}
 }
