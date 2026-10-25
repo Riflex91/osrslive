@@ -49,8 +49,25 @@ internal static class BackgroundWindowInput
         finally{if(!released)PostMessage(destination,right?0x205u:0x202u,IntPtr.Zero,coordinates);}
         return released;
     }
-    internal static bool Escape(IntPtr window)=>IsWindow(window)&&!IsIconic(GetAncestor(window,2))&&
-        PostMessage(window,0x100,new IntPtr(0x1B),IntPtr.Zero)&&PostMessage(window,0x101,new IntPtr(0x1B),IntPtr.Zero);
+    // Mouse input is routed to the official game's child HWND. Escape must
+    // reach that same child; posting VK_ESCAPE to the embed host HWND can
+    // report success without actually dismissing the context menu.
+    internal static bool Escape(IntPtr window,Point gamePoint)
+    {
+        if(!IsWindow(window)||IsIconic(GetAncestor(window,2))||
+            !GetClientRect(window,out var bounds)||gamePoint.X<0||gamePoint.Y<0||
+            gamePoint.X>=bounds.Right||gamePoint.Y>=bounds.Bottom)return false;
+        var mapped=new POINT{X=gamePoint.X,Y=gamePoint.Y};
+        IntPtr destination=Resolve(window,ref mapped);
+        GetWindowThreadProcessId(window,out uint expectedPid);
+        GetWindowThreadProcessId(destination,out uint actualPid);
+        if(expectedPid==0||expectedPid!=actualPid)return false;
+        // Ordinary WM_KEYDOWN/WM_KEYUP, no global keyboard or focus stealing.
+        const long escapeDown=0x00010001L; // repeat count=1, scan code=1
+        const long escapeUp=0xC0010001L;   // prior key + transition bits
+        return PostMessage(destination,0x100,new IntPtr(0x1B),new IntPtr(escapeDown))&&
+            PostMessage(destination,0x101,new IntPtr(0x1B),new IntPtr(escapeUp));
+    }
     internal static async Task<bool> TypeTextAsync(IntPtr window,Point anchor,string text,bool submit,Func<bool> stop,CancellationToken ct)
     {
         if(stop()||!IsWindow(window)||IsIconic(GetAncestor(window,2))||text.Length is <1 or >50||text.Any(c=>c<32||c>126))return false;
