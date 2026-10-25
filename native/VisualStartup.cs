@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal, CharacterPrompt, CharacterSummary, CharacterSummaryName, ContextMenuLine, ContextMenuCandidate }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -23,7 +23,7 @@ internal static class SkillsHoverPolicy
     internal static readonly Point RestPoint=new(500,400);
     internal static readonly Rectangle RestTarget=new(RestPoint.X-2,RestPoint.Y-2,4,4);
     internal static bool AfterOpen(string action,GameInputKind kind,Size size)=>
-        action=="OPEN_SKILLS"&&kind==GameInputKind.LeftClick&&size==DockedWindowLayout.GameSize;
+        (action=="OPEN_SKILLS"||action=="OPEN_SKILLS_FROM_SUMMARY")&&kind==GameInputKind.LeftClick&&size==DockedWindowLayout.GameSize;
     internal static bool NeedsClear(bool alreadyCleared,VisibleGameObservation observation,Size size)=>
         !alreadyCleared&&size==DockedWindowLayout.GameSize&&
         observation.Stage==VisibleGameStage.InGame&&observation.TotalLevel is not null&&
@@ -137,6 +137,35 @@ internal static class VisualStartupPolicy
     }
 }
 
+// A post-entry screen that remains unknown must stop in a visible,
+// recoverable, fail-closed state. Only fresh recognized UI can authorize input.
+internal static class PostEnterUnknownScreenPolicy
+{
+    internal static readonly TimeSpan DiagnosticAfter=TimeSpan.FromSeconds(12);
+    internal static readonly TimeSpan BlockAfter=TimeSpan.FromSeconds(30);
+    internal static bool IsUnknownAfterEnter(string previousAction,DateTimeOffset lastAction,
+        DateTimeOffset now,VisibleGameStage stage)=>
+        previousAction=="ENTER_GAME"&&lastAction!=DateTimeOffset.MinValue&&
+        now>=lastAction&&stage==VisibleGameStage.Unknown;
+    internal static bool ShouldBlock(string previousAction,DateTimeOffset lastAction,
+        DateTimeOffset now,VisibleGameStage stage,string decisionState)=>
+        IsUnknownAfterEnter(previousAction,lastAction,now,stage)&&
+        now-lastAction>=BlockAfter&&decisionState=="WAITING_FOR_RECOGNIZED_SCREEN";
+}
+
+// In an already-open native inventory context menu the item quantities and
+// character/skill OCR crops are obscured or irrelevant. Preserve the complete
+// game-HUD read if independent native HUD pixels are not confirmed.
+internal static class InventoryMenuOcrPolicy
+{
+    internal static bool IsContext(Bitmap bitmap,Point? anchor)=>
+        anchor is Point point&&bitmap.Size==DockedWindowLayout.GameSize&&
+        InventoryTabPolicy.Active(bitmap)&&
+        Enumerable.Range(0,28).Any(i=>ExecutionUi.InventorySlot(i).Contains(point));
+    internal static bool FastHud(bool inventoryContext,bool nativeHudVerified)=>
+        inventoryContext&&nativeHudVerified;
+}
+
 internal sealed class VisualStartup:IDisposable
 {
     private readonly Diagnostics log;
@@ -146,9 +175,14 @@ internal sealed class VisualStartup:IDisposable
     private static string footerDiagnostic="not_read";
     private int repeatedActions;
     private bool skillsHoverCleared;
+    private readonly CharacterSummaryIdentity summaryIdentity=new();
     private int pageActions;
     private string previousAction="";
     private string lastWorldGridDiagnostic="";
+    private string lastSkillOcrDiagnostic="";
+    private Point? contextMenuAnchor;
+    private ulong? contextMenuPanelBefore;
+    private string lastContextDiagnostic="";
     private int? pendingWorldChoice;
     private Rectangle? pendingWorldChoiceBounds;
     private DateTimeOffset pendingWorldChoiceFrame;
@@ -156,6 +190,9 @@ internal sealed class VisualStartup:IDisposable
     private DateTimeOffset pendingPlayFrame,pendingEnterFrame;
     private string lastPostPlayDiagnostic="";
     private DateTimeOffset lastPostPlayDiagnosticAt=DateTimeOffset.MinValue;
+    private WelcomePanelPixels lastWelcomePixels;
+    private GameHudFooterPixels lastHudFooterPixels;
+    private bool postEnterUnknownDiagnosed;
     private int? observedSelectedWorld;
     private IntPtr observedWindow;
     private readonly BackgroundWindowCapture backgroundCapture=new();
@@ -194,7 +231,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";skillsHoverCleared=false;ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -221,7 +258,10 @@ internal sealed class VisualStartup:IDisposable
         if(observed is null)
         {SetState("CAPTURE_"+backgroundCapture.State);return;}
         observed=ConnectivityWatch.Signal(observed,networkLost);
-        Game.Observe(GameScreenReader.Read(observed),DateTimeOffset.UtcNow);
+        var visible=GameScreenReader.Read(observed);
+        summaryIdentity.Observe(visible,observed.Labels);
+        Game.Observe(summaryIdentity.Apply(visible),DateTimeOffset.UtcNow);
+        DiagnoseSkillOcr(observed);
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
         else if(lastVerifiedHud!=default&&DateTimeOffset.UtcNow-lastVerifiedHud>TimeSpan.FromSeconds(3))
         {Gameplay.Reset();lastVerifiedHud=default;}
@@ -239,7 +279,7 @@ internal sealed class VisualStartup:IDisposable
             if(recoveryDecision.ResetSubject)
             {
                 Game.Reset();Gameplay.Reset();observedSelectedWorld=null;previousAction="";repeatedActions=0;
-                ResetWorldChoice();ResetPlayButton();ResetEnter();skillsHoverCleared=false;
+                ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();
             }
             if(lastRecoveryState!=recoveryDecision.State)
             {lastRecoveryState=recoveryDecision.State;log.Add(Severity.INFO,"RECONNECT","STATE","state="+lastRecoveryState+" pending_transactions_preserved=true");}
@@ -258,6 +298,21 @@ internal sealed class VisualStartup:IDisposable
         }
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
         {
+            // The official Character Summary displays the real account name
+            // while the Skills tab displays the full 24-value raster. Require
+            // two fresh summary frames, then switch to the separately verified
+            // Skills icon. Do not click the Summary's Total Level as if it
+            // contained individual skill cells.
+            if(Game.Confirmed is null&&observed.Labels.Any(l=>l.Kind==VisualLabelKind.CharacterSummary))
+            {
+                if(summaryIdentity.Verified(observed.CapturedUtc) is null)
+                {SetState("CONFIRMING_CHARACTER_SUMMARY");return;}
+                var icon=observed.Labels.Where(l=>l.Kind==VisualLabelKind.SkillsButton).ToArray();
+                if(icon.Length!=1)
+                {SetState("SKILLS_BUTTON_NOT_VERIFIED_IN_SUMMARY");return;}
+                await Dispatch(observed,new("OPEN_SKILLS_FROM_SUMMARY",icon[0].Bounds),owner,ct);
+                return;
+            }
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
             {
                 if(Paused||ObserveOnly)throw new OperationCanceledException(token);
@@ -290,6 +345,18 @@ internal sealed class VisualStartup:IDisposable
         var decision=VisualStartupPolicy.Decide(observed.Labels,preferredWorld,
             preferredWorld is not null&&observedSelectedWorld==preferredWorld);
         DiagnoseWorldGrid(observed,preferredWorld,decision);
+        if(PostEnterUnknownScreenPolicy.ShouldBlock(previousAction,lastAction,DateTimeOffset.UtcNow,
+            Game.LastObservation!.Stage,decision.State))
+        {
+            const string blocked="BLOCKED_POST_ENTER_UNRECOGNIZED_SCREEN";
+            if(State!=blocked)
+                log.Add(Severity.WARN,"VISUAL_STARTUP",blocked,
+                    "elapsed_s="+(int)(DateTimeOffset.UtcNow-lastAction).TotalSeconds+
+                    " entry_button_not_visible=true known_hud_not_visible=true "+
+                    "new_input_dispatched=false screenshot_persisted=false");
+            SetState(blocked);
+            return;
+        }
         if(decision.State=="PLAY_SELECTED_CHARACTER"&&decision.Click is Rectangle playButton)
         {
             // Must see the same button from two independent fresh frames.
@@ -365,17 +432,107 @@ internal sealed class VisualStartup:IDisposable
             return null;
         }
         RenderObserver.ObserveBitmap(captured.Image,captured.CapturedUtc);
+        lastWelcomePixels=NativeWelcomePanelReader.Inspect(captured.Image);
+        lastHudFooterPixels=NativeGameHudReader.InspectFooter(captured.Image);
         var point=new POINT();
         if(!ClientToScreen(target,ref point))return null;
         var bounds=new Rectangle(point.X,point.Y,captured.Image.Width,captured.Image.Height);
+        long ocrStart=System.Diagnostics.Stopwatch.GetTimestamp();
         var labels=await Recognize(captured.Image,ocr!,
-            postPlay: recovery.Recovering||previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME");
+            postPlay: recovery.Recovering||previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME",
+            contextAnchor:contextMenuAnchor);
         ct.ThrowIfCancellationRequested();
-        return new(target,bounds,captured.CapturedUtc,labels,ExecutionVision.Read(captured.Image,labels));
+        var ocrElapsed=System.Diagnostics.Stopwatch.GetElapsedTime(ocrStart);
+        if(contextMenuAnchor is Point&&ocrElapsed>=TimeSpan.FromMilliseconds(1400))
+            log.Add(Severity.INFO,"GAMEPLAY","MENU_OCR_TIMING",
+                $"duration_ms={(int)ocrElapsed.TotalMilliseconds} "+
+                $"frame_age_ms={(int)(DateTimeOffset.UtcNow-captured.CapturedUtc).TotalMilliseconds} "+
+                $"native_hud={labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
+                $"inventory_active={InventoryTabPolicy.Active(captured.Image)} "+
+                "screenshot_persisted=false");
+        var pixels=ExecutionVision.Read(captured.Image,labels);
+        if(contextMenuAnchor is Point anchor)
+        {
+            var menu=ExecutionUi.Menu(labels);
+            int focused=labels.Count(l=>l.Kind==VisualLabelKind.ContextMenuLine);
+            var rawCrop=labels.Where(l=>l.Kind==VisualLabelKind.ContextMenuCandidate).ToArray();
+            int cropHeaders=rawCrop.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
+            int cropCancels=rawCrop.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
+            int cropExamines=rawCrop.Count(l=>l.Text.Trim().StartsWith("Examine ",StringComparison.OrdinalIgnoreCase));
+            int examinePrefixes=rawCrop.Count(l=>l.Text.Trim().StartsWith("Examin",StringComparison.OrdinalIgnoreCase));
+            int examineStems=rawCrop.Count(l=>l.Text.Trim().Equals("Examine",StringComparison.OrdinalIgnoreCase));
+            int examineUnspaced=rawCrop.Count(l=>
+                l.Text.Trim().StartsWith("Examine",StringComparison.OrdinalIgnoreCase)&&
+                l.Text.Trim().Length>7&&!char.IsWhiteSpace(l.Text.Trim()[7]));
+            var cancelLines=rawCrop.Where(l=>
+                l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase)).ToArray();
+            string cancelTops=string.Join(",",cancelLines.Select(l=>l.Bounds.Top)
+                .Distinct().OrderBy(y=>y));
+            // Report only bounding-box heights from the 75 native pixels
+            // above an observed Cancel, never chat or inventory item text.
+            int? footerY=cancelLines.Length>0?cancelLines.Min(l=>l.Bounds.Top):null;
+            string footerRows=footerY is int bottom?
+                string.Join(",",rawCrop.Where(l=>l.Bounds.Top>=bottom-75&&
+                    l.Bounds.Top<bottom&&Math.Abs(l.Bounds.Left-anchor.X)<=160)
+                    .Select(l=>l.Bounds.Top).Distinct().OrderBy(y=>y).Take(12)):"none";
+            // Pixel positions only: reveal whether right-edge OCR is reading
+            // an upward or downward popup, without logging item names.
+            string cropPositions=string.Join(",",rawCrop.Take(8)
+                .Select(l=>$"{l.Bounds.Left}:{l.Bounds.Top}"));
+            int headers=labels.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
+            int cancels=labels.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
+            // The panel hash is from the frame BEFORE the right-click. A
+            // changed image indicates rendering changed, NOT that a game
+            // action succeeded. Never expose raw screenshots or item text.
+            bool? changed=contextMenuPanelBefore is ulong hash&&pixels is not null?
+                pixels.InventoryPanelSignature!=hash:null;
+            int empty=pixels?.Slots.Count(slot=>slot.Empty)??0;
+            bool slotZero=pixels?.Slots.FirstOrDefault()?.Empty??false;
+            string diagnostic=$"anchor_x={anchor.X} anchor_y={anchor.Y} focused_lines={focused} "+
+                $"header_candidates={headers} cancel_candidates={cancels} parsed={menu is not null} "+
+                $"entries={menu?.Entries.Count??0} crop_xy={(cropPositions.Length==0?"none":cropPositions)} "+
+                $"inventory_tab_active={pixels?.InventoryTabActive??false} "+
+                $"empty_candidates={empty} slot0_empty={slotZero} panel_changed={changed?.ToString()??"unknown"} "+
+                $"empty_pixel_quality={pixels?.InventorySlot0Diagnostic??"unavailable"} "+
+                $"crop_raw_lines={rawCrop.Length} crop_headers={cropHeaders} "+
+                $"crop_cancels={cropCancels} crop_examines={cropExamines} "+
+                $"crop_examine_prefixes={examinePrefixes} crop_examine_stems={examineStems} "+
+                $"crop_examine_unspaced={examineUnspaced} "+
+                $"crop_cancel_y={(cancelTops.Length>0?cancelTops:"none")} "+
+                $"crop_above_cancel_ys={(footerRows.Length>0?footerRows:"none")} image_phase=AFTER_RIGHT_CLICK";
+            if(diagnostic!=lastContextDiagnostic)
+            {
+                lastContextDiagnostic=diagnostic;
+                log.Add(Severity.INFO,"GAMEPLAY","CONTEXT_MENU_DIAGNOSTIC",diagnostic);
+            }
+        }
+        return new(target,bounds,captured.CapturedUtc,labels,pixels);
+    }
+    // A complete, pixel-backed menu needs one dedicated OCR source; the
+    // expensive whole-screen and minimap/Hp passes otherwise cause a valid
+    // two-second-old capture to be rejected before Cancel can be clicked.
+    // The stage is separately verified by native Skills/footer pixels.
+    internal static async Task<IReadOnlyList<VisualLabel>?> FocusedInventoryMenu(
+        Bitmap bitmap,OcrEngine engine,Point? contextAnchor,bool postPlay=false)
+    {
+        if(postPlay||!InventoryMenuOcrPolicy.IsContext(bitmap,contextAnchor)||
+            NativeGameHudReader.Read(bitmap,Array.Empty<VisualLabel>()) is not VisualLabel verifiedHud)
+            return null;
+        var focused=new List<VisualLabel>{verifiedHud};
+        if(NativeGameHudReader.Skills(bitmap) is VisualLabel skills)
+            focused.Add(skills);
+        if(NativeCharacterFontReader.Read(bitmap) is VisualLabel character)
+            focused.Add(character);
+        focused.AddRange(await ContextMenuOcr.Read(bitmap,engine,contextAnchor!.Value));
+        return ExecutionUi.Menu(focused) is not null?focused.Distinct().ToArray():null;
     }
     private static async Task<IReadOnlyList<VisualLabel>> Recognize(
-        Bitmap bitmap,OcrEngine engine,bool postPlay=false)
+        Bitmap bitmap,OcrEngine engine,bool postPlay=false,Point? contextAnchor=null)
     {
+        // Missing/ambiguous menu evidence still uses the complete OCR path
+        // and never authorizes a click from geometry or inventory alone.
+        if(await FocusedInventoryMenu(bitmap,engine,contextAnchor,postPlay) is { } menuOnly)
+            return menuOnly;
         using var enlarged=bitmap.Width*2<=OcrEngine.MaxImageDimension&&bitmap.Height*2<=OcrEngine.MaxImageDimension?
             new Bitmap(bitmap.Width*2,bitmap.Height*2):null;
         Bitmap input=bitmap;
@@ -426,18 +583,58 @@ internal sealed class VisualStartup:IDisposable
         var focusedWorlds=await WorldGridOcr.Read(bitmap,engine,labels);
         labels.AddRange(focusedWorlds.Count>0?focusedWorlds:WorldGridReader.Classify(labels));
         labels.AddRange(WorldPageReader.Read(bitmap,labels));
-        foreach(var focused in await GameplayHudOcr.Read(bitmap,engine))
+        bool inventoryContext=InventoryMenuOcrPolicy.IsContext(bitmap,contextAnchor);
+        bool nativeHudVerified=false;
+        if(inventoryContext)
         {
-            labels.RemoveAll(l=>l.Kind==focused.Kind&&l.Text.Equals(focused.Text,StringComparison.OrdinalIgnoreCase)&&l.Bounds.IntersectsWith(focused.Bounds));
-            labels.Add(focused);
+            // A directed inventory right-click has its own menu OCR below.
+            // First check the actual minimap, tab icon and chat-footer pixels.
+            // If all native HUD anchors survive the overlay, expensive
+            // chat/skill/quantity OCR cannot add action evidence for this
+            // already-open menu and need not delay its screenshot.
+            labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
+            if(NativeGameHudReader.Skills(bitmap) is VisualLabel nativeSkills)
+                labels.Add(nativeSkills);
+            if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel nativeHud)
+            {
+                labels.Add(nativeHud);
+                nativeHudVerified=true;
+            }
         }
+        if(!InventoryMenuOcrPolicy.FastHud(inventoryContext,nativeHudVerified))
+            foreach(var focused in await GameplayHudOcr.Read(bitmap,engine))
+            {
+                labels.RemoveAll(l=>l.Kind==focused.Kind&&l.Text.Equals(focused.Text,StringComparison.OrdinalIgnoreCase)&&l.Bounds.IntersectsWith(focused.Bounds));
+                labels.Add(focused);
+            }
         labels=labels.Distinct().ToList();
-        labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
-        labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
-        if(NativeGameHudReader.Skills(bitmap) is VisualLabel skillsButton)labels.Add(skillsButton);
-        if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel hud)labels.Add(hud);
-        if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
-            labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
+        // Native P12 chat glyphs remain usable without any OCR inference.
+        if(NativeCharacterFontReader.Read(bitmap) is VisualLabel nativePrompt)
+        {
+            labels.RemoveAll(l=>l.Kind==VisualLabelKind.CharacterPrompt);
+            labels.Add(nativePrompt);
+        }
+        if(!inventoryContext)
+        {
+            labels.AddRange(await CharacterSummaryReader.Read(bitmap,engine));
+            labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
+            labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
+            if(NativeGameHudReader.Skills(bitmap) is VisualLabel skillsButton)
+                labels.Add(skillsButton);
+            if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel hud)
+                labels.Add(hud);
+            if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),
+                DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
+                labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
+        }
+        // While a menu is open, item-stack digits may be obscured or confused
+        // with menu OCR. The neutral pre-click and post-Cancel captures still
+        // read quantities normally and validate the final inventory deltas.
+        if(contextAnchor is Point anchor)
+            // Even a global "Choose Option / Cancel" pair can miss an item's
+            // Examine entry. The focused view must get its own chance to read
+            // all visible lines instead of treating the slot as empty.
+            labels.AddRange(await ContextMenuOcr.Read(bitmap,engine,anchor));
         return labels;
     }
     private static async Task<IReadOnlyList<VisualLabel>> ReadWorldFooter(Bitmap bitmap,OcrEngine engine)
@@ -544,6 +741,234 @@ internal sealed class VisualStartup:IDisposable
             var contextLabels=await Recognize(contextFixture,engine);
             if(ExecutionUi.Menu(contextLabels)?.Exact("Use Logs") is null)
                 throw new InvalidOperationException("Context-menu OCR regression");
+            var focusedContext=await ContextMenuOcr.Read(contextFixture,engine,new Point(60,72));
+            if(ExecutionUi.Menu(focusedContext)?.Exact("Use Logs") is null||
+                !focusedContext.All(l=>l.Kind==VisualLabelKind.ContextMenuLine))
+                throw new InvalidOperationException("Right-click anchored focused context-menu OCR regression");
+            // Reproduce an item menu near the lower-right inventory edge,
+            // where the native popup may be flipped in both directions.
+            using var bottomRightMenu=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(bottomRightMenu))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,770,380);
+                g.DrawString("Use Logs",font,Brushes.White,770,408);
+                g.DrawString("Examine Logs",font,Brushes.White,770,436);
+                g.DrawString("Cancel",font,Brushes.White,770,464);
+            }
+            var cornerMenu=await ContextMenuOcr.Read(bottomRightMenu,engine,new Point(860,508));
+            if(ExecutionUi.Menu(cornerMenu)?.Exact("Examine Logs") is null)
+                throw new InvalidOperationException("Bottom-right flipped menu OCR regression");
+            // Reproduce the real slot-22 geometry: the game's Cancel OCR
+            // line is at y~584, below the previous tight crop bottom (568).
+            // All item names still have to come from independently read pixels.
+            using var lowerEdgeMenu=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(lowerEdgeMenu))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,770,472);
+                g.DrawString("Use Logs",font,Brushes.White,770,492);
+                g.DrawString("Inspect Logs",font,Brushes.White,770,512);
+                g.DrawString("Drop Logs",font,Brushes.White,770,532);
+                g.DrawString("Examine Logs",font,Brushes.White,770,552);
+                g.DrawString("Cancel",font,Brushes.White,770,572);
+            }
+            var lowerEdgeRead=await ContextMenuOcr.Read(lowerEdgeMenu,engine,new Point(860,508));
+            var lowerEdgeParsed=ExecutionUi.Menu(lowerEdgeRead);
+            if(lowerEdgeParsed?.Exact("Examine Logs") is null||
+                lowerEdgeParsed.Exact("Cancel") is null||
+                lowerEdgeRead.Any(l=>l.Kind!=VisualLabelKind.ContextMenuLine))
+                throw new InvalidOperationException("Bottom-edge menu OCR must retain Examine and Cancel without inventing entries");
+            // Regression for the live slot-25 stale capture: with real native
+            // HUD/footer/Inventory evidence, OCR only the visible menu.
+            using var nativeContext=new Bitmap(lowerEdgeMenu);
+            using(var g=Graphics.FromImage(nativeContext))
+            using(var selected=new SolidBrush(Color.FromArgb(125,31,28)))
+            {
+                g.FillRectangle(selected,InventoryTabPolicy.Icon);
+                g.FillRectangle(Brushes.Red,NativeGameHudReader.SkillsButton.X+3,
+                    NativeGameHudReader.SkillsButton.Y+12,6,5);
+                g.FillRectangle(Brushes.Green,NativeGameHudReader.SkillsButton.X+15,
+                    NativeGameHudReader.SkillsButton.Y+12,6,5);
+                g.FillRectangle(Brushes.Blue,NativeGameHudReader.SkillsButton.X+25,
+                    NativeGameHudReader.SkillsButton.Y+12,6,5);
+                foreach(int x in new[]{120,182,368})
+                {
+                    g.FillRectangle(Brushes.White,x+4,579,7,3);
+                    g.FillRectangle(Brushes.Green,x+4,590,5,2);
+                }
+                g.FillRectangle(Brushes.DarkRed,432,577,65,9);
+                g.FillRectangle(Brushes.White,435,578,6,4);
+            }
+            var slot25Anchor=new Point(818,544);
+            var focused25=await FocusedInventoryMenu(nativeContext,engine,slot25Anchor);
+            if(focused25 is null||
+                ExecutionUi.Menu(focused25)?.Exact("Examine Logs") is null||
+                ExecutionUi.Menu(focused25)?.Exact("Cancel") is null||
+                !focused25.Any(l=>l.Kind==VisualLabelKind.GameHud)||
+                GameScreenReader.Read(new VisualFrame(IntPtr.Zero,
+                    new Rectangle(0,0,1000,600),DateTimeOffset.UtcNow,focused25)).Stage!=VisibleGameStage.InGame||
+                focused25.Any(l=>l.Kind==VisualLabelKind.Minimap||l.Kind==VisualLabelKind.Hitpoints))
+                throw new InvalidOperationException("Verified inventory menu must use complete focused OCR and preserve native InGame evidence without inventing health");
+            // The live HUD can be independently verified while Hough returns
+            // no minimap. Read a red health icon + real OCR digits without
+            // turning it into navigation pixels or trusting the skill level.
+            using var healthWithoutMap=new Bitmap(nativeContext);
+            using(var g=Graphics.FromImage(healthWithoutMap))
+            using(var font=new Font("Segoe UI",18))
+            {
+                g.DrawString("24",font,Brushes.White,715,70);
+                g.FillEllipse(Brushes.Red,770,82,20,18);
+            }
+            if(HudVision.Minimap(healthWithoutMap) is not null)
+                throw new InvalidOperationException("Standalone health fixture unexpectedly has a minimap");
+            var redHealth=await ExecutionVision.ReadHealth(healthWithoutMap,engine,
+                Array.Empty<VisualLabel>());
+            var independentHp=ExecutionVision.Read(healthWithoutMap,redHealth);
+            if(redHealth.Count(l=>l.Kind==VisualLabelKind.Hitpoints)!=1||
+                redHealth.Single(l=>l.Kind==VisualLabelKind.Hitpoints).Text!="24"||
+                independentHp?.Hitpoints!=24||independentHp.Navigation is not null)
+                throw new InvalidOperationException("Pixel-verified red health icon must independently OCR 24 without minimap navigation");
+            using var noHealthOrb=new Bitmap(healthWithoutMap);
+            using(var g=Graphics.FromImage(noHealthOrb))
+                g.FillRectangle(Brushes.Black,760,75,40,35);
+            var absentHeart=await ExecutionVision.ReadHealth(noHealthOrb,engine,
+                Array.Empty<VisualLabel>());
+            if(absentHeart.Any(l=>l.Kind==VisualLabelKind.Hitpoints))
+                throw new InvalidOperationException("Visible number alone without red orb must never become HP");
+            using var noHudForHp=new Bitmap(healthWithoutMap);
+            using(var g=Graphics.FromImage(noHudForHp))
+                g.FillRectangle(Brushes.Black,430,575,87,24);
+            if((await ExecutionVision.ReadHealth(noHudForHp,engine,Array.Empty<VisualLabel>()))
+                .Any(l=>l.Kind==VisualLabelKind.Hitpoints))
+                throw new InvalidOperationException("Unverified HUD must never authorize standalone health OCR");
+            // Never activate the shortcut from just an Inventory plate or from
+            // partial menu text. The original complete OCR path remains.
+            using var missingHudFooter=new Bitmap(nativeContext);
+            using(var g=Graphics.FromImage(missingHudFooter))
+                g.FillRectangle(Brushes.Black,430,575,87,24);
+            if(await FocusedInventoryMenu(missingHudFooter,engine,slot25Anchor) is not null||
+                await FocusedInventoryMenu(nativeContext,engine,slot25Anchor,postPlay:true) is not null)
+                throw new InvalidOperationException("Unverified native HUD or post-login screen cannot bypass full-screen OCR");
+            using var missingMenuHeading=new Bitmap(nativeContext);
+            using(var g=Graphics.FromImage(missingMenuHeading))
+                g.FillRectangle(Brushes.Black,755,467,225,32);
+            if(await FocusedInventoryMenu(missingMenuHeading,engine,slot25Anchor) is not null)
+                throw new InvalidOperationException("Incomplete menu without visible header cannot use fast inventory OCR");
+            // The slot-22 footer was recognized four times, but its
+            // Examine line remained unreadable. Exercise a separate 5x
+            // native-pixel OCR strip with text that extends beyond the
+            // previous 955px right edge of the tight context crop.
+            using var farRightRows=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(farRightRows))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Examine Logs",font,Brushes.White,850,552);
+                g.DrawString("Cancel",font,Brushes.White,850,572);
+            }
+            var farRightCancel=new Rectangle(850,576,75,14);
+            var footerContrast=await ContextMenuOcr.ReadFooterRows(
+                farRightRows,engine,new Point(860,508),farRightCancel,contrast:true);
+            var footerOriginal=await ContextMenuOcr.ReadFooterRows(
+                farRightRows,engine,new Point(860,508),farRightCancel,contrast:false);
+            bool FooterHasBoth(IReadOnlyList<VisualLabel> found)=>
+                found.Any(l=>l.Text.Trim().Equals("Examine Logs",StringComparison.OrdinalIgnoreCase))&&
+                found.Any(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
+            if(!FooterHasBoth(footerContrast)&&!FooterHasBoth(footerOriginal))
+                throw new InvalidOperationException("Right-edge footer OCR must independently read Examine and Cancel pixels");
+            if(ExecutionUi.Menu(footerContrast) is not null||
+                ExecutionUi.Menu(footerOriginal) is not null)
+                throw new InvalidOperationException("Examine and Cancel alone cannot invent a missing menu header");
+            // At final-column slot 23 even broad OCR Cancel can be absent.
+            // The cursor-specific corner crop must independently see a
+            // complete native-pixel menu, without requiring a pre-read Cancel.
+            var cornerContrast=await ContextMenuOcr.ReadCornerRows(
+                lowerEdgeMenu,engine,new Point(902,508),contrast:true);
+            var cornerOriginal=await ContextMenuOcr.ReadCornerRows(
+                lowerEdgeMenu,engine,new Point(902,508),contrast:false);
+            if(ExecutionUi.Menu(cornerContrast)?.Exact("Examine Logs") is null&&
+                ExecutionUi.Menu(cornerOriginal)?.Exact("Examine Logs") is null)
+                throw new InvalidOperationException("Last-column independent menu OCR must read real Examine and Cancel");
+            // Live slot 19: (902,472) can render the context menu upward.
+            // The old corner crop y=420..600 loses an upper heading even
+            // though the right-click changes the inventory-panel pixels.
+            using var flippedRowFour=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(flippedRowFour))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,755,350);
+                g.DrawString("Use Logs",font,Brushes.White,755,375);
+                g.DrawString("Examine Logs",font,Brushes.White,755,400);
+                g.DrawString("Cancel",font,Brushes.White,755,425);
+            }
+            var rowFourAnchor=new Point(902,472);
+            var aboveContrast=await ContextMenuOcr.ReadRightEdgeRows(
+                flippedRowFour,engine,rowFourAnchor,above:true,contrast:true);
+            var aboveOriginal=await ContextMenuOcr.ReadRightEdgeRows(
+                flippedRowFour,engine,rowFourAnchor,above:true,contrast:false);
+            bool HasFullMenu(IReadOnlyList<VisualLabel> labels)=>
+                ExecutionUi.Menu(labels)?.Exact("Examine Logs") is not null&&
+                ExecutionUi.Menu(labels)?.Exact("Cancel") is not null;
+            if(!HasFullMenu(aboveContrast)&&!HasFullMenu(aboveOriginal))
+                throw new InvalidOperationException("Slot-19 upper right edge must OCR real header, Examine and Cancel");
+            var verifiedUpper=await ContextMenuOcr.Read(flippedRowFour,engine,rowFourAnchor);
+            if(ExecutionUi.Menu(verifiedUpper)?.Exact("Examine Logs") is null)
+                throw new InvalidOperationException("Slot-19 flipped menu requires independently verified full menu");
+            // The lower alternative still recognizes menus opening down.
+            using var downwardRowFour=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(downwardRowFour))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,755,456);
+                g.DrawString("Use Logs",font,Brushes.White,755,480);
+                g.DrawString("Examine Logs",font,Brushes.White,755,504);
+                g.DrawString("Cancel",font,Brushes.White,755,528);
+            }
+            var belowContrast=await ContextMenuOcr.ReadRightEdgeRows(
+                downwardRowFour,engine,rowFourAnchor,above:false,contrast:true);
+            var belowOriginal=await ContextMenuOcr.ReadRightEdgeRows(
+                downwardRowFour,engine,rowFourAnchor,above:false,contrast:false);
+            if(!HasFullMenu(belowContrast)&&!HasFullMenu(belowOriginal))
+                throw new InvalidOperationException("Slot-19 lower right edge must OCR real header, Examine and Cancel");
+            using var missingUpperHeading=new Bitmap(flippedRowFour);
+            using(var g=Graphics.FromImage(missingUpperHeading))
+                g.FillRectangle(Brushes.Black,new Rectangle(744,344,235,31));
+            var noUpperHeader=await ContextMenuOcr.ReadRightEdgeRows(
+                missingUpperHeading,engine,rowFourAnchor,above:true,contrast:true);
+            if(ExecutionUi.Menu(noUpperHeader) is not null)
+                throw new InvalidOperationException("Edge menu without a visible header is not actionable");
+            var emptyCorner=await ContextMenuOcr.ReadCornerRows(
+                farRightRows,engine,new Point(902,508),contrast:true);
+            if(ExecutionUi.Menu(emptyCorner) is not null)
+                throw new InvalidOperationException("Cancel/Examine without a real menu header is not an action");
+            using var cornerWithoutHeader=new Bitmap(bottomRightMenu);
+            using(var g=Graphics.FromImage(cornerWithoutHeader))
+                g.FillRectangle(Brushes.Black,new Rectangle(745,370,225,35));
+            var missingCornerHeader=await ContextMenuOcr.Read(cornerWithoutHeader,engine,new Point(860,508));
+            if(ExecutionUi.Menu(missingCornerHeader) is not null)
+                throw new InvalidOperationException("Bottom-right menu header cannot be inferred from Cancel");
+            // Simulate real-client OCR: the menu body is readable, but the
+            // heading was entirely missed by the broad recognition pass.
+            // Only independently reading pixels that actually spell the
+            // heading may recover it.
+            var menuBody=new[]{
+                new VisualLabel("Examine Logs",new Rectangle(40,96,135,19)),
+                new VisualLabel("Cancel",new Rectangle(40,124,85,19))
+            };
+            var recoveredHeader=await ContextMenuOcr.RecoverHeader(
+                contextFixture,engine,new Point(60,72),menuBody);
+            if(recoveredHeader is null||recoveredHeader.Text!="Choose Option"||
+                recoveredHeader.Bounds.Top>=menuBody[0].Bounds.Top)
+                throw new InvalidOperationException("Focused header-only OCR recovery regression");
+            using var noHeader=new Bitmap(contextFixture);
+            using(var g=Graphics.FromImage(noHeader))g.FillRectangle(Brushes.Black,15,25,245,40);
+            if(await ContextMenuOcr.RecoverHeader(noHeader,engine,new Point(60,72),menuBody) is not null)
+                throw new InvalidOperationException("Header cannot be inferred from Examine/Cancel alone");
             using var inventoryFixture=new Bitmap(1000,600);
             using(var g=Graphics.FromImage(inventoryFixture))
             using(var font=new Font("Segoe UI",8))
@@ -619,13 +1044,34 @@ internal sealed class VisualStartup:IDisposable
         bool queued=kind switch
         {
             GameInputKind.Hover=>BackgroundWindowInput.Move(frame.Window,point),
-            GameInputKind.Escape=>BackgroundWindowInput.Escape(frame.Window),
+            GameInputKind.Escape=>BackgroundWindowInput.Escape(
+                frame.Window,contextMenuAnchor??SkillsHoverPolicy.RestPoint),
             GameInputKind.Text=>await BackgroundWindowInput.TypeTextAsync(frame.Window,point,decision.RuntimeInput!.Text!,
                 decision.RuntimeInput.Submit,()=>Paused||ObserveOnly,ct),
             _=>await BackgroundWindowInput.ClickAsync(frame.Window,point,()=>Paused||ObserveOnly,ct,kind==GameInputKind.RightClick)
         };
         if(!queued)
         {SetState("INPUT_DISPATCH_FAILED_REOBSERVING");return false;}
+        // Capture the BEFORE-right-click inventory evidence here. The
+        // subsequent screenshot may contain a context menu overlay covering
+        // the same slot; only this baseline is usable for blank classification.
+        if(kind==GameInputKind.RightClick&&frame.Pixels is { InventoryTabActive:true } baseline)
+        {
+            int slot=Enumerable.Range(0,28).FirstOrDefault(i=>
+                ExecutionUi.InventorySlot(i).Contains(point),-1);
+            if(slot>=0)
+                log.Add(Severity.INFO,"GAMEPLAY","INVENTORY_PRE_CLICK_DIAGNOSTIC",
+                    $"slot={slot} empty_candidates={baseline.Slots.Count(s=>s.Empty)} "+
+                    $"slot_empty={baseline.Slots[slot].Empty} "+
+                    $"empty_pixel_quality={ExecutionVision.SlotDiagnostic(baseline,slot)}"+
+                    " image_phase=BEFORE_RIGHT_CLICK");
+        }
+        // Context OCR only runs after a successful directed right-click, and
+        // the anchor is invalidated by the very next non-right-click input.
+        // Captured frames are always independent of the dispatched input.
+        contextMenuAnchor=kind==GameInputKind.RightClick?point:null;
+        contextMenuPanelBefore=kind==GameInputKind.RightClick?frame.Pixels?.InventoryPanelSignature:null;
+        lastContextDiagnostic="";
         // A click on the Skills tab leaves the game mouse over the tab.
         // Clear the hover BEFORE the next capture; never click in the world.
         bool afterOpen=SkillsHoverPolicy.AfterOpen(decision.State,kind,frame.ScreenBounds.Size);
@@ -645,6 +1091,7 @@ internal sealed class VisualStartup:IDisposable
         if(decision.State.StartsWith("WORLD_PAGE_"))pageActions++;
         previousAction=decision.State;
         lastAction=DateTimeOffset.UtcNow;
+        if(decision.State=="ENTER_GAME")postEnterUnknownDiagnosed=false;
         SetState(decision.State+"_REQUESTED");
         log.Add(Severity.INFO,"VISUAL_INPUT","ACTION_DISPATCHED",
             $"action={decision.State} input=WINDOW_MESSAGE background=true global_cursor_moved=false "+
@@ -664,6 +1111,24 @@ internal sealed class VisualStartup:IDisposable
         pendingEnterFrame=captured;
         return false;
     }
+    private void DiagnoseSkillOcr(VisualFrame frame)
+    {
+        var read=Game.LastObservation;
+        if(read?.Stage!=VisibleGameStage.InGame||read.TotalLevel is null)
+        {lastSkillOcrDiagnostic="";return;}
+        if(read.RecognizedSkills==24&&read.Character is not null)
+        {lastSkillOcrDiagnostic="";return;}
+        // Log skill names only, never raw character text or OCR strings.
+        var values=frame.Labels.Where(l=>l.Kind==VisualLabelKind.SkillValue).ToArray();
+        var missing=GameScreenReader.GridSkills.Where(name=>!values.Any(l=>l.Text.StartsWith(name+"=",StringComparison.Ordinal)));
+        int focused=frame.Labels.Count(l=>l.Kind==VisualLabelKind.CharacterPrompt);
+        string diagnostic="missing_skills="+string.Join(",",missing)+
+            " focused_prompt_candidates="+focused+
+            " character_prompt_seen="+(read.Character is not null);
+        if(diagnostic==lastSkillOcrDiagnostic)return;
+        lastSkillOcrDiagnostic=diagnostic;
+        log.Add(Severity.INFO,"GAME_OBSERVER","OCR_GAPS",diagnostic);
+    }
     private void DiagnosePostPlay(VisualFrame observed)
     {
         if(previousAction is not ("PLAY_SELECTED_CHARACTER" or "ENTER_GAME"))return;
@@ -681,6 +1146,25 @@ internal sealed class VisualStartup:IDisposable
             $"enter_marker={enter} native_enter_card={nativeCard} connecting_marker={connecting} chat_controls={chat} "+
             $"labels={labels.Count} decision_source=VISIBLE_OCR auth_verified=false";
         DateTimeOffset now=DateTimeOffset.UtcNow;
+        if(!postEnterUnknownDiagnosed&&
+            PostEnterUnknownScreenPolicy.IsUnknownAfterEnter(previousAction,lastAction,now,
+                Game.LastObservation?.Stage??VisibleGameStage.Unknown)&&
+            now-lastAction>=PostEnterUnknownScreenPolicy.DiagnosticAfter)
+        {
+            postEnterUnknownDiagnosed=true;
+            var px=lastWelcomePixels;
+            var footer=lastHudFooterPixels;
+            log.Add(Severity.INFO,"VISUAL_STARTUP","POST_ENTER_PIXEL_DIAGNOSTIC",
+                $"elapsed_s={(int)(now-lastAction).TotalSeconds} parchment_banner={px.Banner} "+
+                $"red_center={px.RedCenter} side_tiles={px.SideTiles} white_caption={px.Caption} "+
+                $"minimap_marker={labels.Any(l=>l.Kind==VisualLabelKind.Minimap)} "+
+                $"skills_icon_marker={labels.Any(l=>l.Kind==VisualLabelKind.SkillsButton)} "+
+                $"native_hud_marker={labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
+                $"footer_public={footer.Public} footer_private={footer.Private} "+
+                $"footer_trade={footer.Trade} report_background={footer.ReportBackground} "+
+                $"report_caption={footer.ReportCaption} "+
+                "screenshot_persisted=false retry_input=false");
+        }
         if(result==lastPostPlayDiagnostic&&now-lastPostPlayDiagnosticAt<TimeSpan.FromSeconds(20))
             return;
         lastPostPlayDiagnostic=result;
@@ -890,6 +1374,46 @@ internal static class VisualStartupTests
         Require(WorldPageReader.Read(arrowImage,pageLabels).Count==0,"blank arrow area blocks pagination");
         using(var g=Graphics.FromImage(arrowImage))g.FillRectangle(Brushes.Gray,835,290,48,20);
         Require(WorldPageReader.Read(arrowImage,pageLabels).Count==0,"flat grey patch is not an arrow");
+        var postEnterAt=DateTimeOffset.UtcNow;
+        Require(!PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(29),
+            VisibleGameStage.Unknown,"WAITING_FOR_RECOGNIZED_SCREEN"),
+            "post-entry unknown is allowed a bounded transition window");
+        Require(PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+            VisibleGameStage.Unknown,"WAITING_FOR_RECOGNIZED_SCREEN"),
+            "prolonged unrecognized post-entry screen blocks without another click");
+        Require(!PostEnterUnknownScreenPolicy.ShouldBlock("PLAY_SELECTED_CHARACTER",postEnterAt,postEnterAt.AddSeconds(31),
+            VisibleGameStage.Unknown,"WAITING_FOR_RECOGNIZED_SCREEN")&&
+            !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+                VisibleGameStage.Connecting,"WAITING_FOR_RECOGNIZED_SCREEN")&&
+            !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+                VisibleGameStage.InGame,"WAITING_FOR_RECOGNIZED_SCREEN")&&
+            !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+                VisibleGameStage.Unknown,"MANUAL_AUTHENTICATION_REQUIRED")&&
+            !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+                VisibleGameStage.Unknown,"ENTER_GAME"),
+            "known stage, guarded prompt and different actions cannot be timed out");
+        using(var menuScreen=new Bitmap(1000,600))
+        {
+            using(var p=Graphics.FromImage(menuScreen))
+            using(var selected=new SolidBrush(Color.FromArgb(125,31,28)))
+                p.FillRectangle(selected,InventoryTabPolicy.Icon);
+            Require(InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(902,544))&&
+                InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(776,436))&&
+                !InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(500,400))&&
+                !InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(838,582)),
+                "OCR fast path requires real selected Inventory tab and an actual item-slot right-click");
+            Require(!InventoryMenuOcrPolicy.FastHud(true,false)&&
+                InventoryMenuOcrPolicy.FastHud(true,true)&&
+                !InventoryMenuOcrPolicy.FastHud(false,true),
+                "full HUD OCR must remain available unless native pixels independently verify the HUD");
+            using(var p=Graphics.FromImage(menuScreen))
+                p.FillRectangle(Brushes.Black,InventoryTabPolicy.Icon);
+            Require(!InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(902,544)),
+                "unselected Inventory tab cannot bypass full visual OCR");
+            using var wrongMenuViewport=new Bitmap(950,600);
+            Require(!InventoryMenuOcrPolicy.IsContext(wrongMenuViewport,new Point(902,544)),
+                "unverified capture geometry cannot use inventory menu fast path");
+        }
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),Label("CLICK HERE TO PLAY",80)},417,true).State=="ENTER_GAME",
             "welcome transition");
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),

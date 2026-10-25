@@ -80,16 +80,37 @@ internal sealed class CombatRoutine
 {
     private readonly GameInteractions game;private readonly CombatJournal journal;private readonly WorldNavigator atlas;
     private readonly int maxHp;private readonly Action<string> report;
+    private bool reportedUnreadableHealth;
     internal CombatRoutine(GameInteractions game,CombatJournal journal,WorldNavigator atlas,int maxHp,Action<string>? report=null)
     {
         this.game=game;this.journal=journal;this.atlas=atlas;this.maxHp=maxHp;this.report=report??(_=>{});
         if(game.Driver is WindowVisualGameDriver driver)driver.Guard=_=>Check();
     }
-    private int? Hp=>game.Driver.Current.Pixels?.Navigation?.Hitpoints;
+    // Pixel-verified red health orb can be read without a Hough minimap;
+    // absent navigation still blocks map clicks and travel separately.
+    private int? Hp=>game.Driver.Current.Pixels?.Hitpoints??
+        game.Driver.Current.Pixels?.Navigation?.Hitpoints;
     private void Check()
     {
         if(CombatPolicy.Danger(game.Driver.Current.Labels))throw new RoutineBlockedException("COMBAT_DANGEROUS_SCREEN_STOPPED");
-        if(!CombatPolicy.Healthy(Hp,maxHp,1))throw new RoutineBlockedException("COMBAT_HEALTH_UNREADABLE_OR_DEAD");
+        if(!CombatPolicy.Healthy(Hp,maxHp,1))
+        {
+            if(!reportedUnreadableHealth)
+            {
+                reportedUnreadableHealth=true;
+                var frame=game.Driver.Current;
+                report("COMBAT_HEALTH_EVIDENCE "+
+                    $"minimap_marker={frame.Labels.Any(l=>l.Kind==VisualLabelKind.Minimap)} "+
+                    $"navigation_pixels={frame.Pixels?.Navigation is not null} "+
+                    $"hp_ocr_marker={frame.Labels.Any(l=>l.Kind==VisualLabelKind.Hitpoints)} "+
+                    $"hp_navigation_readable={frame.Pixels?.Navigation?.Hitpoints is not null} "+
+                    $"hp_standalone_readable={frame.Pixels?.Hitpoints is not null} "+
+                    $"heart_pixel_evidence={frame.Pixels?.HealthEvidence??"unavailable"} "+
+                    $"native_hud_marker={frame.Labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
+                    "screenshot_persisted=false no_combat_input=true");
+            }
+            throw new RoutineBlockedException("COMBAT_HEALTH_UNREADABLE_OR_DEAD");
+        }
     }
     internal async Task<RoutineResult> Run(CombatSpec spec,string id,IReadOnlyList<PublicOsrsSkill> skills,CancellationToken ct)
     {

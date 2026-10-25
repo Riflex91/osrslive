@@ -59,7 +59,14 @@ internal static class SessionRecoveryTests
         }
         var marker=NativeGameHudReader.Read(image,new[]{new VisualLabel("MINIMAP",new(810,5,150,150),VisualLabelKind.Minimap)});
         Require(marker?.Kind==VisualLabelKind.GameHud&&NativeGameHudReader.Skills(image) is not null,"multi-region native HUD and chart icon");
-        Require(NativeGameHudReader.Read(image,Array.Empty<VisualLabel>()) is null,"button colors alone do not prove HUD");
+        var withoutMap=NativeGameHudReader.Read(image,Array.Empty<VisualLabel>());
+        Require(withoutMap?.Kind==VisualLabelKind.GameHud&&
+            withoutMap.Text=="NATIVE_GAME_HUD_NO_MINIMAP",
+            "fully verified footer plus Skills icon remains an independent HUD marker when map OCR is absent");
+        using(var g=Graphics.FromImage(image))
+            g.FillRectangle(Brushes.Black,430,575,87,24);
+        Require(NativeGameHudReader.Read(image,Array.Empty<VisualLabel>()) is null,
+            "button colors without the independently verified Report footer do not prove HUD");
         var observation=GameScreenReader.Read(Frame(0,marker!));
         var tracker=new GameObservationTracker();tracker.Observe(observation,time);tracker.Observe(observation with{ObservedUtc=time.AddSeconds(1)},time.AddSeconds(1));
         Require(observation.Stage==VisibleGameStage.InGame&&tracker.Confirmed is null,"image HUD never invents character identity or skills");

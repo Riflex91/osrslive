@@ -5,6 +5,60 @@ internal static class CombatNavigationTests
     internal static void Run()
     {
         static void Require(bool b,string message){if(!b)throw new Exception("Combat/navigation: "+message);}
+        using(var minimapPixels=new Bitmap(1000,600))
+        {
+            var actual=new Rectangle(775,25,150,150);
+            var decorative=new Rectangle(845,30,140,140);
+            using(var g=Graphics.FromImage(minimapPixels))
+            {
+                g.Clear(Color.Black);
+                g.FillRectangle(Brushes.White,actual.Left+72,actual.Top+72,7,7);
+            }
+            Require(HudVision.UniquePixelVerifiedMinimap(minimapPixels,
+                new[]{actual,decorative})==actual,
+                "decorative Hough circles cannot invalidate the one white-player-verified minimap");
+            Require(HudVision.UniquePixelVerifiedMinimap(minimapPixels,
+                new[]{decorative}) is null,
+                "unverified decorative circle cannot become a minimap");
+            using(var g=Graphics.FromImage(minimapPixels))
+                g.FillRectangle(Brushes.White,decorative.Left+67,decorative.Top+67,7,7);
+            Require(HudVision.UniquePixelVerifiedMinimap(minimapPixels,
+                new[]{actual,decorative}) is null,
+                "two independently white-centered circles remain ambiguous");
+            using var otherViewport=new Bitmap(950,600);
+            Require(HudVision.UniquePixelVerifiedMinimap(otherViewport,
+                new[]{actual}) is null,
+                "unsupported viewport cannot create minimap navigation coordinates");
+        }
+        using(var nativeHpPixels=new Bitmap(1000,600))
+        {
+            using(var g=Graphics.FromImage(nativeHpPixels))
+            {
+                g.Clear(Color.Black);
+                g.FillEllipse(Brushes.Red,770,82,20,18);
+            }
+            var iconCandidates=HudVision.RedHealthIconCandidates(nativeHpPixels);
+            var number=HudVision.StandaloneHealthNumber(nativeHpPixels);
+            Require(iconCandidates.Count==1&&number is Rectangle candidate&&
+                candidate.Right<iconCandidates[0].Left&&
+                HudVision.HeartRightOf(nativeHpPixels,candidate),
+                "a single actual red orb component can propose only a pixel-verified digit crop");
+            Require(ExecutionVision.Read(nativeHpPixels,Array.Empty<VisualLabel>()) is
+                {Hitpoints:null,Navigation:null},
+                "red pixels without independently OCR-read digits are not health or a minimap");
+            var numberLabel=new VisualLabel("24",number!.Value,VisualLabelKind.Hitpoints);
+            var hpPixels=ExecutionVision.Read(nativeHpPixels,new[]{numberLabel});
+            Require(hpPixels is {Hitpoints:24,Navigation:null}&&
+                CombatPolicy.Healthy(hpPixels.Hitpoints,24,90),
+                "validated HP OCR can be carried without fabricating minimap navigation");
+            using(var g=Graphics.FromImage(nativeHpPixels))
+                g.FillEllipse(Brushes.Red,810,110,20,18);
+            Require(HudVision.StandaloneHealthNumber(nativeHpPixels) is null,
+                "two red icon candidates cannot guess an HP number crop");
+            using var otherHealthViewport=new Bitmap(950,600);
+            Require(HudVision.StandaloneHealthNumber(otherHealthViewport) is null,
+                "unverified viewport cannot produce standalone health");
+        }
         Require(ExecutionUi.InventorySlot(0)==new Rectangle(760,312,32,32)&&ExecutionUi.InventorySlot(27)==new Rectangle(886,528,32,32),
             "native 1000x600 inventory grid spans all four observed columns");
         using(var captured=BackgroundWindowCapture.OpaqueBitmap(2,1,new byte[]{12,34,200,0,99,88,77,13}))

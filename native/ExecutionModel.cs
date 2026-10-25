@@ -4,7 +4,7 @@ namespace OSRSLiveDiagnostics;
 
 internal enum GameInputKind { Hover, LeftClick, RightClick, Escape, Text }
 internal sealed record GameInput(GameInputKind Kind,Rectangle Bounds,string? Text=null,bool Submit=true);
-internal sealed record ObservedSlot(int Index,Rectangle Bounds,ulong Signature,bool Empty,int? Quantity=null);
+internal sealed record ObservedSlot(int Index,Rectangle Bounds,ulong Signature,bool Empty,int? Quantity=null,ulong CoreSignature=0);
 internal sealed record InventoryItem(int Slot,string Name,int? Quantity,ulong Signature,Rectangle Bounds);
 internal sealed record InventoryState(IReadOnlyList<InventoryItem> Items,int EmptySlots,DateTimeOffset ObservedUtc)
 {
@@ -17,7 +17,9 @@ internal sealed record InventoryState(IReadOnlyList<InventoryItem> Items,int Emp
     }
     internal InventoryItem? Find(string name)=>Items.FirstOrDefault(i=>i.Name.Equals(name,StringComparison.OrdinalIgnoreCase));
 }
-internal sealed record ExecutionPixels(IReadOnlyList<ObservedSlot> Slots,ulong SceneSignature,NavigationPixels? Navigation=null);
+internal sealed record ExecutionPixels(IReadOnlyList<ObservedSlot> Slots,ulong SceneSignature,NavigationPixels? Navigation=null,
+    bool InventoryTabActive=false,ulong InventoryPanelSignature=0,string InventorySlot0Diagnostic="",
+    IReadOnlyList<string>? InventorySlotDiagnostics=null,int? Hitpoints=null,string HealthEvidence="");
 internal sealed record MenuEntry(string Text,Rectangle Bounds);
 internal sealed record ContextMenu(IReadOnlyList<MenuEntry> Entries)
 {
@@ -88,14 +90,20 @@ internal static class ExecutionUi
     internal static Rectangle InventorySlot(int index)=>new(760+index%4*42,312+index/4*36,32,32);
     internal static ContextMenu? Menu(IReadOnlyList<VisualLabel> labels)
     {
-        var headers=labels.Where(l=>l.Kind==VisualLabelKind.Text&&l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase)).ToArray();
+        // Focused OCR is tied to the most recent right-click and must not be
+        // mixed with unrelated whole-frame OCR. Ordinary fixture/UI parsing
+        // remains available when a focused menu was not captured.
+        var focused=labels.Where(l=>l.Kind==VisualLabelKind.ContextMenuLine).ToArray();
+        var source=focused.Length>0?focused:
+            labels.Where(l=>l.Kind==VisualLabelKind.Text).ToArray();
+        var headers=source.Where(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase)).ToArray();
         if(headers.Length!=1)return null;
         var h=headers[0];
-        var cancel=labels.Where(l=>l.Kind==VisualLabelKind.Text&&l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase)&&
+        var cancel=source.Where(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase)&&
             l.Bounds.Top>h.Bounds.Bottom&&l.Bounds.Top<h.Bounds.Bottom+450&&Math.Abs(l.Bounds.Left-h.Bounds.Left)<30)
             .OrderBy(l=>l.Bounds.Top).FirstOrDefault();
         if(cancel is null)return null;
-        var entries=labels.Where(l=>l.Kind==VisualLabelKind.Text&&l.Bounds.Top>=h.Bounds.Bottom&&
+        var entries=source.Where(l=>l.Bounds.Top>=h.Bounds.Bottom&&
             l.Bounds.Bottom<=cancel.Bounds.Bottom+2&&Math.Abs(l.Bounds.Left-h.Bounds.Left)<30)
             .Select(l=>new MenuEntry(Regex.Replace(l.Text.Trim(),@"\s+"," "),l.Bounds)).ToArray();
         return new(entries);

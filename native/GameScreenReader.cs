@@ -65,9 +65,22 @@ internal static class GameScreenReader
         "Runecraft","Slayer","Farming","Construction","Hunter","Sailing"
     };
     private static readonly Regex Total=new(@"\bTotal\s*level\s*[:;]?\s*(\d{2,4})\b",RegexOptions.IgnoreCase);
-    private static readonly Regex Prompt=new(@"^([A-Za-z0-9 _-]{1,12})\s*[:;]\s*[*|+.·]?$",RegexOptions.CultureInvariant);
+    // The chat input ends with a cursor glyph rendered by the native client.
+    // OCR can see it as punctuation other than '*'; never accept text typed
+    // after the colon as a character identity.
+    private static readonly Regex Prompt=new(@"^([A-Za-z0-9 _-]{1,12})\s*[:;]\s*[^A-Za-z0-9]{0,2}$",RegexOptions.CultureInvariant);
+    internal static string? ParseCharacterPrompt(string text)
+    {
+        var match=Prompt.Match(text.Trim());
+        if(!match.Success)return null;
+        string name=match.Groups[1].Value.Trim();
+        return PublicOsrsHiscores.ValidName(name)?name:null;
+    }
     internal static SkillGridLayout? LocateSkills(IReadOnlyList<VisualLabel> labels,Size frameSize)
     {
+        // Character Summary also displays "Total Level", but its panel is
+        // NOT a 3x8 skill grid. Never interpret that heading as a skill anchor.
+        if(labels.Any(l=>l.Kind==VisualLabelKind.CharacterSummary))return null;
         var totals=labels.Where(l=>l.Kind==VisualLabelKind.Text&&Total.IsMatch(l.Text)&&
             l.Bounds.Left>frameSize.Width*.5&&l.Bounds.Top>frameSize.Height*.5).ToArray();
         if(totals.Length!=1)return null;
@@ -97,12 +110,16 @@ internal static class GameScreenReader
             if(Has("Play Now"))return Result(VisibleGameStage.Login);
             return Result(VisibleGameStage.Unknown);
         }
-        var prompts=labels.Where(l=>l.Kind==VisualLabelKind.Text&&
-            l.Bounds.Left<frame.ScreenBounds.Width*.45&&
-            l.Bounds.Top>=frame.ScreenBounds.Height-90&&l.Bounds.Bottom<=frame.ScreenBounds.Height-20)
-            .Select(l=>Prompt.Match(l.Text.Trim())).Where(m=>m.Success)
-            .Select(m=>m.Groups[1].Value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        string? character=prompts.Length==1&&PublicOsrsHiscores.ValidName(prompts[0])?prompts[0]:null;
+        var focusedPrompts=labels.Where(l=>l.Kind==VisualLabelKind.CharacterPrompt).ToArray();
+        // A tight, independently OCR-read chat-input crop takes priority over
+        // coarse full-frame OCR, which may disagree on native pixel characters.
+        var source=focusedPrompts.Length>0?focusedPrompts:
+            labels.Where(l=>l.Kind==VisualLabelKind.Text&&
+                l.Bounds.Left<frame.ScreenBounds.Width*.45&&
+                l.Bounds.Top>=frame.ScreenBounds.Height-90&&l.Bounds.Bottom<=frame.ScreenBounds.Height-20);
+        var prompts=source.Select(l=>ParseCharacterPrompt(l.Text)).Where(n=>n is not null)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        string? character=prompts.Length==1?prompts[0]:null;
         var grid=LocateSkills(labels,frame.ScreenBounds.Size);
         var values=labels.Where(l=>l.Kind==VisualLabelKind.SkillValue).ToArray();
         var skills=new List<PublicOsrsSkill>();
@@ -120,10 +137,26 @@ internal static class GameScreenReader
 
 internal static class SkillGridOcr
 {
+    internal static Rectangle LevelCrop(SkillGridLayout layout,int index,bool wide)
+    {
+        // The first OCR pass retains the established crop. If a digit cannot
+        // be read, the fallback extends LEFT to include both glyphs even when
+        // total-level OCR shifts the panel anchor by a few native pixels.
+        int offset=wide?27:38,width=wide?44:24;
+        return new Rectangle(
+            (int)Math.Round(layout.Bounds.Left+(index%3*62+offset)*layout.Scale),
+            (int)Math.Round(layout.Bounds.Top+(index/3*30+14)*layout.Scale),
+            (int)Math.Round(width*layout.Scale),(int)Math.Round(16*layout.Scale));
+    }
     internal static async Task<IReadOnlyList<VisualLabel>> Read(Bitmap bitmap,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {
         var layout=GameScreenReader.LocateSkills(labels,bitmap.Size);
         if(layout is null)return Array.Empty<VisualLabel>();
+        // Exact original-client P11 glyph pixels are stronger evidence than
+        // Windows OCR, particularly for the 24 in the Hitpoints cell.
+        var native=NativeSkillFontReader.Read(bitmap,layout);
+        if(native.Count==24&&native.Sum(l=>int.Parse(l.Text[(l.Text.IndexOf('=')+1)..]))==layout.TotalLevel)
+            return native;
         // A contact sheet gives the tiny base-level digits to OCR at useful size.
         // Icons, current levels and chat are excluded from these crops.
         const int tileWidth=240,tileHeight=88;
@@ -135,9 +168,7 @@ internal static class SkillGridOcr
             graphics.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
             for(int i=0;i<24;i++)
             {
-                var crop=new Rectangle((int)Math.Round(layout.Bounds.Left+(i%3*62+38)*layout.Scale),
-                    (int)Math.Round(layout.Bounds.Top+(i/3*30+14)*layout.Scale),
-                    (int)Math.Round(24*layout.Scale),(int)Math.Round(16*layout.Scale));
+                var crop=LevelCrop(layout,i,false);
                 if(!new Rectangle(Point.Empty,bitmap.Size).Contains(crop))return Array.Empty<VisualLabel>();
                 using var digits=new Bitmap(crop.Width,crop.Height);
                 for(int y=0;y<crop.Height;y++)for(int x=0;x<crop.Width;x++)
@@ -165,6 +196,62 @@ internal static class SkillGridOcr
             int index=row*6+col;
             if(!numbers.TryGetValue(index,out var values)){values=new();numbers[index]=values;}
             values.Add(level);
+        }
+        // Additional OCR only for ambiguous/missing tiles. Never fill the
+        // unread level from Total level minus the other 23 values: that would
+        // turn a checksum into fabricated independent skill evidence.
+        var missing=Enumerable.Range(0,24).Where(i=>!numbers.TryGetValue(i,out var values)||values.Count!=1).ToArray();
+        if(missing.Length is >0 and <=3)
+        {
+            const int tileWidth2=320,tileHeight2=96;
+            using var retrySheet=new Bitmap(tileWidth2,tileHeight2*missing.Length);
+            using var retryFont=new Font("Segoe UI",32,FontStyle.Regular,GraphicsUnit.Pixel);
+            using(var g=Graphics.FromImage(retrySheet))
+            {
+                g.Clear(Color.White);
+                g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                for(int k=0;k<missing.Length;k++)
+                {
+                    var box=LevelCrop(layout,missing[k],true);
+                    if(!new Rectangle(Point.Empty,bitmap.Size).Contains(box))return Array.Empty<VisualLabel>();
+                    using var digits=new Bitmap(box.Width,box.Height);
+                    for(int y=0;y<box.Height;y++)for(int x=0;x<box.Width;x++)
+                    {
+                        var c=bitmap.GetPixel(box.Left+x,box.Top+y);
+                        bool yellow=c.R>160&&c.G>140&&c.B<130&&c.R>c.B*1.5&&c.G>c.B*1.5;
+                        digits.SetPixel(x,y,yellow?Color.Black:Color.White);
+                    }
+                    g.DrawString("Level",retryFont,Brushes.Black,8,k*tileHeight2+18);
+                    g.DrawImage(digits,new Rectangle(112,k*tileHeight2+12,176,64));
+                }
+            }
+            var second=await VisualStartup.RecognizeRaw(retrySheet,engine);
+            var rescue=new Dictionary<int,List<int>>();
+            foreach(var word in second.Lines.SelectMany(l=>l.Words))
+            {
+                string text=word.Text.Trim().Replace('I','1').Replace('l','1').Replace('|','1').Replace('O','0');
+                if(!int.TryParse(text,NumberStyles.None,CultureInfo.InvariantCulture,out int value)||
+                    value is <1 or >99||word.BoundingRect.X<106||
+                    word.BoundingRect.X+word.BoundingRect.Width/2>304)continue;
+                int row=(int)(word.BoundingRect.Y+word.BoundingRect.Height/2)/tileHeight2;
+                if(row<0||row>=missing.Length)continue;
+                if(!rescue.TryGetValue(row,out var hits)){hits=new();rescue[row]=hits;}
+                hits.Add(value);
+            }
+            foreach(var hit in rescue.Where(e=>e.Value.Count==1))
+                numbers[missing[hit.Key]]=hit.Value;
+        }
+        // Fall back to independently decoded P11 glyphs only for unreadable
+        // OCR tiles. A disagreement is not silently overwritten; the final
+        // 24-value total checksum still gates the observation.
+        foreach(var label in native)
+        {
+            int i=Array.FindIndex(GameScreenReader.GridSkills,n=>
+                label.Text.StartsWith(n+"=",StringComparison.Ordinal));
+            if(i<0)continue;
+            if(numbers.TryGetValue(i,out var prior)&&prior.Count==1)continue;
+            if(int.TryParse(label.Text[(label.Text.IndexOf('=')+1)..],out int value))
+                numbers[i]=new List<int>{value};
         }
         return numbers.Where(p=>p.Value.Count==1).Select(p=>new VisualLabel(
             GameScreenReader.GridSkills[p.Key]+"="+p.Value[0],layout.Bounds,VisualLabelKind.SkillValue)).ToArray();

@@ -38,6 +38,204 @@ internal static class ExecutionRoutinesTests
         VisualLabel L(string text,int x,int y,int width=180)=>new(text,new(x,y,width,14));
         var menu=new[]{L("Choose Option",30,30),L("Use Logs",30,50),L("Drop Logs",30,66),L("Examine Logs",30,82),L("Cancel",30,98),
             L("Deposit-All Logs",400,50)};
+        ContextMenuOcr.SelfTest();
+        NativeMenuHeaderReader.SelfTest();
+        InventoryTabPolicy.SelfTest();
+        NativeInventoryEmptyReader.SelfTest();
+        // Real regression: just after opening Inventory, one independent
+        // post-hover frame temporarily lacked recognizable HUD/footer labels.
+        // Re-observe pixels without sending another click, then require a
+        // NEW InGame frame before continuing with the inventory scan.
+        var hudLabels=new[]{new VisualLabel("NATIVE_GAME_HUD",
+            new Rectangle(0,575,517,25),VisualLabelKind.GameHud)};
+        var initialHudFrame=new VisualFrame(new IntPtr(11),new Rectangle(0,0,1000,600),
+            DateTimeOffset.UtcNow,hudLabels);
+        int transientCaptures=0,transientDispatches=0;
+        var reports=new List<string>();
+        var transientHud=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            transientCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=DateTimeOffset.UtcNow,
+                Labels=transientCaptures==1?Array.Empty<VisualLabel>():hudLabels});
+        },(_,input,token)=>{
+            transientDispatches++;return Task.FromResult(true);
+        },reports.Add);
+        var recoveredHud=await transientHud.ObserveAsync(CancellationToken.None);
+        Require(transientCaptures==2&&transientDispatches==0&&
+            GameScreenReader.Read(recoveredHud).Stage==VisibleGameStage.InGame&&
+            reports.Count==1&&reports[0].StartsWith("HUD_REOBSERVING",StringComparison.Ordinal),
+            "one transient unrecognized HUD frame is re-observed without any new input");
+        int missingHudCaptures=0;
+        var missingHud=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            missingHudCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=DateTimeOffset.UtcNow,
+                Labels=Array.Empty<VisualLabel>()});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        bool missingHudBlocked=false;
+        try {await missingHud.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex){missingHudBlocked=ex.Message=="GAMEPLAY_HUD_NOT_VERIFIED";}
+        Require(missingHudBlocked&&missingHudCaptures==3&&
+            ReferenceEquals(missingHud.Current,initialHudFrame),
+            "three unreadable HUD frames block without replacing the last verified frame");
+        int staleCaptures=0,staleDispatches=0;
+        var staleReports=new List<string>();
+        var staleOnce=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            staleCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=staleCaptures==1?DateTimeOffset.UtcNow.AddSeconds(-5):
+                    DateTimeOffset.UtcNow,Labels=hudLabels});
+        },(_,input,token)=>{
+            staleDispatches++;return Task.FromResult(true);
+        },staleReports.Add);
+        var refreshed=await staleOnce.ObserveAsync(CancellationToken.None);
+        Require(staleCaptures==2&&staleDispatches==0&&
+            GameScreenReader.Read(refreshed).Stage==VisibleGameStage.InGame&&
+            staleReports.Count==1&&staleReports[0].StartsWith("FRAME_REOBSERVING",StringComparison.Ordinal),
+            "slow OCR rejects stale captured pixels and observes a fresh frame without another click");
+        int persistentlyStaleCount=0;
+        var persistentlyStale=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            persistentlyStaleCount++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=DateTimeOffset.UtcNow.AddSeconds(-5)});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        bool staleBlocked=false;
+        try{await persistentlyStale.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {staleBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(staleBlocked&&persistentlyStaleCount==3&&
+            ReferenceEquals(persistentlyStale.Current,initialHudFrame),
+            "persistently stale pixel captures must block without replacing the verified frame");
+        int wrongWindowCount=0;
+        var wrongWindow=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            wrongWindowCount++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                Window=new IntPtr(12),CapturedUtc=DateTimeOffset.UtcNow});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        bool geometryBlocked=false;
+        try{await wrongWindow.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {geometryBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(geometryBlocked&&wrongWindowCount==1,
+            "new window handles remain an immediate hard stop without retry");
+        int reusedHudCaptures=0;
+        var reusedTime=DateTimeOffset.UtcNow;
+        var reusedHud=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            reusedHudCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=reusedHudCaptures<3?reusedTime:reusedTime.AddMilliseconds(200),
+                Labels=reusedHudCaptures==1?Array.Empty<VisualLabel>():hudLabels});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        var freshHud=await reusedHud.ObserveAsync(CancellationToken.None);
+        Require(reusedHudCaptures==3&&freshHud.CapturedUtc>reusedTime,
+            "a reused timestamp cannot turn a transient Unknown frame into new HUD evidence");
+        int otherScreenCaptures=0;
+        var otherScreen=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            otherScreenCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=DateTimeOffset.UtcNow,
+                Labels=new[]{new VisualLabel("Select a world",new Rectangle(10,10,140,14))}});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        bool leftGameBlocked=false;
+        try{await otherScreen.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex){leftGameBlocked=ex.Message=="GAME_SESSION_LEFT_EXECUTION_SCREEN";}
+        Require(leftGameBlocked&&otherScreenCaptures==1,
+            "world selection or another known non-game screen must abort immediately");
+        var wrongPanel=new InventoryGridDriver(true,active:false);
+        bool panelBlocked=false;
+        try {await new GameInteractions(wrongPanel).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {panelBlocked=ex.Message=="INVENTORY_TAB_NOT_VISUALLY_OPEN";}
+        Require(panelBlocked&&wrongPanel.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "Inventory panel must be independently verified before reading slots or right-clicking");
+        var emptyDriver=new InventoryGridDriver(true);
+        var fullyEmpty=await new GameInteractions(emptyDriver).Inventory(CancellationToken.None);
+        Require(fullyEmpty.EmptySlots==28&&fullyEmpty.Items.Count==0&&
+            emptyDriver.Inputs.Any(i=>i.Kind==GameInputKind.LeftClick)&&
+            emptyDriver.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "a visually and independently verified empty inventory skips all right clicks");
+        var lateEmptyDriver=new InventoryGridDriver(true,lateEmptyFirstSlot:true);
+        var lateEmpty=await new GameInteractions(lateEmptyDriver).Inventory(CancellationToken.None);
+        Require(lateEmpty.EmptySlots==28&&lateEmpty.Items.Count==0&&
+            lateEmptyDriver.Observations>=4&&
+            lateEmptyDriver.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "empty consensus appearing after the baseline is reverified twice, without a right-click");
+        var unstableLateEmpty=new InventoryGridDriver(true,lateEmptyFirstSlot:true,
+            lateEmptyDisappears:true);
+        bool unstableLateBlocked=false;
+        try{await new GameInteractions(unstableLateEmpty).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){unstableLateBlocked=ex.Message=="INVENTORY_LATE_EMPTY_NOT_STABLE";}
+        Require(unstableLateBlocked&&unstableLateEmpty.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "a late empty classification that disappears must block before any menu attempt");
+        var unknownDriver=new InventoryGridDriver(false);
+        bool unknownBlocked=false;
+        try{await new GameInteractions(unknownDriver).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){unknownBlocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
+        int unknownRight=unknownDriver.Inputs.FindIndex(i=>i.Kind==GameInputKind.RightClick);
+        Require(unknownBlocked&&unknownRight>0&&
+            unknownDriver.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
+            unknownDriver.Inputs[unknownRight-1].Kind==GameInputKind.Hover&&
+            ExecutionUi.InventorySlot(0).Contains(new Point(
+                unknownDriver.Inputs[unknownRight-1].Bounds.Left+16,
+                unknownDriver.Inputs[unknownRight-1].Bounds.Top+16)),
+            "unverified slots get one staged hover and one right-click; a missing menu never proves empty");
+        var settling=new InventoryGridDriver(false,changeFirstFrame:true);
+        bool settlingMenuBlocked=false;
+        try{await new GameInteractions(settling).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){settlingMenuBlocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
+        Require(settlingMenuBlocked&&settling.ObservationsAtRightClick>=3&&
+            settling.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1,
+            "changed slots 2/3 during initial rendering require three matching neutral frames before one click");
+        var changing=new InventoryGridDriver(false,changeEveryFrame:true);
+        bool unstableBlocked=false;
+        try{await new GameInteractions(changing).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){unstableBlocked=ex.Message=="INVENTORY_BASELINE_NOT_STABLE";}
+        Require(unstableBlocked&&changing.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "continually changing inventory pixels must block before any right-click");
+        var lostTab=new InventoryGridDriver(false,loseTabOnSlotHover:true);
+        bool lostTabBlocked=false;
+        try{await new GameInteractions(lostTab).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){lostTabBlocked=ex.Message=="INVENTORY_TAB_LOST_BEFORE_RIGHT_CLICK";}
+        Require(lostTabBlocked&&lostTab.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "loss of the selected Inventory tab during staging must prevent the right-click");
+        var tabDriver=new InventoryTabDriver();
+        await new GameInteractions(tabDriver).OpenInventory(CancellationToken.None);
+        Require(tabDriver.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==1&&
+            tabDriver.Inputs.Where(i=>i.Kind==GameInputKind.LeftClick)
+                .All(i=>i.Bounds.Top>=265&&i.Bounds.Top<302),
+            "Inventory opening must click upper-row backpack, never bottom-row Logout");
+        var wrongTooltip=new InventoryTabDriver(misplacedTooltip:true);
+        bool noWrongClick=false;
+        try {await new GameInteractions(wrongTooltip).OpenInventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex) {noWrongClick=ex.Message=="INVENTORY_TAB_NOT_VERIFIED";}
+        Require(noWrongClick&&wrongTooltip.Inputs.All(i=>i.Kind!=GameInputKind.LeftClick),
+            "misleading Inventory text inside a panel must not authorize a tab click");
+        var focusedMenu=menu.Where(l=>l.Bounds.Left<300)
+            .Select(l=>l with {Kind=VisualLabelKind.ContextMenuLine}).ToArray();
+        var conflictingFrame=focusedMenu.Concat(new[]{
+            L("Choose Option",400,30),L("Examine Different Item",400,66),L("Cancel",400,98)
+        }).ToArray();
+        Require(ExecutionUi.Menu(conflictingFrame)?.Exact("Examine Logs") is not null&&
+            ExecutionUi.Menu(conflictingFrame)?.Exact("Examine Different Item") is null,
+            "focused right-click menu cannot be contaminated by unrelated global OCR");
+        var corruptFocused=focusedMenu.Where(l=>l.Text!="Cancel").Concat(menu).ToArray();
+        Require(ExecutionUi.Menu(corruptFocused) is null,
+            "incomplete focused menu fails closed instead of falling back to another source");
+        // Partial OCR candidates may be logged as COUNTS, but must never be
+        // used to authorize an item menu, even if a complete header/cancel
+        // pair is present as unverified candidate glyphs.
+        var diagnosticOnly=menu.Select(l=>
+            l with {Kind=VisualLabelKind.ContextMenuCandidate}).ToArray();
+        Require(ExecutionUi.Menu(diagnosticOnly) is null&&
+            diagnosticOnly.Count(l=>l.Kind==VisualLabelKind.ContextMenuLine)==0,
+            "partial context-menu OCR diagnostic evidence is non-actionable");
         var parsed=ExecutionUi.Menu(menu);
         Require(parsed?.Exact("Drop Logs") is not null&&parsed.Exact("Deposit-All Logs") is null,"unrelated OCR cannot enter a context menu");
         Require(ExecutionUi.Menu(menu.Append(L("Choose Option",400,5)).ToArray()) is null,"ambiguous menu headers blocked");
@@ -46,10 +244,126 @@ internal static class ExecutionRoutinesTests
         bool blocked=false;
         try{await interactions.Choose(new(100,100,5,5),"Deposit-All Logs",CancellationToken.None);}
         catch(RoutineBlockedException){blocked=true;}
-        Require(blocked&&fake.Inputs.All(i=>i.Kind!=GameInputKind.LeftClick),"wrong menu cannot send destructive left click");
+        Require(blocked&&fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{
+                GameInputKind.RightClick,GameInputKind.LeftClick,GameInputKind.Hover})&&
+            fake.Inputs[1].Bounds==menu.Single(l=>l.Text=="Cancel").Bounds&&
+            fake.Inputs[2].Bounds.Contains(new Point(500,400)),
+            "missing target clicks ONLY verified Cancel then moves mouse away; no Escape");
         fake=new ScriptedDriver(menu);
         await new GameInteractions(fake).Choose(new(100,100,5,5),"Use Logs",CancellationToken.None);
         Require(fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{GameInputKind.RightClick,GameInputKind.LeftClick}),"observe menu before exact selection");
+        var targetMissing=new ScriptedDriver(menu);
+        bool missingUseBlocked=false;
+        try
+        {
+            await new GameInteractions(targetMissing).UseItem(
+                new InventoryItem(0,"logs",1,1,ExecutionUi.InventorySlot(0)),
+                new Rectangle(220,150,12,12),"Range",CancellationToken.None);
+        }
+        catch(RoutineBlockedException ex)
+        {missingUseBlocked=ex.Message=="USE_TARGET_NOT_VERIFIED";}
+        Require(missingUseBlocked&&targetMissing.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==2&&
+            targetMissing.Inputs.Any(i=>i.Kind==GameInputKind.LeftClick&&
+                i.Bounds==menu.Single(l=>l.Text=="Cancel").Bounds)&&
+            targetMissing.Inputs.All(i=>i.Kind!=GameInputKind.Escape),
+            "unverified Use target closes via real Cancel, not Escape");
+        var late=new ScriptedDriver(menu,delayObservations:2);
+        var lateResult=await new GameInteractions(late).OpenMenu(new(100,100,5,5),CancellationToken.None);
+        Require(lateResult.Exact("Use Logs") is not null&&late.Observations>=2&&
+            late.Inputs.Count==1&&late.Inputs[0].Kind==GameInputKind.RightClick,
+            "menu may appear in a later independently observed frame without another right-click");
+        var never=new ScriptedDriver(menu,delayObservations:10);
+        blocked=false;
+        try{await new GameInteractions(never).OpenMenu(new(100,100,5,5),CancellationToken.None);}
+        catch(RoutineBlockedException ex){blocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
+        Require(blocked&&never.Inputs.Count==1&&never.Observations==3,
+            "unreadable context menu blocks after bounded observation without repeating click");
+        var baseSlots=Enumerable.Range(0,28).Select(i=>
+            new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,i>0)).ToArray();
+        var basePixels=new ExecutionPixels(baseSlots,1,InventoryTabActive:true,
+            InventoryPanelSignature:813);
+        var chromeOnly=basePixels with{InventoryPanelSignature=927};
+        var oneTransient=chromeOnly with {Slots=baseSlots.Select((v,i)=>
+            i==27?v with {Signature=88777}:v).ToArray()};
+        var clickedChanged=chromeOnly with {Slots=baseSlots.Select((v,i)=>
+            i==0?v with {Signature=88777}:v).ToArray()};
+        var severalChanged=chromeOnly with {Slots=baseSlots.Select((v,i)=>
+            i is 6 or 27?v with {Signature=88777}:v).ToArray()};
+        Require(GameInteractions.InventoryBaselineStable(basePixels,basePixels)&&
+            !GameInteractions.InventoryBaselineStable(basePixels,severalChanged)&&
+            !GameInteractions.InventoryBaselineStable(basePixels,oneTransient)&&
+            !GameInteractions.InventoryBaselineStable(basePixels,basePixels with{InventoryTabActive=false}),
+            "inventory reference must stabilize every slot before the first right-click");
+        Require(GameInteractions.InventoryRestored(basePixels,chromeOnly,0)&&
+            GameInteractions.InventoryRestored(basePixels,oneTransient,0)&&
+            !GameInteractions.InventoryRestored(basePixels,clickedChanged,0)&&
+            !GameInteractions.InventoryRestored(basePixels,severalChanged,0)&&
+            !GameInteractions.InventoryRestored(basePixels,chromeOnly with{InventoryTabActive=false},0),
+            "Cancel confirmation tolerates hover chrome but not occupied slot, popup or tab changes");
+        var spriteSlots=baseSlots.Select((v,i)=>
+            v with{CoreSignature=(ulong)(i+500)}).ToArray();
+        var spriteBefore=basePixels with{Slots=spriteSlots};
+        var hoverBorders=spriteBefore with{Slots=spriteSlots.Select((v,i)=>
+            v with{Signature=v.Signature+5000}).ToArray()};
+        var coveredSprites=spriteBefore with{Slots=spriteSlots.Select((v,i)=>
+            i<5?v with{Signature=v.Signature+100,CoreSignature=v.CoreSignature+100}:v)
+            .ToArray()};
+        var changedItem=spriteBefore with{Slots=spriteSlots.Select((v,i)=>
+            i==0?v with{Signature=v.Signature+100,CoreSignature=v.CoreSignature+100}:v)
+            .ToArray()};
+        var hoverMatch=GameInteractions.InventoryMatch(spriteBefore,hoverBorders,0);
+        Require(hoverMatch.Restored&&hoverMatch.Exact==0&&hoverMatch.Core==28&&
+            hoverMatch.ChangedSlots=="none"&&
+            !GameInteractions.InventoryRestored(spriteBefore,coveredSprites,0)&&
+            GameInteractions.InventoryMatch(spriteBefore,coveredSprites,0).ChangedSlots=="0,1,2,3,4"&&
+            !GameInteractions.InventoryRestored(spriteBefore,changedItem,0),
+            "all hover-sensitive outer pixels may change but authentic item interiors must match; overlays fail");
+        var cancellable=new InventoryMenuDriver(menu,closes:true);
+        var checkedInventory=await new GameInteractions(cancellable).Inventory(CancellationToken.None);
+        int firstRightClick=cancellable.Inputs.FindIndex(i=>i.Kind==GameInputKind.RightClick);
+        int lastNeutralBeforeClick=cancellable.Inputs.FindLastIndex(firstRightClick-1,
+            i=>i.Kind==GameInputKind.Hover&&i.Bounds.Contains(new Point(500,400)));
+        Require(firstRightClick>1&&lastNeutralBeforeClick==firstRightClick-2&&
+            cancellable.Inputs[firstRightClick-1].Kind==GameInputKind.Hover&&
+            cancellable.Inputs[firstRightClick-1].Bounds==ExecutionUi.InventorySlot(0),
+            "neutral baseline must precede a target hover and exactly one right-click");
+        Require(checkedInventory.Items.Count==1&&checkedInventory.Items[0].Name=="logs"&&
+            checkedInventory.EmptySlots==27&&
+            cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
+            cancellable.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==2&&
+            cancellable.Inputs.All(i=>i.Kind!=GameInputKind.Escape),
+            "menu Cancel restores verified inventory before scanning other slots"+
+            $" items={checkedInventory.Items.Count} name={(checkedInventory.Items.FirstOrDefault()?.Name??"none")}"+
+            $" empty={checkedInventory.EmptySlots} right={cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)}"+
+            $" left={cancellable.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)}");
+        var cancelOnlyLabels=new[]{L("Choose Option",30,30),L("Cancel",30,98)};
+        var cancelOnlyDriver=new InventoryMenuDriver(cancelOnlyLabels,closes:true);
+        bool cancelOnlyBlocked=false;
+        try{await new GameInteractions(cancelOnlyDriver).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){cancelOnlyBlocked=ex.Message=="AMBIGUOUS_OR_NON_INVENTORY_SLOT";}
+        Require(cancelOnlyBlocked&&
+            cancelOnlyDriver.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
+            cancelOnlyDriver.Inputs.Any(i=>i.Kind==GameInputKind.LeftClick&&
+                i.Bounds==cancelOnlyLabels[1].Bounds),
+            "Cancel-only menu must be safely dismissed, never treated as an empty inventory slot");
+        var stuckMenu=new InventoryMenuDriver(menu,closes:false);
+        bool stuckBlocked=false;
+        try{await new GameInteractions(stuckMenu).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {stuckBlocked=ex.Message=="CONTEXT_MENU_CANCEL_NOT_CONFIRMED";}
+        Require(stuckBlocked&&stuckMenu.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
+            stuckMenu.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==2&&
+            stuckMenu.Inputs.All(i=>i.Kind!=GameInputKind.Escape),
+            "menu that survives a queued Cancel must block BEFORE any second right-click");
+        var noCancelMenu=new ContextMenu(new[]{
+            new MenuEntry("Examine Logs",new Rectangle(30,82,180,14))
+        });
+        var noCancelDriver=new InventoryMenuDriver(menu,closes:true);
+        bool noCancelBlocked=false;
+        try{await new GameInteractions(noCancelDriver).DismissMenu(noCancelMenu,CancellationToken.None);}
+        catch(RoutineBlockedException ex){noCancelBlocked=ex.Message=="CONTEXT_CANCEL_NOT_VERIFIED";}
+        Require(noCancelBlocked&&noCancelDriver.Inputs.Count==0,
+            "missing or ambiguous Cancel never authorizes an invented click");
         var order=new TradeOrder("test-buy","iron axe",1,100,false,500,now);
         var facts=new ProgressionFacts(Ironman:false,FreeGeSlots:1);
         Require(TradeRoutine.Validate(order,facts,Stock(now,("coins",600)),now) is null,"bounded affordable purchase");
@@ -91,13 +405,170 @@ internal static class ExecutionRoutinesTests
         finally{if(Directory.Exists(directory))Directory.Delete(directory,true);}
         Console.WriteLine("EXECUTION ROUTINES PASS: context selection, independent yields, recipe deltas, supply gates, GE invoices/receipts/partial fills, durable deduplication");
     }
+    private sealed class InventoryMenuDriver:IVisualGameDriver
+    {
+        private readonly IReadOnlyList<VisualLabel> menu;
+        private readonly bool closes;
+        internal readonly List<GameInput> Inputs=new();
+        private readonly ExecutionPixels before;
+        private readonly ExecutionPixels covered;
+        public VisualFrame Current {get;private set;}
+        internal InventoryMenuDriver(IReadOnlyList<VisualLabel> labels,bool closes)
+        {
+            menu=labels;this.closes=closes;
+            var slots=Enumerable.Range(0,28).Select(i=>
+                new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,i>0)).ToArray();
+            before=new ExecutionPixels(slots,1,InventoryTabActive:true,InventoryPanelSignature:813);
+            covered=before with {InventoryPanelSignature=914,
+                Slots=slots.Select((v,i)=>i<3?v with{Signature=v.Signature+1000}:v).ToArray()};
+            Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
+                DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),before);
+        }
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)
+        {
+            Current=Current with {CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
+            return Task.FromResult(Current);
+        }
+        public Task InputAsync(GameInput input,CancellationToken ct)
+        {
+            Inputs.Add(input);
+            if(input.Kind==GameInputKind.Hover)
+                Current=Current with {Labels=new VisualLabel[]{
+                    new("Inventory",new Rectangle(12,8,70,14))}};
+            else if(input.Kind==GameInputKind.RightClick)
+                Current=Current with {Labels=menu,Pixels=covered};
+            else if(input.Kind==GameInputKind.LeftClick&&Inputs.Any(i=>i.Kind==GameInputKind.RightClick)&&
+                menu.Any(l=>l.Text=="Cancel"&&l.Bounds==input.Bounds)&&closes)
+                // Only panel chrome has changed. Slot sprites are identical
+                // to the pre-menu frame even when the whole-panel hash differs.
+                Current=Current with {Labels=Array.Empty<VisualLabel>(),
+                    Pixels=before with{InventoryPanelSignature=999}};
+            Current=Current with {CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class InventoryGridDriver:IVisualGameDriver
+    {
+        internal readonly List<GameInput> Inputs=new();
+        public VisualFrame Current {get;private set;}
+        private readonly bool loseTabOnSlotHover,changeFirstFrame,changeEveryFrame;
+        private readonly bool lateEmptyFirstSlot,lateEmptyDisappears;
+        internal int Observations {get;private set;}
+        internal int ObservationsAtRightClick {get;private set;}=-1;
+        internal InventoryGridDriver(bool pixelVerifiedEmpty,bool active=true,bool loseTabOnSlotHover=false,
+            bool changeFirstFrame=false,bool changeEveryFrame=false,bool lateEmptyFirstSlot=false,
+            bool lateEmptyDisappears=false)
+        {
+            this.loseTabOnSlotHover=loseTabOnSlotHover;
+            this.changeFirstFrame=changeFirstFrame;
+            this.changeEveryFrame=changeEveryFrame;
+            this.lateEmptyFirstSlot=lateEmptyFirstSlot;
+            this.lateEmptyDisappears=lateEmptyDisappears;
+            var slots=Enumerable.Range(0,28).Select(i=>
+                new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,
+                    pixelVerifiedEmpty&&!(lateEmptyFirstSlot&&i==0))).ToArray();
+            Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
+                DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),
+                new ExecutionPixels(slots,1,InventoryTabActive:active));
+        }
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)
+        {
+            Observations++;
+            if(changeEveryFrame||changeFirstFrame&&Observations==1)
+            {
+                var pixels=Current.Pixels!;
+                Current=Current with{Pixels=pixels with{Slots=pixels.Slots.Select((slot,i)=>
+                    i is 2 or 3?slot with{Signature=slot.Signature+100}:slot).ToArray()}};
+            }
+            if(lateEmptyFirstSlot&&(Observations==2||lateEmptyDisappears&&Observations==3))
+            {
+                var pixels=Current.Pixels!;
+                bool empty=Observations==2;
+                Current=Current with{Pixels=pixels with{Slots=pixels.Slots.Select((slot,i)=>
+                    i==0?slot with{Empty=empty}:slot).ToArray()}};
+            }
+            Current=Current with {CapturedUtc=Current.CapturedUtc.AddSeconds(1)};
+            return Task.FromResult(Current);
+        }
+        public Task InputAsync(GameInput input,CancellationToken ct)
+        {
+            Inputs.Add(input);
+            if(input.Kind==GameInputKind.RightClick)ObservationsAtRightClick=Observations;
+            if(input.Kind==GameInputKind.Hover)
+            {
+                Current=Current with{Labels=new[]{new VisualLabel("Inventory",new Rectangle(12,8,80,12))}};
+                if(loseTabOnSlotHover&&input.Bounds==ExecutionUi.InventorySlot(0))
+                {
+                    var pixels=Current.Pixels!;
+                    Current=Current with{Pixels=pixels with{InventoryTabActive=false}};
+                }
+            }
+            Current=Current with{CapturedUtc=Current.CapturedUtc.AddSeconds(1)};
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class InventoryTabDriver:IVisualGameDriver
+    {
+        private readonly bool misplacedTooltip;
+        internal readonly List<GameInput> Inputs=new();
+        public VisualFrame Current {get;private set;}=
+            new(new IntPtr(1),new Rectangle(0,0,1000,600),DateTimeOffset.UtcNow,
+                Array.Empty<VisualLabel>());
+        internal InventoryTabDriver(bool misplacedTooltip=false)
+        {this.misplacedTooltip=misplacedTooltip;}
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)=>
+            Task.FromResult(Current);
+        public Task InputAsync(GameInput input,CancellationToken ct)
+        {
+            Inputs.Add(input);
+            if(input.Kind==GameInputKind.Hover)
+                Current=Current with{
+                    Labels=new VisualLabel[]{new("Inventory",
+                        misplacedTooltip?new Rectangle(800,320,75,12):new Rectangle(11,8,65,12))}
+                };
+            Current=Current with{CapturedUtc=DateTimeOffset.UtcNow};
+            return Task.CompletedTask;
+        }
+    }
     private sealed class ScriptedDriver:IVisualGameDriver
     {
         public VisualFrame Current {get;private set;}
         internal readonly List<GameInput> Inputs=new();
-        internal ScriptedDriver(IReadOnlyList<VisualLabel> menu)=>Current=new(new IntPtr(1),new(0,0,1000,600),DateTimeOffset.UtcNow,menu);
-        public Task<VisualFrame> ObserveAsync(CancellationToken ct)=>Task.FromResult(Current);
+        private readonly IReadOnlyList<VisualLabel> menu;
+        private readonly int delayObservations;
+        private bool waitingForMenu;
+        internal int Observations {get;private set;}
+        internal ScriptedDriver(IReadOnlyList<VisualLabel> menu,int delayObservations=0)
+        {
+            this.menu=menu;this.delayObservations=delayObservations;
+            Current=new(new IntPtr(1),new(0,0,1000,600),DateTimeOffset.UtcNow,menu);
+        }
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)
+        {
+            Observations++;
+            if(waitingForMenu&&Observations>=delayObservations)
+            {
+                waitingForMenu=false;
+                Current=Current with {Labels=menu};
+            }
+            Current=Current with {CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
+            return Task.FromResult(Current);
+        }
         public Task InputAsync(GameInput input,CancellationToken ct)
-        {Inputs.Add(input);Current=Current with{CapturedUtc=DateTimeOffset.UtcNow};return Task.CompletedTask;}
+        {
+            Inputs.Add(input);
+            if(input.Kind==GameInputKind.RightClick&&delayObservations>0)
+            {
+                waitingForMenu=true;Observations=0;
+                Current=Current with {Labels=Array.Empty<VisualLabel>()};
+            }
+            if(input.Kind==GameInputKind.LeftClick&&
+                menu.Any(l=>l.Text=="Cancel"&&l.Bounds==input.Bounds))
+                Current=Current with {Labels=Array.Empty<VisualLabel>()};
+            Current=Current with{CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
+            return Task.CompletedTask;
+        }
     }
 }

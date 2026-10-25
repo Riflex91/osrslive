@@ -8,30 +8,58 @@ internal static class ExecutionVision
     internal static ExecutionPixels? Read(Bitmap image,IReadOnlyList<VisualLabel> labels)
     {
         if(image.Size!=DockedWindowLayout.GameSize)return null;
+        bool inventoryActive=InventoryTabPolicy.Active(image);
+        var emptyResult=inventoryActive?NativeInventoryEmptyReader.Classify(image):null;
+        var emptyEvidence=emptyResult?.Empty??new bool[28];
         var slots=Enumerable.Range(0,28).Select(i=>
         {
             var box=ExecutionUi.InventorySlot(i);
             var quantities=labels.Where(l=>l.Kind==VisualLabelKind.InventoryQuantity&&l.Text.StartsWith(i+"=",StringComparison.Ordinal))
                 .Select(l=>int.TryParse(l.Text[(l.Text.IndexOf('=')+1)..],out int n)?(int?)n:null).ToArray();
-            return new ObservedSlot(i,box,Signature(image,box),false,quantities.Length==1?quantities[0]:null);
+            var core=new Rectangle(box.X+7,box.Y+7,18,18);
+            return new ObservedSlot(i,box,Signature(image,box),
+                emptyEvidence[i]&&quantities.Length==0,quantities.Length==1?quantities[0]:null,
+                Signature(image,core));
         }).ToArray();
         NavigationPixels? navigation=null;
+        var hpLabels=labels.Where(l=>l.Kind==VisualLabelKind.Hitpoints).ToArray();
+        int? hitpoints=hpLabels.Length==1&&int.TryParse(hpLabels[0].Text,out int value)&&
+            value is >=1 and <=99?value:null;
         var maps=labels.Where(l=>l.Kind==VisualLabelKind.Minimap).ToArray();
         if(maps.Length==1)
-        {
-            var hp=labels.Where(l=>l.Kind==VisualLabelKind.Hitpoints).ToArray();
-            navigation=new(HudVision.Png(image,maps[0].Bounds),maps[0].Bounds,
-                hp.Length==1&&int.TryParse(hp[0].Text,out int value)?value:null);
-        }
-        return new(slots,Signature(image,new Rectangle(30,50,690,300)),navigation);
+            navigation=new(HudVision.Png(image,maps[0].Bounds),maps[0].Bounds,hitpoints);
+        // Diagnostic counts identify missing/ambiguous red pixels without
+        // exposing image data, character names or guessed health values.
+        int redIcons=hitpoints is null?HudVision.RedHealthIconCandidates(image).Count:0;
+        return new(slots,Signature(image,new Rectangle(30,50,690,300)),navigation,
+            inventoryActive,Signature(image,new Rectangle(746,304,220,265)),
+            emptyResult?.FirstSlotDiagnostic??"inventory_inactive",
+            emptyResult?.SlotDiagnostics,hitpoints,
+            $"red_icon_components={redIcons} hp_labels={hpLabels.Length}");
+    }
+    internal static string SlotDiagnostic(ExecutionPixels pixels,int slot)
+    {
+        if(slot is <0 or >=28)return "invalid_slot";
+        if(pixels.InventorySlotDiagnostics is { Count:28 } all)return all[slot];
+        return slot==0?pixels.InventorySlot0Diagnostic:"not_sampled";
     }
     internal static async Task<IReadOnlyList<VisualLabel>> ReadHealth(Bitmap image,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {
-        if(HudVision.Minimap(image) is not Rectangle map)return Array.Empty<VisualLabel>();
-        var found=new List<VisualLabel>{new("MINIMAP",map,VisualLabelKind.Minimap)};
-        var detected=HudVision.HealthNumber(image,map,labels);
-        var b=detected??new Rectangle(map.Left-62,map.Top+48,42,28);
-        if(!new Rectangle(Point.Empty,image.Size).Contains(b)||!HudVision.HeartRightOf(image,b))return found;
+        var found=new List<VisualLabel>();
+        var minimap=HudVision.Minimap(image);
+        if(minimap is Rectangle map)found.Add(new("MINIMAP",map,VisualLabelKind.Minimap));
+        Rectangle? observedNumber=minimap is Rectangle actual?
+            HudVision.HealthNumber(image,actual,labels)??
+                new Rectangle(actual.Left-62,actual.Top+48,42,28):null;
+        // Gameplay is independently verified by the native Skills icon and
+        // footer; the health-orb pixels can be read even when Hough misses
+        // the minimap. Never manufacture NavigationPixels from this path.
+        if(observedNumber is null&&
+            NativeGameHudReader.Read(image,labels) is not null)
+            observedNumber=HudVision.StandaloneHealthNumber(image);
+        if(observedNumber is not Rectangle b||
+            !new Rectangle(Point.Empty,image.Size).Contains(b)||
+            !HudVision.HeartRightOf(image,b))return found;
         using var contrast=GameplayHudOcr.Contrast(image,b);
         using var crop=new Bitmap(b.Width*4,b.Height*4);
         using(var g=Graphics.FromImage(crop))

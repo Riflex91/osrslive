@@ -11,6 +11,8 @@ internal static class Program
     private static int Main(string[] args)
     {
         if(args.Length>0 && args[0]=="--apply-update")return Updater.Apply(args);
+        if(args.Length>0 && args[0]=="--build-info")
+        {Console.WriteLine(BuildIdentity.Log);return 0;}
         if(args.Length>0 && args[0]=="--self-test")return SelfTest.Run();
         if(args.Length>0 && args[0]=="--ocr-self-test")return VisualStartup.OcrSelfTest().GetAwaiter().GetResult();
         if(args.Length>0 && args[0]=="--navigation-self-test")return WorldNavigationDataTests.Run().GetAwaiter().GetResult();
@@ -117,7 +119,7 @@ internal sealed class MainWindow : Form
         visualStartup.VisuallyConfirmedSession=CloseLauncherAfterVisualSessionConfirmation;
         runtimeLogFile=Path.Combine(logDirectory,
             !startAutomatically?"ui-smoke-test.log":observeOnly?"observation-session.log":"last-session.log");
-        Text=$"OSRS Play {Diagnostics.Version} – offizielles OSRS";
+        Text=$"OSRS Play {Diagnostics.Version} – offizielles OSRS – {BuildIdentity.Display}";
         AutoScaleMode=AutoScaleMode.None;
         FormBorderStyle=FormBorderStyle.FixedSingle;MaximizeBox=false;
         ClientSize=DockedWindowLayout.ClientSize(true);
@@ -130,7 +132,7 @@ internal sealed class MainWindow : Form
         log.SetMode("LIVE ONLY: ORIGINALER JAGEX LAUNCHER UND OSRS");
         log.Add(Severity.INFO,"CORE","STARTED",
             $"version={Diagnostics.Version} mode=LIVE_ONLY controls=DIAGNOSTICS "+
-            "game_source=OFFICIAL_JAGEX");
+            "game_source=OFFICIAL_JAGEX "+BuildIdentity.Log);
         log.Add(Severity.INFO,"CORE","PRIVACY",
             "credentials_and_oauth_handled_only_by_jagex=true");
         log.Add(Severity.INFO,"LIVE_AGENT","CAPABILITIES",
@@ -263,7 +265,8 @@ internal sealed class MainWindow : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,DockedWindowLayout.LogHeight));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute,DockedWindowLayout.ToolbarHeight));
         Controls.Add(layout);
-        heading.Text=$"OSRS PLAY {Diagnostics.Version}  ·  AUTOMATISCHER LIVE-BETRIEB";
+        heading.Text=$"OSRS PLAY {Diagnostics.Version}  ·  AUTOMATISCHER LIVE-BETRIEB"+
+            (BuildIdentity.Channel=="pull_request"?"  ·  PR-TEST "+BuildIdentity.Run:"");
         heading.Dock=DockStyle.Fill;heading.Font=new Font("Segoe UI",13,FontStyle.Bold);
         layout.Controls.Add(heading,0,0);
         status.Dock=DockStyle.Fill;status.Font=new Font("Segoe UI",10);
@@ -801,6 +804,7 @@ internal static class SelfTest
                 throw new Exception("Copied report must include newest errors beyond preview/export limits");
             if(OfficialGameSessionGate.Readiness(null)!="OFFICIAL_PROTOCOL_ADAPTER_MISSING")
                 throw new Exception("Missing official game adapter must not allow bot");
+            BuildIdentity.SelfTest();
             OfficialWindowTransitionTests.Run();
             OfficialClientWindowHostTests.Run();
             OfficialStartupPolicyTests.Run();

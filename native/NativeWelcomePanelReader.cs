@@ -3,6 +3,11 @@ namespace OSRSLiveDiagnostics;
 // Pixel-geometry fallback for the second official OSRS entry screen shown
 // after Play Now. Coordinates are client-local 1000x600 search regions, never
 // an inferred account identity or unconditionally clickable screen position.
+internal readonly record struct WelcomePanelPixels(bool Banner,bool RedCenter,bool SideTiles,bool Caption)
+{
+    internal bool Actionable=>Banner&&RedCenter&&SideTiles&&Caption;
+}
+
 internal static class NativeWelcomePanelReader
 {
     internal static readonly Rectangle ButtonTextBounds=new(446,322,134,29);
@@ -30,6 +35,17 @@ internal static class NativeWelcomePanelReader
         int samples=((area.Width+1)/2)*((area.Height+1)/2);
         return Count(image,area,predicate)>=samples*threshold;
     }
+    // Reveal only structural pixel evidence for a stalled transition, never
+    // OCR text, the image itself, character names or credentials.
+    internal static WelcomePanelPixels Inspect(Bitmap image)
+    {
+        if(image.Size!=DockedWindowLayout.GameSize)return default;
+        bool banner=Fraction(image,Banner,Parchment,.70);
+        bool redCenter=Fraction(image,RedPanel,Red,.65);
+        bool sideTiles=!Fraction(image,LeftPanel,Red,.15)&&!Fraction(image,RightPanel,Red,.15);
+        int white=Count(image,WhiteText,White);
+        return new(banner,redCenter,sideTiles,white is >=45 and <=420);
+    }
     internal static VisualLabel? Read(Bitmap image,IReadOnlyList<VisualLabel> labels)
     {
         if(image.Size!=DockedWindowLayout.GameSize)return null;
@@ -38,18 +54,10 @@ internal static class NativeWelcomePanelReader
             l.Text.Contains("authenticator",StringComparison.OrdinalIgnoreCase)||
             l.Text.Contains("verification code",StringComparison.OrdinalIgnoreCase)))
             return null;
-        // The actual second entry screen combines a parchment banner, a dark
-        // red center action tile, grey side tiles and a short white heading.
-        // This multi-region check intentionally rejects the original Play Now
-        // dialog and generic red advertisements elsewhere in the interface.
-        if(!Fraction(image,Banner,Parchment,.70)||
-           !Fraction(image,RedPanel,Red,.65)||
-           Fraction(image,LeftPanel,Red,.15)||
-           Fraction(image,RightPanel,Red,.15))
-            return null;
-        int white=Count(image,WhiteText,White);
-        if(white is <45 or >420)return null;
-        return new("CLICK HERE TO PLAY",ButtonTextBounds,VisualLabelKind.EnterButton);
+        // Require the same four independent native pixel regions as before.
+        // Inspection itself never authorizes clicks or bypasses credential UI.
+        return Inspect(image).Actionable?
+            new("CLICK HERE TO PLAY",ButtonTextBounds,VisualLabelKind.EnterButton):null;
     }
 
     internal static void SelfTest()
@@ -72,17 +80,17 @@ internal static class NativeWelcomePanelReader
             using var font=new Font("Segoe UI",14,FontStyle.Bold);
             g.DrawString("CLICK HERE TO PLAY",font,Brushes.White,449,322);
         }
-        if(Read(screen,labels)?.Kind!=VisualLabelKind.EnterButton)
+        if(Read(screen,labels)?.Kind!=VisualLabelKind.EnterButton||!Inspect(screen).Actionable)
             throw new Exception("Native second entry: expected parchment + red tile + caption.");
         if(Read(screen,new[]{new VisualLabel("password",new Rectangle(10,10,80,12))}) is not null)
             throw new Exception("Native second entry: credential screen cannot be actionable.");
         if(Read(screen,new[]{new VisualLabel("Select a world",new Rectangle(10,10,120,12))}) is not null)
             throw new Exception("Native second entry: world list cannot be actionable.");
         using(var g=Graphics.FromImage(screen))g.FillRectangle(Brushes.Black,WhiteText);
-        if(Read(screen,labels) is not null)
+        if(Read(screen,labels) is not null||Inspect(screen).Caption)
             throw new Exception("Native second entry: red tile without bright caption must not be clicked.");
         using(var g=Graphics.FromImage(screen))g.FillRectangle(Brushes.Black,Banner);
-        if(Read(screen,labels) is not null)
+        if(Read(screen,labels) is not null||Inspect(screen).Banner)
             throw new Exception("Native second entry: missing parchment must block action.");
         using var wrongSize=new Bitmap(950,600);
         if(Read(wrongSize,labels) is not null)
