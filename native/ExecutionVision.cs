@@ -48,26 +48,36 @@ internal static class ExecutionVision
         var found=new List<VisualLabel>();
         var minimap=HudVision.Minimap(image);
         if(minimap is Rectangle map)found.Add(new("MINIMAP",map,VisualLabelKind.Minimap));
-        Rectangle? observedNumber=minimap is Rectangle actual?
-            HudVision.HealthNumber(image,actual,labels)??
-                new Rectangle(actual.Left-62,actual.Top+48,42,28):null;
-        // Gameplay is independently verified by the native Skills icon and
-        // footer; the health-orb pixels can be read even when Hough misses
-        // the minimap. Never manufacture NavigationPixels from this path.
-        if(observedNumber is null&&
-            NativeGameHudReader.Read(image,labels) is not null)
-            observedNumber=HudVision.StandaloneHealthNumber(image);
-        if(observedNumber is not Rectangle b||
-            !new Rectangle(Point.Empty,image.Size).Contains(b)||
-            !HudVision.HeartRightOf(image,b))return found;
-        using var contrast=GameplayHudOcr.Contrast(image,b);
-        using var crop=new Bitmap(b.Width*4,b.Height*4);
-        using(var g=Graphics.FromImage(crop))
-        {g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;g.DrawImage(contrast,new Rectangle(Point.Empty,crop.Size));}
-        var ocr=await VisualStartup.RecognizeRaw(crop,engine);
-        var words=ocr.Lines.SelectMany(l=>l.Words).Select(w=>w.Text.Trim()).ToArray();
-        if(words.Length==1&&Regex.IsMatch(words[0],@"^\d{1,2}$"))found.Add(new(words[0],b,VisualLabelKind.Hitpoints));
+        foreach(var b in HealthNumberCandidates(image,labels,minimap))
+        {
+            if(!new Rectangle(Point.Empty,image.Size).Contains(b)||
+                !HudVision.HeartRightOf(image,b))continue;
+            using var contrast=GameplayHudOcr.Contrast(image,b);
+            using var crop=new Bitmap(b.Width*4,b.Height*4);
+            using(var g=Graphics.FromImage(crop))
+            {g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;g.DrawImage(contrast,new Rectangle(Point.Empty,crop.Size));}
+            var ocr=await VisualStartup.RecognizeRaw(crop,engine);
+            var words=ocr.Lines.SelectMany(l=>l.Words).Select(w=>w.Text.Trim()).ToArray();
+            if(words.Length!=1||!Regex.IsMatch(words[0],@"^\d{1,2}$"))continue;
+            found.Add(new(words[0],b,VisualLabelKind.Hitpoints));
+            break;
+        }
         return found;
+    }
+    internal static IReadOnlyList<Rectangle> HealthNumberCandidates(Bitmap image,
+        IReadOnlyList<VisualLabel> labels,Rectangle? minimap)
+    {
+        var candidates=new List<Rectangle>();
+        if(minimap is Rectangle map)
+            candidates.Add(HudVision.HealthNumber(image,map,labels)??
+                new Rectangle(map.Left-62,map.Top+48,42,28));
+        // A detected minimap does not guarantee that its relative digit crop
+        // contains the HP text. If that crop fails, independently verified
+        // native HUD + red-orb pixels still provide the standalone OCR path.
+        if(NativeGameHudReader.Read(image,labels) is not null&&
+            HudVision.StandaloneHealthNumber(image) is Rectangle standalone)
+            candidates.Add(standalone);
+        return candidates.Distinct().ToArray();
     }
     internal static ulong Signature(Bitmap image,Rectangle box)
     {

@@ -181,6 +181,7 @@ internal sealed class VisualStartup:IDisposable
     private string lastWorldGridDiagnostic="";
     private string lastSkillOcrDiagnostic="";
     private Point? contextMenuAnchor;
+    private string lastHealthDiagnostic="";
     private ulong? contextMenuPanelBefore;
     private string lastContextDiagnostic="";
     private int? pendingWorldChoice;
@@ -451,6 +452,13 @@ internal sealed class VisualStartup:IDisposable
                 $"inventory_active={InventoryTabPolicy.Active(captured.Image)} "+
                 "screenshot_persisted=false");
         var pixels=ExecutionVision.Read(captured.Image,labels);
+        if(contextMenuAnchor is null&&pixels is not null&&labels.Any(l=>l.Kind==VisualLabelKind.GameHud))
+        {
+            string health=$"hp={CombatPolicy.Hitpoints(pixels)?.ToString()??"unknown"} "+
+                $"navigation_available={pixels.Navigation is not null} evidence={pixels.HealthEvidence}";
+            if(health!=lastHealthDiagnostic)
+            {lastHealthDiagnostic=health;log.Add(Severity.INFO,"GAMEPLAY","HEALTH_OBSERVATION",health);}
+        }
         if(contextMenuAnchor is Point anchor)
         {
             var menu=ExecutionUi.Menu(labels);
@@ -826,6 +834,13 @@ internal sealed class VisualStartup:IDisposable
                 throw new InvalidOperationException("Standalone health fixture unexpectedly has a minimap");
             var redHealth=await ExecutionVision.ReadHealth(healthWithoutMap,engine,
                 Array.Empty<VisualLabel>());
+            var offsetMap=new Rectangle(830,25,150,150);
+            var healthCandidates=ExecutionVision.HealthNumberCandidates(healthWithoutMap,
+                Array.Empty<VisualLabel>(),offsetMap);
+            if(healthCandidates.Count!=2||
+                healthCandidates[1]!=HudVision.StandaloneHealthNumber(healthWithoutMap)||
+                HudVision.HeartRightOf(healthWithoutMap,healthCandidates[0]))
+                throw new InvalidOperationException("An unusable map-relative HP crop must retain the independent red-orb fallback");
             var independentHp=ExecutionVision.Read(healthWithoutMap,redHealth);
             if(redHealth.Count(l=>l.Kind==VisualLabelKind.Hitpoints)!=1||
                 redHealth.Single(l=>l.Kind==VisualLabelKind.Hitpoints).Text!="24"||
