@@ -164,11 +164,18 @@ internal static class ExecutionRoutinesTests
             .ToArray()};
         var hoverMatch=GameInteractions.InventoryMatch(spriteBefore,hoverBorders,0);
         Require(hoverMatch.Restored&&hoverMatch.Exact==0&&hoverMatch.Core==28&&
+            hoverMatch.ChangedSlots=="none"&&
             !GameInteractions.InventoryRestored(spriteBefore,coveredSprites,0)&&
+            GameInteractions.InventoryMatch(spriteBefore,coveredSprites,0).ChangedSlots=="0,1,2,3,4"&&
             !GameInteractions.InventoryRestored(spriteBefore,changedItem,0),
             "all hover-sensitive outer pixels may change but authentic item interiors must match; overlays fail");
         var cancellable=new InventoryMenuDriver(menu,closes:true);
         var checkedInventory=await new GameInteractions(cancellable).Inventory(CancellationToken.None);
+        int firstRightClick=cancellable.Inputs.FindIndex(i=>i.Kind==GameInputKind.RightClick);
+        int lastNeutralBeforeClick=cancellable.Inputs.FindLastIndex(firstRightClick-1,
+            i=>i.Kind==GameInputKind.Hover&&i.Bounds.Contains(new Point(500,400)));
+        Require(firstRightClick>0&&lastNeutralBeforeClick==firstRightClick-1,
+            "inventory slot baseline must be acquired after neutralizing the tab-hover position");
         Require(checkedInventory.Items.Count==1&&checkedInventory.Items[0].Name=="logs"&&
             checkedInventory.EmptySlots==27&&
             cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
