@@ -168,7 +168,57 @@ internal static class ContextMenuOcr
             if(region.Contains(bounds)&&value.Length is >0 and <=90)
                 labels.Add(new(value,bounds));
         }
-        return labels;
+        return JoinExamineFragments(labels,region);
+    }
+
+    // Windows OCR may create two OcrLines for differently coloured text on
+    // ONE native menu row ("Examine" and the item name). Recombine only
+    // independently recognized, uniquely aligned pixel text; never fill a
+    // name from slot positions, another menu row or an item catalogue.
+    internal static List<VisualLabel> JoinExamineFragments(
+        IReadOnlyList<VisualLabel> source,Rectangle region)
+    {
+        var result=source.ToList();
+        static bool ItemPart(string value)=>
+            value.Length is >0 and <=50&&
+            value.Any(char.IsLetterOrDigit)&&
+            value.All(c=>char.IsLetterOrDigit(c)||
+                c is ' ' or '-' or '\'' or '(' or ')' or '/');
+        foreach(var label in source)
+        {
+            string value=label.Text.Trim();
+            // A colour boundary may also remove the separating space within
+            // ONE OCR line. Only an exact action prefix and a visibly decoded,
+            // capitalized/digit-starting suffix support a correction.
+            if(value.StartsWith("Examine",StringComparison.OrdinalIgnoreCase)&&
+                value.Length>7&&(char.IsUpper(value[7])||char.IsDigit(value[7]))&&
+                ItemPart(value[7..]))
+            {
+                int idx=result.IndexOf(label);
+                if(idx>=0)result[idx]=label with{Text="Examine "+value[7..]};
+                continue;
+            }
+            if(!value.Equals("Examine",StringComparison.OrdinalIgnoreCase))continue;
+            var suffixes=source.Where(other=>!ReferenceEquals(other,label)&&
+                region.Contains(other.Bounds)&&
+                other.Bounds.Left>=label.Bounds.Right&&
+                other.Bounds.Left-label.Bounds.Right<=28&&
+                Math.Abs(other.Bounds.Top-label.Bounds.Top)<=5&&
+                Math.Abs(other.Bounds.Bottom-label.Bounds.Bottom)<=6&&
+                ItemPart(other.Text.Trim())&&
+                !new[]{"Cancel","Examine","Choose Option"}.Contains(
+                    other.Text.Trim(),StringComparer.OrdinalIgnoreCase))
+                .ToArray();
+            if(suffixes.Length!=1)continue;
+            var suffix=suffixes[0];
+            if(!result.Contains(label)||!result.Contains(suffix))continue;
+            var joint=Rectangle.Union(label.Bounds,suffix.Bounds);
+            if(!region.Contains(joint))continue;
+            result.Remove(label);
+            result.Remove(suffix);
+            result.Add(new("Examine "+suffix.Text.Trim(),joint));
+        }
+        return result;
     }
 
     private static async Task<IReadOnlyList<VisualLabel>?> Verify(
@@ -302,6 +352,30 @@ internal static class ContextMenuOcr
                 tight.Width>=Region(point,size).Width)
                 throw new Exception("Tight menu OCR must retain the click in a smaller viewport crop");
         }
+        var textArea=new Rectangle(680,440,320,160);
+        var examineWord=new VisualLabel("Examine",new Rectangle(786,568,55,13));
+        var itemWord=new VisualLabel("Logs",new Rectangle(846,568,42,13));
+        var split=JoinExamineFragments(new[]{examineWord,itemWord},textArea);
+        if(split.Count!=1||split[0].Text!="Examine Logs"||
+            split[0].Bounds!=Rectangle.Union(examineWord.Bounds,itemWord.Bounds)||
+            ExecutionUi.Menu(split) is not null)
+            throw new Exception("Real same-row OCR words must form a complete Examine action without guessing an item");
+        if(JoinExamineFragments(new[]{examineWord},textArea)
+                .Any(l=>l.Text.StartsWith("Examine ",StringComparison.OrdinalIgnoreCase))||
+            JoinExamineFragments(new[]{examineWord,
+                itemWord with {Bounds=new Rectangle(846,548,42,13)}},textArea)
+                .Any(l=>l.Text.StartsWith("Examine ",StringComparison.OrdinalIgnoreCase))||
+            JoinExamineFragments(new[]{examineWord,itemWord,
+                itemWord with{Text="Coins",Bounds=new Rectangle(852,568,40,13)}},textArea)
+                .Any(l=>l.Text.StartsWith("Examine ",StringComparison.OrdinalIgnoreCase)))
+            throw new Exception("Missing, misaligned or ambiguous names must never complete Examine");
+        var fused=JoinExamineFragments(new[]{
+            new VisualLabel("ExamineLogs",new Rectangle(786,568,100,13))},textArea);
+        if(fused.Count!=1||fused[0].Text!="Examine Logs"||
+            JoinExamineFragments(new[]{
+                new VisualLabel("Examine",new Rectangle(786,568,55,13))},textArea)
+                .Any(l=>l.Text.Contains("Logs",StringComparison.OrdinalIgnoreCase)))
+            throw new Exception("Only visibly decoded fused name characters may be separated");
         // Live regression: right-click at (860,508), but OCR sees the
         // footer at y=584. The original 270px crop ended at y=568 and
         // necessarily discarded the footer and adjacent Examine text.

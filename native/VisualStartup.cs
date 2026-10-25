@@ -405,6 +405,10 @@ internal sealed class VisualStartup:IDisposable
             int cropCancels=rawCrop.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
             int cropExamines=rawCrop.Count(l=>l.Text.Trim().StartsWith("Examine ",StringComparison.OrdinalIgnoreCase));
             int examinePrefixes=rawCrop.Count(l=>l.Text.Trim().StartsWith("Examin",StringComparison.OrdinalIgnoreCase));
+            int examineStems=rawCrop.Count(l=>l.Text.Trim().Equals("Examine",StringComparison.OrdinalIgnoreCase));
+            int examineUnspaced=rawCrop.Count(l=>
+                l.Text.Trim().StartsWith("Examine",StringComparison.OrdinalIgnoreCase)&&
+                l.Text.Trim().Length>7&&!char.IsWhiteSpace(l.Text.Trim()[7]));
             var cancelLines=rawCrop.Where(l=>
                 l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase)).ToArray();
             string cancelTops=string.Join(",",cancelLines.Select(l=>l.Bounds.Top)
@@ -432,7 +436,8 @@ internal sealed class VisualStartup:IDisposable
                 $"empty_pixel_quality={pixels?.InventorySlot0Diagnostic??"unavailable"} "+
                 $"crop_raw_lines={rawCrop.Length} crop_headers={cropHeaders} "+
                 $"crop_cancels={cropCancels} crop_examines={cropExamines} "+
-                $"crop_examine_prefixes={examinePrefixes} "+
+                $"crop_examine_prefixes={examinePrefixes} crop_examine_stems={examineStems} "+
+                $"crop_examine_unspaced={examineUnspaced} "+
                 $"crop_cancel_y={(cancelTops.Length>0?cancelTops:"none")} "+
                 $"crop_above_cancel_ys={(footerRows.Length>0?footerRows:"none")} image_phase=AFTER_RIGHT_CLICK";
             if(diagnostic!=lastContextDiagnostic)
