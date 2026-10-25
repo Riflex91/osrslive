@@ -2,7 +2,7 @@ using Cv=OpenCvSharp;
 
 namespace OSRSLiveDiagnostics;
 
-internal sealed record MinimapScaleEvidence(double? Scale,int Inliers,string Reason);
+internal sealed record MinimapScaleEvidence(double? Scale,int Inliers,string Reason,int RatioMatches=0);
 
 // Local geometry only: no client memory, saved screenshot, map-coordinate
 // guess or assumption that PostMessage was accepted by the game renderer.
@@ -30,26 +30,34 @@ internal static class MinimapZoomVision
         var matches=matcher.KnnMatch(da,db,2)
             .Where(pair=>pair.Length==2&&pair[0].Distance<.70*pair[1].Distance)
             .Select(pair=>pair[0]).ToArray();
-        if(matches.Length<12)return new(null,0,"MINIMAP_ZOOM_MATCHES_INSUFFICIENT");
+        if(matches.Length<12)return new(null,0,"MINIMAP_ZOOM_MATCHES_INSUFFICIENT",matches.Length);
         var from=matches.Select(m=>pa[m.QueryIdx].Pt).ToArray();
         var to=matches.Select(m=>pb[m.TrainIdx].Pt).ToArray();
         using var input=Cv.InputArray.Create(from);using var output=Cv.InputArray.Create(to);
         using var inliers=new Cv.Mat();
         using var fit=Cv.Cv2.EstimateAffinePartial2D(input,output,inliers,
             Cv.RobustEstimationAlgorithms.RANSAC,2.5,3000,.995,20);
-        if(fit is null||fit.Empty())return new(null,0,"MINIMAP_ZOOM_GEOMETRY_UNVERIFIED");
+        if(fit is null||fit.Empty())return new(null,0,"MINIMAP_ZOOM_GEOMETRY_UNVERIFIED",matches.Length);
         int count=Cv.Cv2.CountNonZero(inliers);
-        if(count<12||count<matches.Length*.60)
-            return new(null,count,"MINIMAP_ZOOM_GEOMETRY_UNVERIFIED");
+        // Ten or eleven spatially distributed inliers may be useful, but are
+        // *not* enough to authorize a scroll decision in isolation. Scroll()
+        // requires an independent second frame with the same measured scale.
+        if(count<10||count<matches.Length*.60)
+            return new(null,count,"MINIMAP_ZOOM_GEOMETRY_UNVERIFIED",matches.Length);
         var accepted=from.Where((_,i)=>inliers.At<byte>(i)!=0).ToArray();
         if(accepted.Max(p=>p.X)-accepted.Min(p=>p.X)<30||
             accepted.Max(p=>p.Y)-accepted.Min(p=>p.Y)<30)
-            return new(null,count,"MINIMAP_ZOOM_FEATURES_TOO_CLUSTERED");
+            return new(null,count,"MINIMAP_ZOOM_FEATURES_TOO_CLUSTERED",matches.Length);
         double scale=Math.Sqrt(Math.Pow(fit.At<double>(0,0),2)+Math.Pow(fit.At<double>(1,0),2));
         return scale is >=.35 and <=2.8?
-            new(scale,count,"VERIFIED_RELATIVE_SCALE"):
-            new(null,count,"MINIMAP_ZOOM_SCALE_OUT_OF_RANGE");
+            new(scale,count,"VERIFIED_RELATIVE_SCALE",matches.Length):
+            new(null,count,"MINIMAP_ZOOM_SCALE_OUT_OF_RANGE",matches.Length);
     }
+
+    internal static bool ConfirmMarginal(MinimapScaleEvidence first,MinimapScaleEvidence second)=>
+        first.Scale is double prior&&second.Scale is double current&&
+        first.Inliers>=10&&second.Inliers>=10&&
+        Math.Abs(prior-current)<=.035;
 }
 
 // The C++ OSRS minimap may zoom with the wheel, but the renderer can reject
@@ -158,15 +166,37 @@ internal sealed class MinimapZoomRoutine
         await driver.InputAsync(new(direction,centre),ct);
         if(stopped())throw new OperationCanceledException(ct);
         await wait(250,ct);
-        var after=await driver.ObserveAsync(ct);
-        if(!Usable(after)||after.Window!=before.Window||after.ScreenBounds!=before.ScreenBounds||
-            after.CapturedUtc<=before.CapturedUtc)
-            return new(null,0,"MINIMAP_ZOOM_POST_SCROLL_FRAME_NOT_VERIFIED");
-        var evidence=MinimapZoomVision.Compare(before.Pixels.Navigation,after.Pixels!.Navigation!);
-        diagnostic($"input={direction} target={(direction is GameInputKind.WheelDownGameWindow or GameInputKind.WheelUpGameWindow?"GAME_WINDOW":"RENDER_CHILD")} "+
-            $"scale={(evidence.Scale is double scale?scale.ToString("F4",System.Globalization.CultureInfo.InvariantCulture):"unknown")} "+
-            $"inliers={evidence.Inliers} evidence={evidence.Reason}");
-        return evidence;
+        MinimapScaleEvidence? tentative=null,last=null;
+        DateTimeOffset lastCapture=before.CapturedUtc;
+        for(int sample=1;sample<=3;sample++)
+        {
+            if(stopped())throw new OperationCanceledException(ct);
+            var after=await driver.ObserveAsync(ct);
+            if(!Usable(after)||after.Window!=before.Window||after.ScreenBounds!=before.ScreenBounds||
+                after.CapturedUtc<=before.CapturedUtc)
+                return new(null,0,"MINIMAP_ZOOM_POST_SCROLL_FRAME_NOT_VERIFIED");
+            // A cached image cannot independently confirm marginal geometry.
+            if(after.CapturedUtc<=lastCapture)
+            {if(sample<3)await wait(200,ct);continue;}
+            lastCapture=after.CapturedUtc;
+            var evidence=MinimapZoomVision.Compare(before.Pixels.Navigation,after.Pixels!.Navigation!);
+            last=evidence;
+            diagnostic($"input={direction} target={(direction is GameInputKind.WheelDownGameWindow or GameInputKind.WheelUpGameWindow?"GAME_WINDOW":"RENDER_CHILD")} "+
+                $"sample={sample} scale={(evidence.Scale is double scale?scale.ToString("F4",System.Globalization.CultureInfo.InvariantCulture):"unknown")} "+
+                $"inliers={evidence.Inliers} matches={evidence.RatioMatches} evidence={evidence.Reason}");
+            if(evidence.Scale is not null)
+            {
+                if(evidence.Inliers>=12||
+                    (tentative is not null&&MinimapZoomVision.ConfirmMarginal(tentative,evidence)))
+                    return evidence;
+                tentative=evidence;
+            }
+            else tentative=null;
+            if(sample<3)await wait(200,ct);
+        }
+        return tentative is not null?
+            new(null,tentative.Inliers,"MINIMAP_ZOOM_MARGINAL_GEOMETRY_NOT_RECONFIRMED",tentative.RatioMatches):
+            last??new(null,0,"MINIMAP_ZOOM_NO_FRESH_COMPARISON");
     }
     private static bool Usable(VisualFrame f)=>
         f.ScreenBounds.Size==DockedWindowLayout.GameSize&&

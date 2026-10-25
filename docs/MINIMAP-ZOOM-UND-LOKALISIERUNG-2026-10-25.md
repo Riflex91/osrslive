@@ -36,3 +36,15 @@ Nach Microsoft Win32 wird `WM_MOUSEWHEEL` an das fokussierte Fenster zugestellt 
 Die Kalibrierung erprobt jetzt **zwei separate, durch Screenshots getrennte Routen**: zuerst das rendernde OSRS-Child-HWND und nur bei ausbleibendem messbaren Effekt das offizielle OSRS-Spiel-HWND (`osclient.exe`). Sobald eine Route eine verifizierte Verkleinerung bzw. beim unteren Anschlag einen reversiblen Zoom-in zeigt, wird nur diese Route für weitere Abwärtsschritte verwendet. Die Ziel-PID muss weiterhin zur Spiel-PID passen. Kein Weg verwendet `SendInput`, bewegt den globalen Cursor oder aktiviert das Spielfenster.
 
 Jeder Versuch meldet `[MINIMAP_ZOOM] STEP | input=... target=RENDER_CHILD|GAME_WINDOW scale=... inliers=... evidence=...`. Bleiben alle vier begrenzten Richtungs-/Routenproben unverändert, stoppt die Automatik mit `MINIMAP_ZOOM_BACKGROUND_WHEEL_NOT_OBSERVED`, statt eine erfolgreich herausgezoomte Minimap vorzutäuschen. Ein zusätzlicher synthetischer Test deckt beide Routen einschließlich des Falls „bereits ganz herausgezoomt“ ab. Der echte OSRS-Client muss danach erneut mit einem neuen Windows-Build getestet werden.
+
+## Manueller Zoom-Kontrolltest: Hintergrund-Eingabe funktioniert
+
+Im Live-Log vom 25.10.2026, 21:07–21:08 Uhr (Build `5e0f0ee`, PR #26) wurde der Minimap-Zoom nach manueller F8-/Button-Pause sichtbar hineingezoomt und nach dem Fortsetzen neu kalibriert. Diesmal zeigten drei aufeinanderfolgende `RENDER_CHILD`-Abwärtsimpulse echte, geometrisch verifizierte Änderungen: `scale=0.8753 inliers=15`, `0.8536/15`, `0.8381/12`. Damit ist die Hintergrund-Zustellung an das OSRS-Renderfenster **im echten Spiel nachgewiesen**. Die vierte Abwärtsstufe konnte mit `inliers=11` nicht über die alte starre Untergrenze von zwölf Merkmalen bestätigt werden (`MINIMAP_ZOOM_GEOMETRY_UNVERIFIED`). Die Kalibrierung blockierte korrekt statt vorschnell einen Zoomanschlag zu behaupten.
+
+Die Bildprüfung verwendet nun die folgenden eng begrenzten Ergänzungen:
+
+- Bei fehlender Bildgeometrie wird ohne erneute Eingabe bis zu zweimal passiv nachbeobachtet. Jede Aufnahme wird mit einer neuen Zeitmarke und demselben unabhängigen Vorherbild verglichen.
+- Bereits zehn oder elf räumlich verteilte RANSAC-Inlier können eine **vorläufige** Skalenmessung liefern, müssen aber in einer zweiten unabhängigen Aufnahme mit höchstens `0.035` Skalenabweichung erneut bestätigt werden; andernfalls bleibt der Schritt ungeprüft. Ab zwölf Inliern gelten die bisherigen strengen Geometrieprüfungen.
+- Der Schritt-Log enthält künftig `sample` und `matches` sowie `scale`, `inliers` und die Evidenzursache. Pausen, Sitzungsgrenzen und das Verbot von Bewegung ohne verifizierte Position bleiben unverändert.
+
+Bei einem weiteren Test sollen die letzten Abwärtsimpulse `scale≈1.0` zeigen und erst nach einem vorher bestätigten Herauszoomen und zwei solchen stabilen Anschlagsbelegen `MINIMAP_FULLY_ZOOMED_OUT_VISUALLY_CONFIRMED` auslösen. Der Win32-Fallback bleibt für andere Clients als Reserve erhalten, wird aber beim beobachtet funktionierenden `RENDER_CHILD` nicht verwendet.
