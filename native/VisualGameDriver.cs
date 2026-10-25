@@ -23,14 +23,43 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
     public async Task<VisualFrame> ObserveAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var next=await capture(ct);
-        if(next is null||next.Window!=Current.Window||next.ScreenBounds!=Current.ScreenBounds||
-            DateTimeOffset.UtcNow-next.CapturedUtc>TimeSpan.FromSeconds(2))
-            throw new RoutineBlockedException("FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED");
-        var stage=GameScreenReader.Read(next).Stage;
-        if(stage!=VisibleGameStage.InGame)
-            throw new RoutineBlockedException(stage==VisibleGameStage.Unknown?"GAMEPLAY_HUD_NOT_VERIFIED":"GAME_SESSION_LEFT_EXECUTION_SCREEN");
-        Current=next;Guard?.Invoke(next);return next;
+        // After a directed tab click or hover Windows Graphics Capture can
+        // deliver a transient frame whose native HUD/footer OCR is incomplete.
+        // Never accept that frame as gameplay evidence, and NEVER dispatch
+        // another input to recover. Re-observe at most twice, requiring a
+        // fresh, independently recognized InGame frame from the same window.
+        DateTimeOffset lastUnknown=default;
+        for(int attempt=0;attempt<3;attempt++)
+        {
+            if(attempt>0)await Task.Delay(150,ct);
+            var next=await capture(ct);
+            if(next is null||next.Window!=Current.Window||next.ScreenBounds!=Current.ScreenBounds||
+                DateTimeOffset.UtcNow-next.CapturedUtc>TimeSpan.FromSeconds(2))
+                throw new RoutineBlockedException("FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED");
+            var stage=GameScreenReader.Read(next).Stage;
+            if(stage==VisibleGameStage.InGame)
+            {
+                if(lastUnknown!=default&&next.CapturedUtc<=lastUnknown)continue;
+                Current=next;Guard?.Invoke(next);return next;
+            }
+            if(stage!=VisibleGameStage.Unknown)
+                throw new RoutineBlockedException("GAME_SESSION_LEFT_EXECUTION_SCREEN");
+            lastUnknown=next.CapturedUtc;
+            if(attempt==0)
+            {
+                string footer=string.Join(" ",next.Labels.Where(l=>
+                    l.Bounds.Top>next.ScreenBounds.Height-40&&
+                    l.Bounds.Left<next.ScreenBounds.Width*.55).Select(l=>l.Text));
+                int chatControls=new[]{"Public","Private","Trade","Report"}
+                    .Count(term=>footer.Contains(term,StringComparison.OrdinalIgnoreCase));
+                report("HUD_REOBSERVING after_unknown=true "+
+                    $"native_hud={next.Labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
+                    $"minimap={next.Labels.Any(l=>l.Kind==VisualLabelKind.Minimap)} "+
+                    $"skills_icon={next.Labels.Any(l=>l.Kind==VisualLabelKind.SkillsButton)} "+
+                    $"chat_control_labels={chatControls}");
+            }
+        }
+        throw new RoutineBlockedException("GAMEPLAY_HUD_NOT_VERIFIED");
     }
     internal void Diagnostic(string message)=>report(message);
     public async Task InputAsync(GameInput input,CancellationToken ct)

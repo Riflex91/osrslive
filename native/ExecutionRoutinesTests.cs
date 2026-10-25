@@ -42,6 +42,69 @@ internal static class ExecutionRoutinesTests
         NativeMenuHeaderReader.SelfTest();
         InventoryTabPolicy.SelfTest();
         NativeInventoryEmptyReader.SelfTest();
+        // Real regression: just after opening Inventory, one independent
+        // post-hover frame temporarily lacked recognizable HUD/footer labels.
+        // Re-observe pixels without sending another click, then require a
+        // NEW InGame frame before continuing with the inventory scan.
+        var hudLabels=new[]{new VisualLabel("NATIVE_GAME_HUD",
+            new Rectangle(0,575,517,25),VisualLabelKind.GameHud)};
+        var initialHudFrame=new VisualFrame(new IntPtr(11),new Rectangle(0,0,1000,600),
+            DateTimeOffset.UtcNow,hudLabels);
+        int transientCaptures=0,transientDispatches=0;
+        var reports=new List<string>();
+        var transientHud=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            transientCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=DateTimeOffset.UtcNow,
+                Labels=transientCaptures==1?Array.Empty<VisualLabel>():hudLabels});
+        },(_,input,token)=>{
+            transientDispatches++;return Task.FromResult(true);
+        },reports.Add);
+        var recoveredHud=await transientHud.ObserveAsync(CancellationToken.None);
+        Require(transientCaptures==2&&transientDispatches==0&&
+            GameScreenReader.Read(recoveredHud).Stage==VisibleGameStage.InGame&&
+            reports.Count==1&&reports[0].StartsWith("HUD_REOBSERVING",StringComparison.Ordinal),
+            "one transient unrecognized HUD frame is re-observed without any new input");
+        int missingHudCaptures=0;
+        var missingHud=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            missingHudCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=DateTimeOffset.UtcNow,
+                Labels=Array.Empty<VisualLabel>()});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        bool missingHudBlocked=false;
+        try {await missingHud.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex){missingHudBlocked=ex.Message=="GAMEPLAY_HUD_NOT_VERIFIED";}
+        Require(missingHudBlocked&&missingHudCaptures==3&&
+            ReferenceEquals(missingHud.Current,initialHudFrame),
+            "three unreadable HUD frames block without replacing the last verified frame");
+        int reusedHudCaptures=0;
+        var reusedTime=DateTimeOffset.UtcNow;
+        var reusedHud=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            reusedHudCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=reusedHudCaptures<3?reusedTime:reusedTime.AddMilliseconds(200),
+                Labels=reusedHudCaptures==1?Array.Empty<VisualLabel>():hudLabels});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        var freshHud=await reusedHud.ObserveAsync(CancellationToken.None);
+        Require(reusedHudCaptures==3&&freshHud.CapturedUtc>reusedTime,
+            "a reused timestamp cannot turn a transient Unknown frame into new HUD evidence");
+        int otherScreenCaptures=0;
+        var otherScreen=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            otherScreenCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=DateTimeOffset.UtcNow,
+                Labels=new[]{new VisualLabel("Select a world",new Rectangle(10,10,140,14))}});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        bool leftGameBlocked=false;
+        try{await otherScreen.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex){leftGameBlocked=ex.Message=="GAME_SESSION_LEFT_EXECUTION_SCREEN";}
+        Require(leftGameBlocked&&otherScreenCaptures==1,
+            "world selection or another known non-game screen must abort immediately");
         var wrongPanel=new InventoryGridDriver(true,active:false);
         bool panelBlocked=false;
         try {await new GameInteractions(wrongPanel).Inventory(CancellationToken.None);}
