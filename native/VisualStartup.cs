@@ -508,9 +508,31 @@ internal sealed class VisualStartup:IDisposable
         }
         return new(target,bounds,captured.CapturedUtc,labels,pixels);
     }
+    // A complete, pixel-backed menu needs one dedicated OCR source; the
+    // expensive whole-screen and minimap/Hp passes otherwise cause a valid
+    // two-second-old capture to be rejected before Cancel can be clicked.
+    // The stage is separately verified by native Skills/footer pixels.
+    internal static async Task<IReadOnlyList<VisualLabel>?> FocusedInventoryMenu(
+        Bitmap bitmap,OcrEngine engine,Point? contextAnchor,bool postPlay=false)
+    {
+        if(postPlay||!InventoryMenuOcrPolicy.IsContext(bitmap,contextAnchor)||
+            NativeGameHudReader.Read(bitmap,Array.Empty<VisualLabel>()) is not VisualLabel verifiedHud)
+            return null;
+        var focused=new List<VisualLabel>{verifiedHud};
+        if(NativeGameHudReader.Skills(bitmap) is VisualLabel skills)
+            focused.Add(skills);
+        if(NativeCharacterFontReader.Read(bitmap) is VisualLabel character)
+            focused.Add(character);
+        focused.AddRange(await ContextMenuOcr.Read(bitmap,engine,contextAnchor!.Value));
+        return ExecutionUi.Menu(focused) is not null?focused.Distinct().ToArray():null;
+    }
     private static async Task<IReadOnlyList<VisualLabel>> Recognize(
         Bitmap bitmap,OcrEngine engine,bool postPlay=false,Point? contextAnchor=null)
     {
+        // Missing/ambiguous menu evidence still uses the complete OCR path
+        // and never authorizes a click from geometry or inventory alone.
+        if(await FocusedInventoryMenu(bitmap,engine,contextAnchor,postPlay) is { } menuOnly)
+            return menuOnly;
         using var enlarged=bitmap.Width*2<=OcrEngine.MaxImageDimension&&bitmap.Height*2<=OcrEngine.MaxImageDimension?
             new Bitmap(bitmap.Width*2,bitmap.Height*2):null;
         Bitmap input=bitmap;
@@ -759,6 +781,50 @@ internal sealed class VisualStartup:IDisposable
                 lowerEdgeParsed.Exact("Cancel") is null||
                 lowerEdgeRead.Any(l=>l.Kind!=VisualLabelKind.ContextMenuLine))
                 throw new InvalidOperationException("Bottom-edge menu OCR must retain Examine and Cancel without inventing entries");
+            // Regression for the live slot-25 stale capture: with real native
+            // HUD/footer/Inventory evidence, OCR only the visible menu.
+            using var nativeContext=new Bitmap(lowerEdgeMenu);
+            using(var g=Graphics.FromImage(nativeContext))
+            using(var selected=new SolidBrush(Color.FromArgb(125,31,28)))
+            {
+                g.FillRectangle(selected,InventoryTabPolicy.Icon);
+                g.FillRectangle(Brushes.Red,NativeGameHudReader.SkillsButton.X+3,
+                    NativeGameHudReader.SkillsButton.Y+12,6,5);
+                g.FillRectangle(Brushes.Green,NativeGameHudReader.SkillsButton.X+15,
+                    NativeGameHudReader.SkillsButton.Y+12,6,5);
+                g.FillRectangle(Brushes.Blue,NativeGameHudReader.SkillsButton.X+25,
+                    NativeGameHudReader.SkillsButton.Y+12,6,5);
+                foreach(int x in new[]{120,182,368})
+                {
+                    g.FillRectangle(Brushes.White,x+4,579,7,3);
+                    g.FillRectangle(Brushes.Green,x+4,590,5,2);
+                }
+                g.FillRectangle(Brushes.DarkRed,432,577,65,9);
+                g.FillRectangle(Brushes.White,435,578,6,4);
+            }
+            var slot25Anchor=new Point(818,544);
+            var focused25=await FocusedInventoryMenu(nativeContext,engine,slot25Anchor);
+            if(focused25 is null||
+                ExecutionUi.Menu(focused25)?.Exact("Examine Logs") is null||
+                ExecutionUi.Menu(focused25)?.Exact("Cancel") is null||
+                !focused25.Any(l=>l.Kind==VisualLabelKind.GameHud)||
+                GameScreenReader.Read(new VisualFrame(IntPtr.Zero,
+                    new Rectangle(0,0,1000,600),DateTimeOffset.UtcNow,focused25)).Stage!=VisibleGameStage.InGame||
+                focused25.Any(l=>l.Kind==VisualLabelKind.Minimap||l.Kind==VisualLabelKind.Hitpoints))
+                throw new InvalidOperationException("Verified inventory menu must use complete focused OCR and preserve native InGame evidence without inventing health");
+            // Never activate the shortcut from just an Inventory plate or from
+            // partial menu text. The original complete OCR path remains.
+            using var missingHudFooter=new Bitmap(nativeContext);
+            using(var g=Graphics.FromImage(missingHudFooter))
+                g.FillRectangle(Brushes.Black,430,575,87,24);
+            if(await FocusedInventoryMenu(missingHudFooter,engine,slot25Anchor) is not null||
+                await FocusedInventoryMenu(nativeContext,engine,slot25Anchor,postPlay:true) is not null)
+                throw new InvalidOperationException("Unverified native HUD or post-login screen cannot bypass full-screen OCR");
+            using var missingMenuHeading=new Bitmap(nativeContext);
+            using(var g=Graphics.FromImage(missingMenuHeading))
+                g.FillRectangle(Brushes.Black,755,467,225,32);
+            if(await FocusedInventoryMenu(missingMenuHeading,engine,slot25Anchor) is not null)
+                throw new InvalidOperationException("Incomplete menu without visible header cannot use fast inventory OCR");
             // The slot-22 footer was recognized four times, but its
             // Examine line remained unreadable. Exercise a separate 5x
             // native-pixel OCR strip with text that extends beyond the
