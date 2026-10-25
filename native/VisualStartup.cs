@@ -404,9 +404,18 @@ internal sealed class VisualStartup:IDisposable
             int cropHeaders=rawCrop.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
             int cropCancels=rawCrop.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
             int cropExamines=rawCrop.Count(l=>l.Text.Trim().StartsWith("Examine ",StringComparison.OrdinalIgnoreCase));
-            string cancelTops=string.Join(",",rawCrop.Where(l=>
-                l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase))
-                .Select(l=>l.Bounds.Top).Distinct().OrderBy(y=>y));
+            int examinePrefixes=rawCrop.Count(l=>l.Text.Trim().StartsWith("Examin",StringComparison.OrdinalIgnoreCase));
+            var cancelLines=rawCrop.Where(l=>
+                l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase)).ToArray();
+            string cancelTops=string.Join(",",cancelLines.Select(l=>l.Bounds.Top)
+                .Distinct().OrderBy(y=>y));
+            // Report only bounding-box heights from the 75 native pixels
+            // above an observed Cancel, never chat or inventory item text.
+            int? footerY=cancelLines.Length>0?cancelLines.Min(l=>l.Bounds.Top):null;
+            string footerRows=footerY is int bottom?
+                string.Join(",",rawCrop.Where(l=>l.Bounds.Top>=bottom-75&&
+                    l.Bounds.Top<bottom&&Math.Abs(l.Bounds.Left-anchor.X)<=160)
+                    .Select(l=>l.Bounds.Top).Distinct().OrderBy(y=>y).Take(12)):"none";
             int headers=labels.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
             int cancels=labels.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
             // The panel hash is from the frame BEFORE the right-click. A
@@ -423,7 +432,9 @@ internal sealed class VisualStartup:IDisposable
                 $"empty_pixel_quality={pixels?.InventorySlot0Diagnostic??"unavailable"} "+
                 $"crop_raw_lines={rawCrop.Length} crop_headers={cropHeaders} "+
                 $"crop_cancels={cropCancels} crop_examines={cropExamines} "+
-                $"crop_cancel_y={(cancelTops.Length>0?cancelTops:"none")} image_phase=AFTER_RIGHT_CLICK";
+                $"crop_examine_prefixes={examinePrefixes} "+
+                $"crop_cancel_y={(cancelTops.Length>0?cancelTops:"none")} "+
+                $"crop_above_cancel_ys={(footerRows.Length>0?footerRows:"none")} image_phase=AFTER_RIGHT_CLICK";
             if(diagnostic!=lastContextDiagnostic)
             {
                 lastContextDiagnostic=diagnostic;
@@ -657,6 +668,31 @@ internal sealed class VisualStartup:IDisposable
                 lowerEdgeParsed.Exact("Cancel") is null||
                 lowerEdgeRead.Any(l=>l.Kind!=VisualLabelKind.ContextMenuLine))
                 throw new InvalidOperationException("Bottom-edge menu OCR must retain Examine and Cancel without inventing entries");
+            // The slot-22 footer was recognized four times, but its
+            // Examine line remained unreadable. Exercise a separate 5x
+            // native-pixel OCR strip with text that extends beyond the
+            // previous 955px right edge of the tight context crop.
+            using var farRightRows=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(farRightRows))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Examine Logs",font,Brushes.White,850,552);
+                g.DrawString("Cancel",font,Brushes.White,850,572);
+            }
+            var farRightCancel=new Rectangle(850,576,75,14);
+            var footerContrast=await ContextMenuOcr.ReadFooterRows(
+                farRightRows,engine,new Point(860,508),farRightCancel,contrast:true);
+            var footerOriginal=await ContextMenuOcr.ReadFooterRows(
+                farRightRows,engine,new Point(860,508),farRightCancel,contrast:false);
+            bool FooterHasBoth(IReadOnlyList<VisualLabel> found)=>
+                found.Any(l=>l.Text.Trim().Equals("Examine Logs",StringComparison.OrdinalIgnoreCase))&&
+                found.Any(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
+            if(!FooterHasBoth(footerContrast)&&!FooterHasBoth(footerOriginal))
+                throw new InvalidOperationException("Right-edge footer OCR must independently read Examine and Cancel pixels");
+            if(ExecutionUi.Menu(footerContrast) is not null||
+                ExecutionUi.Menu(footerOriginal) is not null)
+                throw new InvalidOperationException("Examine and Cancel alone cannot invent a missing menu header");
             using var cornerWithoutHeader=new Bitmap(bottomRightMenu);
             using(var g=Graphics.FromImage(cornerWithoutHeader))
                 g.FillRectangle(Brushes.Black,new Rectangle(745,370,225,35));

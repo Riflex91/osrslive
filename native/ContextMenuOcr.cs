@@ -41,6 +41,35 @@ internal static class ContextMenuOcr
             y,width,height);
     }
 
+    // The last inventory row can put both Examine and Cancel next to the
+    // 600px bottom edge. The broader 400x430 crop has too much inventory
+    // clutter, while the existing tight crop clips text on its right side.
+    // Position a final narrow OCR strip using an ACTUALLY OCR-read Cancel.
+    internal static Rectangle FooterRegion(Point anchor,Size size,Rectangle cancel)
+    {
+        const int width=320,height=160;
+        if(size.Width<width||size.Height<height||anchor.X<0||anchor.Y<0||
+            anchor.X>=size.Width||anchor.Y>=size.Height||cancel.IsEmpty||
+            !new Rectangle(Point.Empty,size).Contains(cancel)||
+            Math.Abs(cancel.Left-anchor.X)>130||
+            cancel.Top<anchor.Y-200||cancel.Top>anchor.Y+200)
+            return Rectangle.Empty;
+        return new Rectangle(
+            Math.Clamp(Math.Min(anchor.X-135,cancel.Left-28),0,size.Width-width),
+            Math.Clamp(cancel.Top-135,0,size.Height-height),width,height);
+    }
+
+    // Exposed for the Windows OCR fixture: this is only raw visual evidence,
+    // never an executable menu until Verify independently validates it.
+    internal static Task<List<VisualLabel>> ReadFooterRows(
+        Bitmap image,OcrEngine engine,Point anchor,Rectangle cancel,bool contrast)
+    {
+        var region=FooterRegion(anchor,image.Size,cancel);
+        if(image.Size!=DockedWindowLayout.GameSize||region.IsEmpty)
+            return Task.FromResult(new List<VisualLabel>());
+        return ReadRegion(image,engine,region,5,contrast,nearest:true);
+    }
+
     internal static async Task<IReadOnlyList<VisualLabel>> Read(
         Bitmap image,OcrEngine engine,Point anchor)
     {
@@ -75,6 +104,19 @@ internal static class ContextMenuOcr
                 {
                     var labels=await ReadRegion(image,engine,tight,4,
                         contrast:pass==0,nearest:true);
+                    diagnosticCandidates.AddRange(labels.Select(l=>
+                        l with{Kind=VisualLabelKind.ContextMenuCandidate}));
+                    if(await Verify(image,engine,anchor,labels,requireExamine:true)
+                        is { } menu)return menu;
+                }
+            if(observedCancel is Rectangle cancel&&
+                !FooterRegion(anchor,image.Size,cancel).IsEmpty)
+                for(int pass=0;pass<2;pass++)
+                {
+                    // The final pass isolates the real footer and complete
+                    // right-hand menu text; no action is inferred from Cancel.
+                    var labels=await ReadFooterRows(image,engine,anchor,cancel,
+                        contrast:pass==0);
                     diagnosticCandidates.AddRange(labels.Select(l=>
                         l with{Kind=VisualLabelKind.ContextMenuCandidate}));
                     if(await Verify(image,engine,anchor,labels,requireExamine:true)
@@ -271,6 +313,18 @@ internal static class ContextMenuOcr
             !nearBottom.Contains(new Point(860,508))||
             nearBottom.Bottom!=size.Height)
             throw new Exception("Bottom-row focused OCR must include a visibly observed Cancel and its menu header");
+        var footerStrip=FooterRegion(new Point(860,508),size,footer);
+        if(footerStrip.IsEmpty||footerStrip.Right!=size.Width||
+            footerStrip.Bottom!=size.Height||
+            !footerStrip.Contains(footer)||
+            !footerStrip.Contains(new Rectangle(785,555,120,15))||
+            !footerStrip.Contains(new Rectangle(785,476,95,14))||
+            !footerStrip.Contains(new Point(860,508)))
+            throw new Exception("Bottom-edge menu footer OCR must include complete right-side text and clicked anchor");
+        if(FooterRegion(new Point(860,508),size,new Rectangle(0,584,58,12))!=Rectangle.Empty||
+            FooterRegion(new Point(860,508),size,new Rectangle(785,599,58,12))!=Rectangle.Empty||
+            FooterRegion(new Point(-1,508),size,footer)!=Rectangle.Empty)
+            throw new Exception("Unrelated, out-of-frame or invalid Cancel cannot authorize a footer OCR pass");
         if(TightRegion(new Point(860,508),size,new Rectangle(0,584,58,12))!=
             TightRegion(new Point(860,508),size)||
             TightRegion(new Point(860,508),size,new Rectangle(785,599,58,12))!=
