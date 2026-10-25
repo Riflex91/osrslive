@@ -13,6 +13,11 @@ internal static class ItemKnowledgeStoreTests
         string path=Path.Combine(directory,"items.sqlite");
         var now=DateTimeOffset.UtcNow;
         var slot=new ObservedSlot(0,ExecutionUi.InventorySlot(0),1,false,17,2,new string('A',64));
+        Require(ItemKnowledgeStore.ReferenceRefreshRequired(1,now,now)&&
+            !ItemKnowledgeStore.ReferenceRefreshRequired(1000,now,now)&&
+            ItemKnowledgeStore.ReferenceRefreshRequired(1000,now.AddHours(1),now)&&
+            ItemKnowledgeStore.ReferenceRefreshRequired(1000,now.AddDays(-8),now),
+            "partial, future-dated and stale Wiki catalogues cannot skip a refresh");
         ItemMenuEvidence Evidence(string name,ObservedSlot? s=null)
         {
             var observed=s??slot;
@@ -23,7 +28,8 @@ internal static class ItemKnowledgeStoreTests
         }
         try
         {
-            using(var store=new ItemKnowledgeStore(path))
+            var sessionReports=new List<string>();
+            using(var store=new ItemKnowledgeStore(path,sessionReports.Add))
             {
                 Require(store.Recognize(slot,now) is null,"unknown image is never guessed from a catalogue");
                 store.Learn(new[]{Evidence("coins")},now);
@@ -54,9 +60,15 @@ internal static class ItemKnowledgeStoreTests
                 Require(store.Recognize(slot,now) is null,"session reset removes recognition authorization");
                 store.Learn(new[]{Evidence("bi9 bones")},now);
                 Require(store.Recognize(slot,now) is null,"unverified OCR spelling cannot become a reusable item identity");
+                store.Learn(new[]{Evidence("bi9 bones")},now.AddMilliseconds(100));
+                Require(sessionReports.Count(m=>m.StartsWith("ITEM_NAME_UNVERIFIED",StringComparison.Ordinal))==1,
+                    "repeated unverified identity is reported only once per session");
                 store.Learn(new[]{Evidence("logs")},now);
                 Require(store.Recognize(slot,now)?.Name=="logs","a later directly observed canonical name can replace an untrusted spelling");
                 store.ResetSession();
+                store.Learn(new[]{Evidence("bi9 bones")},now);
+                Require(sessionReports.Count(m=>m.StartsWith("ITEM_NAME_UNVERIFIED",StringComparison.Ordinal))==2,
+                    "new session can report an independently observed unverified identity again");
                 store.Learn(new[]{Evidence("logs")},now);
             }
             using(var reopened=new ItemKnowledgeStore(path))

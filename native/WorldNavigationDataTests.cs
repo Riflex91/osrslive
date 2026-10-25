@@ -34,6 +34,8 @@ internal static class WorldNavigationDataTests
                     new(Array.Empty<ObservedSlot>(),0,new(minimap.ToBytes(".png"),new(830,10,150,150),10)));
                 var found=navigator.Locate(frame);
                 if(found is null||found.Tile.Distance(tile)>1)throw new Exception("Automatic map localisation failed for rotation/zoom: "+variant+" found="+found?.Tile);
+                if(navigator.LocateDetailed(frame).Status!="VERIFIED")
+                    throw new Exception("Navigation diagnostics must distinguish an accepted map match");
                 Console.WriteLine($"REFERENCE MATCH PASS: rotation={variant.Angle} scale={variant.Scale} world={found.Tile} inliers={found.Inliers}");
                 if(variant.Angle==0)
                 {
@@ -48,26 +50,65 @@ internal static class WorldNavigationDataTests
                     var map=HudVision.Minimap(fixture);
                     if(map is null||Math.Abs(map.Value.Left-830)>5||Math.Abs(map.Value.Top-10)>5)
                         throw new Exception("Automatic circular HUD detection failed: "+map);
+                    var hud=new VisualLabel("NATIVE_GAME_HUD",new Rectangle(0,575,517,25),VisualLabelKind.GameHud);
+                    if(ExecutionVision.Read(fixture,new[]{hud})?.Navigation?.MapBounds!=map||
+                        ExecutionVision.Read(fixture,Array.Empty<VisualLabel>())?.Navigation is not null)
+                        throw new Exception("A missing minimap OCR label is restored only with native HUD plus a unique pixel-verified circle");
                     Console.WriteLine("AUTOMATIC HUD PASS: minimap circle plus central player marker; no manual calibration");
                     var driver=new StationaryDriver(frame);
                     var result=await new TravelRoutine(new(driver),navigator,10,wait:(_,_)=>Task.CompletedTask).Run("Grand Exchange",timeout.Token);
                     if(result.Status==RoutineStatus.Completed||driver.Walks!=1)throw new Exception("Unmoved character was reported as arrived or clicked repeatedly");
                     Console.WriteLine("UNMOVED CHARACTER PASS: one waypoint click; no arrival receipt and no blind click loop");
+                    var lost=frame with{Pixels=frame.Pixels! with{Navigation=null,Hitpoints=10}};
+                    var recovering=new RecoveringDriver(lost,frame,restoreAfter:2);
+                    var passive=await new TravelRoutine(new(recovering),navigator,10,minimumPercent:1,
+                        wait:(_,_)=>Task.CompletedTask).Run("Grand Exchange",timeout.Token);
+                    if(passive.Status==RoutineStatus.Completed||recovering.Walks!=1||recovering.Observations<3)
+                        throw new Exception("Transient missing minimap must be re-observed before one verified route click");
+                    var missing=new RecoveringDriver(lost,frame,restoreAfter:int.MaxValue);
+                    var reports=new List<string>();
+                    var blocked=await new TravelRoutine(new(missing),navigator,10,reports.Add,minimumPercent:1,
+                        wait:(_,_)=>Task.CompletedTask).Run("Grand Exchange",timeout.Token);
+                    if(blocked.Reason!="AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT"||missing.Walks!=0||
+                        !reports.Any(s=>s.Contains("MINIMAP_NOT_IDENTIFIED",StringComparison.Ordinal)))
+                        throw new Exception("Persistently absent minimap must block without any click and report the actual reason");
                 }
             }
             using var blank=new Cv.Mat(150,150,Cv.MatType.CV_8UC1,Cv.Scalar.Black);
             var unknown=new VisualFrame(new(1),new(0,0,1000,600),DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),
                 new(Array.Empty<ObservedSlot>(),0,new(blank.ToBytes(".png"),new(830,10,150,150),10)));
             if(navigator.Locate(unknown) is not null)throw new Exception("Black minimap produced a false position");
+            if(navigator.LocateDetailed(unknown).Status!="MINIMAP_FEATURES_INSUFFICIENT")
+                throw new Exception("Feature-poor minimap must be diagnosed without invented coordinates");
             var duplicate=new WorldMapData.ReferenceMap(1,reference.Image.Clone());data.References.Add(duplicate);
             using var crop=new Cv.Mat(reference.Image,new Cv.Rect((int)px-75,(int)py-75,150,150));
             var ambiguous=unknown with{Pixels=new(Array.Empty<ObservedSlot>(),0,new(crop.ToBytes(".png"),new(830,10,150,150),10))};
             if(navigator.Locate(ambiguous) is not null)throw new Exception("Ambiguous floors produced a false position");
+            if(navigator.LocateDetailed(ambiguous).Status!="MAP_MATCH_AMBIGUOUS")
+                throw new Exception("Ambiguous floors must expose an ambiguity reason without a position");
             data.References.Remove(duplicate);duplicate.Dispose();
             Console.WriteLine("AUTOMATIC NAVIGATION DATA PASS: pinned public assets, collision routes, upper-floor stairs, rotated/zoomed reference matching, unknown-map rejection. No live game actions tested.");
             return 0;
         }
         catch(Exception ex){Console.Error.WriteLine("AUTOMATIC NAVIGATION DATA FAIL: "+ex);return 1;}
+    }
+    private sealed class RecoveringDriver:IVisualGameDriver
+    {
+        private readonly VisualFrame missing,restored;
+        private readonly int restoreAfter;
+        public VisualFrame Current{get;private set;}
+        internal int Walks,Observations;
+        internal RecoveringDriver(VisualFrame missing,VisualFrame restored,int restoreAfter)
+        {this.missing=missing;this.restored=restored;this.restoreAfter=restoreAfter;Current=missing;}
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();Observations++;
+            Current=(Observations>=restoreAfter?restored:missing) with{
+                CapturedUtc=Current.CapturedUtc.AddSeconds(1)};
+            return Task.FromResult(Current);
+        }
+        public Task InputAsync(GameInput input,CancellationToken ct)
+        {ct.ThrowIfCancellationRequested();if(input.Kind==GameInputKind.LeftClick)Walks++;return Task.CompletedTask;}
     }
     private sealed class StationaryDriver:IVisualGameDriver
     {

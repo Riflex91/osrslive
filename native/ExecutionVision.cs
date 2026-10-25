@@ -29,6 +29,15 @@ internal static class ExecutionVision
         var maps=labels.Where(l=>l.Kind==VisualLabelKind.Minimap).ToArray();
         if(maps.Length==1)
             navigation=new(HudVision.Png(image,maps[0].Bounds),maps[0].Bounds,hitpoints);
+        else if(maps.Length==0&&labels.Any(l=>l.Kind==VisualLabelKind.GameHud)&&
+            HudVision.Minimap(image) is Rectangle verifiedMap)
+        {
+            // A focused inventory/menu OCR frame can preserve the native
+            // game HUD but omit the minimap label. Only the independently
+            // pixel-verified unique player-centred circle may restore it.
+            // Ambiguous/minimap-free frames still provide no coordinates.
+            navigation=new(HudVision.Png(image,verifiedMap),verifiedMap,hitpoints);
+        }
         // Diagnostic counts identify missing/ambiguous red pixels without
         // exposing image data, character names or guessed health values.
         int redIcons=hitpoints is null?HudVision.RedHealthIconCandidates(image).Count:0;

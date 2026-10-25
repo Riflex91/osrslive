@@ -13,6 +13,7 @@ internal sealed class ItemKnowledgeStore:IDisposable
     private readonly string path;
     private readonly Action<string> report;
     private readonly Dictionary<string,Identity> identities=new(StringComparer.Ordinal);
+    private readonly HashSet<string> unverifiedReported=new(StringComparer.Ordinal);
     private SqliteConnection? connection;
     private bool unavailable;
     private string session=Guid.NewGuid().ToString("N");
@@ -24,9 +25,11 @@ internal sealed class ItemKnowledgeStore:IDisposable
             .Concat(CombatPolicy.Food).Concat(CombatPolicy.Specs.SelectMany(s=>s.Weapons))
             .Concat(new[]{"coins","pure essence","bronze arrow","air rune","mind rune"}),StringComparer.OrdinalIgnoreCase);
     internal static readonly TimeSpan Lifetime=TimeSpan.FromMinutes(5);
+    internal static bool ReferenceRefreshRequired(int cachedNames,DateTimeOffset newest,DateTimeOffset now)=>
+        cachedNames<1000||newest>now||now-newest>=TimeSpan.FromDays(7);
     internal ItemKnowledgeStore(string path,Action<string>? report=null)
     {this.path=path;this.report=report??(_=>{});}
-    internal void ResetSession(){identities.Clear();session=Guid.NewGuid().ToString("N");}
+    internal void ResetSession(){identities.Clear();unverifiedReported.Clear();session=Guid.NewGuid().ToString("N");}
     internal async Task EnsureReference(CancellationToken ct)
     {
         if(referenceAttempted||unavailable)return;
@@ -34,6 +37,7 @@ internal sealed class ItemKnowledgeStore:IDisposable
         try
         {
             var db=Open();DateTimeOffset newest=default;
+            int cachedNames=0;
             using(var command=db.CreateCommand())
             {
                 command.CommandText="SELECT normalized_name,fetched_utc FROM reference_items";
@@ -41,11 +45,16 @@ internal sealed class ItemKnowledgeStore:IDisposable
                 while(reader.Read())
                 {
                     canonical.Add(reader.GetString(0));
+                    cachedNames++;
                     if(DateTimeOffset.TryParse(reader.GetString(1),out var time)&&time>newest)newest=time;
                 }
             }
             var now=DateTimeOffset.UtcNow;
-            if(newest<=now&&now-newest<TimeSpan.FromDays(7))return;
+            if(!ReferenceRefreshRequired(cachedNames,newest,now))
+            {
+                report($"ITEM_REFERENCE_READY names={cachedNames} source=CACHED_WIKI_MAPPING age_hours={(int)(now-newest).TotalHours}");
+                return;
+            }
             using var http=new HttpClient{Timeout=TimeSpan.FromSeconds(12)};
             http.DefaultRequestHeaders.UserAgent.ParseAdd("OSRS-Play/1.7.2 (+https://github.com/Riflex91/osrslive; item-name-reference)");
             using var response=await http.GetAsync("https://prices.runescape.wiki/api/v1/osrs/mapping",ct);
@@ -96,7 +105,11 @@ internal sealed class ItemKnowledgeStore:IDisposable
             if(identities.TryGetValue(key,out var prior)&&canonical.Contains(prior.Name)&&
                 (prior.Ambiguous||prior.Name!=e.Item.Name))identities[key]=prior with{Ambiguous=true};
             else identities[key]=new(e.Item.Name,now,Ambiguous:!canonical.Contains(e.Item.Name));
-            if(!canonical.Contains(e.Item.Name))report("ITEM_NAME_UNVERIFIED cache_authorized=false");
+            // The same pixel identity may be read in several activity cycles.
+            // Keep every observation, but report an untrusted OCR spelling
+            // only once per identity/spelling in this session.
+            if(!canonical.Contains(e.Item.Name)&&unverifiedReported.Add(key+":"+e.Item.Name))
+                report("ITEM_NAME_UNVERIFIED cache_authorized=false repeat_suppressed=true");
         }
         if(accepted.Length==0||unavailable)return;
         try
