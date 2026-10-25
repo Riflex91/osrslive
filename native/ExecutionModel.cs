@@ -4,7 +4,7 @@ namespace OSRSLiveDiagnostics;
 
 internal enum GameInputKind { Hover, LeftClick, RightClick, Escape, Text }
 internal sealed record GameInput(GameInputKind Kind,Rectangle Bounds,string? Text=null,bool Submit=true);
-internal sealed record ObservedSlot(int Index,Rectangle Bounds,ulong Signature,bool Empty,int? Quantity=null);
+internal sealed record ObservedSlot(int Index,Rectangle Bounds,ulong Signature,bool Empty,int? Quantity=null,ulong CoreSignature=0);
 internal sealed record InventoryItem(int Slot,string Name,int? Quantity,ulong Signature,Rectangle Bounds);
 internal sealed record InventoryState(IReadOnlyList<InventoryItem> Items,int EmptySlots,DateTimeOffset ObservedUtc)
 {
