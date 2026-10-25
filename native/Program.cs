@@ -818,6 +818,7 @@ internal static class SelfTest
             NativeWorldDigitReader.SelfTest();
             AccountGoalPlannerTests.Run();
             F2PProgressionTests.Run();
+            ActivitySchedulerTests.Run();
             ExecutionRoutinesTests.Run();
             CombatNavigationTests.Run();
             GameScreenReaderTests.Run();
