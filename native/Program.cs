@@ -804,6 +804,7 @@ internal static class SelfTest
                 throw new Exception("Copied report must include newest errors beyond preview/export limits");
             if(OfficialGameSessionGate.Readiness(null)!="OFFICIAL_PROTOCOL_ADAPTER_MISSING")
                 throw new Exception("Missing official game adapter must not allow bot");
+            BuildIdentity.SelfTest();
             OfficialWindowTransitionTests.Run();
             OfficialClientWindowHostTests.Run();
             OfficialStartupPolicyTests.Run();
