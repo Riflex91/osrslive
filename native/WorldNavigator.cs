@@ -19,6 +19,18 @@ internal sealed class WorldNavigator:IDisposable
     // minimap image or unverified coordinates. Navigation must fail closed.
     internal MapLocalization LocateDetailed(VisualFrame frame)
     {
+        var native=LocateAtSampling(frame,1);
+        // An ambiguous valid match must not become unique by trying another
+        // sampling. Only feature/match failures get one additional analysis.
+        if(native.Location is not null||native.Status is not ("NO_VERIFIED_MAP_MATCH" or "MINIMAP_FEATURES_INSUFFICIENT"))return native;
+        var enlarged=LocateAtSampling(frame,2);
+        return enlarged with{Features=Math.Max(native.Features,enlarged.Features),
+            BestInliers=Math.Max(native.BestInliers,enlarged.BestInliers),
+            BestRatioMatches=Math.Max(native.BestRatioMatches,enlarged.BestRatioMatches)};
+    }
+    internal MapLocalization LocateAtSampling(VisualFrame frame,int sampling)
+    {
+        if(sampling is not (1 or 2))throw new ArgumentOutOfRangeException(nameof(sampling));
         if(Data is null)return new(null,"REFERENCE_MAP_NOT_READY");
         if(frame.Pixels?.Navigation is not NavigationPixels pixels)return new(null,"MINIMAP_NOT_IDENTIFIED");
         if(pixels.MinimapPng.Length==0)return new(null,"MINIMAP_IMAGE_INVALID");
@@ -28,8 +40,11 @@ internal sealed class WorldNavigator:IDisposable
         using var mask=new Cv.Mat(image.Size(),Cv.MatType.CV_8UC1,Cv.Scalar.Black);
         Cv.Cv2.Circle(mask,new(image.Width/2,image.Height/2),image.Width/2-10,Cv.Scalar.White,-1);
         Cv.Cv2.Circle(mask,new(image.Width/2,image.Height/2),8,Cv.Scalar.Black,-1);
+        using var featureImage=new Cv.Mat();using var featureMask=new Cv.Mat();
+        Cv.Cv2.Resize(image,featureImage,new(image.Width*sampling,image.Height*sampling),interpolation:Cv.InterpolationFlags.Linear);
+        Cv.Cv2.Resize(mask,featureMask,featureImage.Size(),interpolation:Cv.InterpolationFlags.Nearest);
         using var sift=Cv.Features2D.SIFT.Create(500,contrastThreshold:.01);
-        using var descriptors=new Cv.Mat();sift.DetectAndCompute(image,mask,out var points,descriptors);
+        using var descriptors=new Cv.Mat();sift.DetectAndCompute(featureImage,featureMask,out var points,descriptors);
         if(points.Length<8||descriptors.Empty())return new(null,"MINIMAP_FEATURES_INSUFFICIENT",points.Length);
         var candidates=new List<MapLocation>();
         int bestInliers=0,bestPairs=0;
@@ -41,7 +56,10 @@ internal sealed class WorldNavigator:IDisposable
                 .Where(p=>p.Length==2&&p[0].Distance<.65*p[1].Distance).Select(p=>p[0]).ToArray();
             bestPairs=Math.Max(bestPairs,pairs.Length);
             if(pairs.Length<8)continue;
-            var from=pairs.Select(p=>points[p.QueryIdx].Pt).ToArray();var to=pairs.Select(p=>reference.Points[p.TrainIdx].Pt).ToArray();
+            // Fit in original screenshot pixels, preserving native spread,
+            // reprojection, click coordinates and the independent edge test.
+            var from=pairs.Select(p=>new Cv.Point2f(points[p.QueryIdx].Pt.X/sampling,points[p.QueryIdx].Pt.Y/sampling)).ToArray();
+            var to=pairs.Select(p=>reference.Points[p.TrainIdx].Pt).ToArray();
             using var input=Cv.InputArray.Create(from);using var output=Cv.InputArray.Create(to);using var inliers=new Cv.Mat();
             using var affine=Cv.Cv2.EstimateAffinePartial2D(input,output,inliers,Cv.RobustEstimationAlgorithms.RANSAC,2,3000,.995,20);
             if(affine is null||affine.Empty())continue;

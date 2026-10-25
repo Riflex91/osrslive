@@ -39,6 +39,15 @@ internal static class WorldNavigationDataTests
                 if(navigator.LocateDetailed(frame).BestRatioMatches<8)
                     throw new Exception("Confirmed matches must also report the initial feature-pair evidence");
                 Console.WriteLine($"REFERENCE MATCH PASS: rotation={variant.Angle} scale={variant.Scale} world={found.Tile} inliers={found.Inliers}");
+                var sampled=navigator.LocateAtSampling(frame,2);
+                var enlarged=sampled.Location;
+                if((variant.Angle==0&&enlarged is null)||enlarged is not null&&
+                    (enlarged.Tile.Distance(tile)>1||enlarged.MapBounds!=found.MapBounds||
+                    enlarged.ClickFor(new(tile.X+4,tile.Y)) is not Point enlargedClick||
+                    found.ClickFor(new(tile.X+4,tile.Y)) is not Point nativeClick||
+                    Math.Abs(enlargedClick.X-nativeClick.X)>2||Math.Abs(enlargedClick.Y-nativeClick.Y)>2))
+                    throw new Exception("Upsampled feature extraction changed world/click coordinates or failed the native edge check.");
+                Console.WriteLine($"UPSAMPLED FEATURE CHECK: rotation={variant.Angle} status={sampled.Status} native_success_preserved=true");
                 if(variant.Angle==0)
                 {
                     using var memory=new MemoryStream(minimap.ToBytes(".png"));using var patch=new Bitmap(memory);
@@ -80,6 +89,8 @@ internal static class WorldNavigationDataTests
             var unknown=new VisualFrame(new(1),new(0,0,1000,600),DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),
                 new(Array.Empty<ObservedSlot>(),0,new(blank.ToBytes(".png"),new(830,10,150,150),10)));
             if(navigator.Locate(unknown) is not null)throw new Exception("Black minimap produced a false position");
+            if(navigator.LocateAtSampling(unknown,2).Location is not null)
+                throw new Exception("Upsampling a blank minimap cannot create a world position");
             if(navigator.LocateDetailed(unknown).Status!="MINIMAP_FEATURES_INSUFFICIENT")
                 throw new Exception("Feature-poor minimap must be diagnosed without invented coordinates");
             var duplicate=new WorldMapData.ReferenceMap(1,reference.Image.Clone());data.References.Add(duplicate);

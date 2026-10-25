@@ -1,52 +1,36 @@
 # Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.7.2
 
-Stand: 25.10.2026, letzter ausgewerteter Windows-Live-Test: `Eingefügter Text(20261025-202434).txt`, Build `462b9444ebd20ab2a9ee25df5ae565d73da62fc9` aus PR #26 (CI-Lauf `40230287323`). Die Bezeichnungen **bestätigt**, **vermutet** und **nicht geprüft** trennen Log-Beweise von Annahmen. Diese Liste ist kein Nachweis für einen abgeschlossenen autonomen Spielablauf.
+Stand: 25.10.2026, ausgewertete Live-Tests bis 22:13 Uhr, lokaler Testlauf `live-calibration-recovery-15` auf Basis von `main` nach PR #26. Alle Zeiten sind lokale Windows-Zeiten. Implementierung und Belege: [Live-Recovery und Zoom](LIVE-RECOVERY-UND-ZOOM-2026-10-25.md).
 
-## Zuletzt beobachteter Status
+## Bestätigter Fortschritt
 
-- Der offizielle Jagex Launcher und `osclient.exe` starteten, der visuelle Spieleinstieg gelang. 24/24 Skillwerte und Gesamtlevel 131 wurden konsistent erkannt; serverseitige Authentifizierung ist damit nicht bewiesen.
-- Das Log enthält **90 Ereignisse, 2 Warnungen, 0 Fehler**, keinen Pufferüberlauf und rund 320 MiB Arbeitsspeicher.
-- Der Aufgabenplaner schlug `RANGED_CHICKENS` vor. Es erfolgte **kein** bestätigter autonomer Wegschritt, weil die Minimap-Zoomprüfung vorher blockierte.
-- Build, Selbsttests, OCR-, Navigations- und Hintergrundtransporttests liefen auf Windows-CI `40230287323` erfolgreich. Das garantiert keine vollständige Eingabewirkung unter allen realen Spielbildschirmen.
+- Welt 399 und Spieleinstieg wurden unabhängig visuell bestätigt; 24/24 Skillwerte und Gesamtlevel 131 wurden gelesen.
+- Die zuvor blockierte Zoomprüfung erreichte um 22:10:07 erstmals `MINIMAP_FULLY_ZOOMED_OUT_VISUALLY_CONFIRMED`: ein echter Skalenwechsel von 0,6486 mit 24 Inliern, danach zwei Anschlagsmessungen von ungefähr 1,0 mit 83 bzw. 88 Inliern.
+- Die Inventarrunde wurde um 22:11:32 abgeschlossen: 17 frisch untersuchte Items, 11 leere Plätze, etwa 84 Sekunden. Einzelne OCR-Schreibweisen bleiben korrekt von der Cache-Freigabe ausgeschlossen.
+- Der bisher unbekannte echte Disconnect-Dialog wurde erkannt. Ein automatischer, frisch bestätigter Retry-Klick erreichte die Play-Now-Seite. Zwischenzustände beenden die Wiederverbindung nicht mehr fälschlich als erfolgreichen Spielbeitritt.
 
-## Offene Fehler (nach Priorität)
+## P0 – Weltlokalisierung und autonome Bewegung bleiben offen
 
-### P0 – Zoom-Kalibrierung stoppt bei ungültigem Frame nach Mausradimpuls
+**Bestätigt:** Nach erfolgreicher Zoom- und Inventarprüfung um 22:11:36: `NAVIGATION_LOCALIZATION_NO_VERIFIED_MAP_MATCH features=120 candidates=0 inliers=0 best_ratio_matches=0 phase=initial no_input=true`. Eine spätere Wiederholung bei gedrehter Kamera blieb ebenfalls ohne Match. Ergebnis: `AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT`, keine Bewegungsfreigabe.
 
-- **Bestätigt:** Nach `MINIMAP_ZOOM_WheelDown_REQUESTED` um 21:24:01.326 meldete die Spielbeobachtung um 21:24:02.285 `navigation_available=False`. Darauf folgte um 21:24:02.897 `MINIMAP_ZOOM_POST_SCROLL_FRAME_NOT_VERIFIED`, nach nur einer Abwärtsstufe und **ohne** `[MINIMAP_ZOOM] STEP`-Skalenmessung.
-- **Auswirkung:** Kalibrierung und anschließende automatische Navigation bleiben gesperrt. Dies ist ein sicheres Stoppen, aber verhindert einen produktiven Durchlauf.
-- **Ursache unklar:** Ein neues Bild kann vorübergehend die Minimap/HUD-Evidenz verlieren, die Fenstergeometrie wechseln oder die Frischebedingung verletzen. Der aktuelle Grundcode unterscheidet diese Fälle noch nicht im Log. Die zuvor ergänzte passive Wiederholung greift derzeit bei schwacher SIFT-Geometrie, **nicht** bei einem schon als unbrauchbar abgewiesenen Nach-Scroll-Frame.
-- **Nächste Korrektur:** Fehlende Minimap, HUD-/Spielstatus, Fenster-/Größenwechsel und Zeitstempel separat protokollieren; bei einer vorübergehenden unbrauchbaren Aufnahme maximal wenige neue **passive** Frames abwarten. Keinen weiteren Mausradimpuls senden, bis der Zustand geklärt ist. Nach wie vor niemals Navigation aufgrund eines unbestätigten Kartenbildes freigeben.
-- **Reproduktion:** Offiziellen Client per OSRS Play starten, visuelle Skill-Bestätigung abwarten, erster Zoom-Schritt in der eingebetteten 1000×600-Spielansicht. Der Fehler trat im genannten Lauf auf und ist nicht bei jedem vorherigen Lauf identisch aufgetreten.
+**Zusätzlicher Code, noch kein Live-Bewegungsnachweis:** Bei fehlendem nativen Match kann die Merkmalsextraktion einmal gleichmäßig vergrößert wiederholt werden. Die transformierten Punkte werden in ursprünglichen Koordinaten geprüft. Vorhandene gültige native Matches bleiben erhalten, mehrdeutige Matches werden nicht durch einen zweiten Versuch überstimmt. Die Referenztests bestätigen Geometrie, Routing und Klickkoordinaten; die Zuverlässigkeit am echten Client ist damit nicht bewiesen.
 
-### P1 – Weltanzeige wird gelegentlich nicht per OCR verifiziert
+**Nächster Lokalisierungsweg:** Die große Weltkarte wurde im offiziellen Client geöffnet und zeigt den Spielermarker sowie größere Geländeabschnitte. Automatisches Öffnen/Schließen, Bildbereichserkennung, eindeutige Spielerzuordnung und die unabhängig bestätigte Übergabe an den Routenplaner fehlen noch. Die optische Ähnlichkeit zu den Referenzkacheln ist ein Hinweis, kein numerischer Positionsbeleg.
 
-- **Bestätigt:** Um 21:23:50.343: `[VISUAL_STARTUP] WORLD_FOOTER_OCR | world_candidates=0 switch_marker=False`; Zustand `WORLD_LABEL_NOT_RECOGNIZED`.
-- **Auswirkung:** Die F2P-Pingliste empfahl Welt **553** mit 6,5 ms, doch die tatsächliche Anwendung dieser Empfehlung im Spiel ist durch diesen OCR-Schritt **nicht** nachgewiesen. Der anschließende Spieleinstieg gelang trotzdem; diese Warnung blockierte den Ablauf in dem Lauf nicht dauerhaft.
-- **Nächste Korrektur:** Der vorhandene visuelle Weltseiten-Leser soll bei unlesbarer Fußzeile einen begrenzten frischen Screenshot abwarten und die Bestätigung klar von der bloßen Pingempfehlung trennen. Unbestätigte Weltwahl nicht als erfolgreich gemeldet oder für nachfolgende weltabhängige Aktionen vorausgesetzt werden.
+Die bisherigen Navigationsfixtures stammen aus der Referenzkarte selbst. Sie können einen Darstellungsunterschied zwischen echter Minimap und Referenzkarte nicht ausschließen. Kartentreffer und Bewegung dürfen deshalb weiterhin nur aus tatsächlichen Live-Belegen freigegeben werden.
 
-### P1 – Weltposition und vollständige autonome Navigation nicht live bestätigt
+## P1 – Vollständige Aktionsketten und F2P-Maxing nicht bestätigt
 
-- **Zuletzt früher belegt:** Ein vorausgegangener Live-Test meldete `NAVIGATION_LOCALIZATION_NO_VERIFIED_MAP_MATCH features=214 candidates=0 inliers=0`. Obwohl ein Minimap-Ausschnitt erkannt wurde, fehlte ein eindeutiger Kartenmatch.
-- **Aktueller Stand:** In diesem neuesten Log **nicht erneut getestet**, weil die Zoom-Vorprüfung vorher stoppte. Die erfolgreiche automatische Minimap-Verkleinerung nach manuellem Hineinzoomen wurde in einem früheren Kontrolltest anhand von `scale=0.8753`, `0.8536`, `0.8381` im echten OSRS-Client beobachtet. Das bestätigt weder den endgültigen Zoomanschlag noch eine Weltkoordinate.
-- **Nächster Schritt:** Erst nach `MINIMAP_FULLY_ZOOMED_OUT_VISUALLY_CONFIRMED` die Kartenlokalisierung erneut prüfen; Weltposition nur bei ausreichenden Merkmalen/Inliern und eindeutiger Referenz übernehmen.
+Reise, Bank/GE, Kampf, Sammeln, Produktion und Fortschritt über längere Zeit sind noch nicht durchgehend autonom live bestätigt. Eine vollständige Inventarrunde und ein Aufgaben-Vorschlag sind kein Nachweis für Trainingserfolg oder Level 99.
 
-### P2 – Volle Spielaktionen-/Inventar-Kette noch nicht Ende zu Ende verifiziert
+Nach verifizierter Weltposition muss zunächst ein kurzer Weg mit neuer Positionsbestätigung funktionieren; anschließend ein einzelner Sammel-/Produktionsvorgang mit echtem Inventar- oder XP-Beleg. Journale und Schutzregeln für unklare Ergebnisse bleiben erforderlich.
 
-- **Historische Grenze, in diesem kurzen Start-Log nicht neu geprüft:** Inventar-Kontextmenüs, Erkennung von Inventaränderungen, Reise, Bank/GE und Kampf haben Selbsttests und einzelne Live-Beobachtungen, aber keinen durchgehend bestätigten autonomen Live-Durchlauf.
-- **Nächster Schritt:** Nach erfolgreicher Zoom-/Positionsprüfung erst die vorhandenen Einzelaktionen anhand frischer OCR-/Pixelbelege testen; Journale und Eingabesicherungen nicht aufweichen.
+## Behobene Startblockaden und verbleibende Beobachtung
 
-## Bewusste technische Grenzen (keine durch das Log bewiesenen Defekte)
+Die frühere harte Ablehnung schon einer fehlenden Nach-Scroll-Minimap wurde durch begrenzte passive Wiederholungen und getrennte Gründe ersetzt. Die Radius-Schwankung der Kreiserkennung wird durch identische, unskalierte Bildschirmbereiche abgefangen. Die widersprüchliche Zwölf-Matches-Vorbedingung für eine Zehn-/Elf-Inlier-Bestätigung ist entfernt. Native Weltziffern und zusätzliche Footer-OCR überwanden den beobachteten Footer-Block bei Welt 455.
 
-- Ein offiziell gerenderter Clientzustand mit bestätigten Skillwerten beweist **keine** serverseitige Authentifizierung.
-- `PostMessage`-Erfolg beweist nur die Zustellung an ein Windows-Fenster, nicht die Annahme einer Eingabe durch den Spielclient. Die Render-Child-Mausradroute wurde im Kontrolltest zwar visuell bestätigt, kann bei anderen Zuständen jedoch erneut geprüft werden müssen.
-- Verdeckte Fenster lassen sich beobachten; bei minimiertem Fenster pausiert die Aufnahme. Der globale Mauszeiger und der Fensterfokus werden für die Hintergrundroutine nicht verändert.
-- Die Version `1.7.2` und der Update-Check beziehen sich auf den offiziellen Release-Kanal; ein PR-Test-Build enthält zusätzliche Änderungen und wird separat anhand von `build_commit`/`build_run` identifiziert.
+Diese Änderungen wurden mit Regressionen und einzelnen Live-Läufen geprüft; sie garantieren keine beliebige Clientgeometrie oder dauerhaft fehlerfreie Erkennung. F8/Pause, native Geometrie, frische Aufnahmen und bestätigte Bildwirkung bleiben verbindlich. Ein zugestelltes Windows-Ereignis allein belegt keine ausgeführte Spielaktion.
 
-## Hinweise für nächste Logs
+## Hinweise für weitere Logs
 
-1. Den vollständigen kopierten Log mit `build_commit` und `build_run` aufbewahren, keine Zugangsdaten/Screenshots mit privaten Inhalten veröffentlichen.
-2. Auf `MINIMAP_ZOOM STEP` (Skalierung, Inlier, Matches, Aufnahme) und `MINIMAP_ZOOM RESULT` achten. Ein fehlender `STEP`-Eintrag bei einem `POST_SCROLL_FRAME_NOT_VERIFIED`-Block ist ein separater Aufnahme-/Erkennungsfehler.
-3. Erst nach bestätigtem Minimalzoom `NAVIGATION_LOCALIZATION...` auswerten und darauf prüfen, ob ein eindeutiger Ort gefunden wird. Ein Aufgaben-*Vorschlag* ist noch keine ausgeführte Spielaktion.
-
-Dokumentation der vorangegangenen Zoom-Tests und der Implementierung: [MINIMAP-ZOOM-UND-LOKALISIERUNG-2026-10-25.md](MINIMAP-ZOOM-UND-LOKALISIERUNG-2026-10-25.md).
+Vollständigen bereinigten Log mit `build_commit` und `build_run` aufbewahren. Zuerst `WORLD_VISUALLY_CONFIRMED` und `MINIMAP_ZOOM RESULT` prüfen, danach `INVENTORY_READ`, `NAVIGATION_LOCALIZATION...` und tatsächliche Fortschrittsbelege. Keine Zugangsdaten oder privaten Screenshots veröffentlichen. Die Versionsnummer 1.7.2 allein identifiziert keinen PR-Testbuild.

@@ -33,12 +33,15 @@ internal static class SkillsHoverPolicy
 
 internal static class WorldFooterPolicy
 {
-    internal static IReadOnlyList<VisualLabel> Read(IReadOnlyList<VisualLabel> labels,Size imageSize)
+    internal static VisualLabel? SwitchMarker(IReadOnlyList<VisualLabel> labels,Size imageSize)
     {
         var switches=labels.Where(l=>Regex.IsMatch(l.Text.Trim(),@"^Click\s*(?:to\s*)?switch$",RegexOptions.IgnoreCase)&&
             l.Bounds.Left<imageSize.Width/2&&l.Bounds.Top>imageSize.Height-85).ToArray();
-        if(switches.Length!=1)return Array.Empty<VisualLabel>();
-        var marker=switches[0];
+        return switches.Length==1?switches[0]:null;
+    }
+    internal static IReadOnlyList<VisualLabel> Read(IReadOnlyList<VisualLabel> labels,Size imageSize)
+    {
+        if(SwitchMarker(labels,imageSize) is not VisualLabel marker)return Array.Empty<VisualLabel>();
         var numbers=labels.Where(l=>Regex.IsMatch(l.Text.Trim(),@"^[3-8]\d{2}$")&&
             int.Parse(l.Text.Trim())<=800&&l.Bounds.Bottom<=marker.Bounds.Top+3&&
             marker.Bounds.Top-l.Bounds.Bottom<30&&l.Bounds.Left<marker.Bounds.Right&&l.Bounds.Right>marker.Bounds.Left).ToArray();
@@ -190,6 +193,8 @@ internal sealed class VisualStartup:IDisposable
     private Rectangle? pendingPlayBounds,pendingEnterBounds;
     private DateTimeOffset pendingPlayFrame,pendingEnterFrame;
     private string lastPostPlayDiagnostic="";
+    private string lastRecoveryOcrDiagnostic="";
+    private DateTimeOffset nextWorldFooterDiagnostic;
     private DateTimeOffset lastPostPlayDiagnosticAt=DateTimeOffset.MinValue;
     private WelcomePanelPixels lastWelcomePixels;
     private GameHudFooterPixels lastHudFooterPixels;
@@ -269,6 +274,20 @@ internal sealed class VisualStartup:IDisposable
         var observed=await Capture(target,owner,ct);
         if(observed is null)
         {SetState("CAPTURE_"+backgroundCapture.State);return;}
+        if(!ObserveOnly)
+        {
+            bool diagnoseFooter=DateTimeOffset.UtcNow>=nextWorldFooterDiagnostic;
+            observed=await WorldFooterRecovery.Reobserve(observed,preferredWorld,
+                token=>Capture(target,owner,token),ct,
+                diagnostic:message=>
+                {
+                    if(diagnoseFooter)
+                    {
+                        log.Add(Severity.INFO,"VISUAL_STARTUP","WORLD_FOOTER_REOBSERVING",message);
+                        nextWorldFooterDiagnostic=DateTimeOffset.UtcNow.AddSeconds(10);
+                    }
+                });
+        }
         observed=ConnectivityWatch.Signal(observed,networkLost);
         var visible=GameScreenReader.Read(observed);
         summaryIdentity.Observe(visible,observed.Labels);
@@ -301,7 +320,7 @@ internal sealed class VisualStartup:IDisposable
             }
             if(!recoveryDecision.ResumeLogin){SetState(recoveryDecision.State);return;}
         }
-        else if(lastRecoveryState.Length>0)
+        else if(lastRecoveryState.Length>0&&Game.LastObservation!.Stage==VisibleGameStage.InGame)
         {lastRecoveryState="";log.Add(Severity.INFO,"RECONNECT","RETURNED_TO_GAME","skills_and_character_must_be_reconfirmed=true");}
         if(Game.LastObservation?.Stage==VisibleGameStage.Connecting)
         {
@@ -414,6 +433,8 @@ internal sealed class VisualStartup:IDisposable
             }
             ResetPlayButton();
             observedSelectedWorld=preferredWorld;
+            log.Add(Severity.INFO,"VISUAL_STARTUP","WORLD_VISUALLY_CONFIRMED",
+                $"world={observedSelectedWorld} independent_footer_and_play_frames=2 ping_recommendation_only=false");
         }
         else ResetPlayButton();
         if(decision.State=="ENTER_GAME"&&decision.Click is Rectangle enterButton)
@@ -497,6 +518,12 @@ internal sealed class VisualStartup:IDisposable
                 $"inventory_active={InventoryTabPolicy.Active(captured.Image)} "+
                 "screenshot_persisted=false");
         var pixels=ExecutionVision.Read(captured.Image,labels);
+        if(GameScreenReader.Read(new(target,bounds,captured.CapturedUtc,labels)).Stage==VisibleGameStage.Unknown&&
+            PostPlayScreenReader.RecoveryDiagnostic!="not_read"&&lastRecoveryOcrDiagnostic!=PostPlayScreenReader.RecoveryDiagnostic)
+        {
+            lastRecoveryOcrDiagnostic=PostPlayScreenReader.RecoveryDiagnostic;
+            log.Add(Severity.INFO,"RECONNECT","FOCUSED_OCR_DIAGNOSTIC",lastRecoveryOcrDiagnostic);
+        }
         if(contextMenuAnchor is null&&pixels is not null&&labels.Any(l=>l.Kind==VisualLabelKind.GameHud))
         {
             string health=$"hp={CombatPolicy.Hitpoints(pixels)?.ToString()??"unknown"} "+
@@ -625,14 +652,6 @@ internal sealed class VisualStartup:IDisposable
                     labels.Add(new("Welcome",new Rectangle(300,20,400,35)));
             }
         }
-        // A separate enlarged footer pass avoids the tiny native bitmap font
-        // being merged with copyright text by full-frame OCR.
-        if(labels.Any(l=>l.Text.Contains("Welcome to Old School RuneScape",StringComparison.OrdinalIgnoreCase)))
-        {
-            labels.AddRange(await ReadWorldFooter(bitmap,engine));
-            if(WelcomePlayButtonReader.Read(bitmap,labels) is VisualLabel playButton)
-                labels.Add(playButton);
-        }
         var focusedWorlds=await WorldGridOcr.Read(bitmap,engine,labels);
         labels.AddRange(focusedWorlds.Count>0?focusedWorlds:WorldGridReader.Classify(labels));
         labels.AddRange(WorldPageReader.Read(bitmap,labels));
@@ -661,6 +680,21 @@ internal sealed class VisualStartup:IDisposable
                 labels.Add(focused);
             }
         labels=labels.Distinct().ToList();
+        if(!inventoryContext&&GameScreenReader.Read(new(IntPtr.Zero,
+            new Rectangle(Point.Empty,bitmap.Size),DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.Unknown)
+            foreach(var recovered in await PostPlayScreenReader.Read(bitmap,engine,labels,recovery:true))
+                if(!labels.Any(l=>l.Kind==recovered.Kind&&l.Text.Equals(recovered.Text,StringComparison.OrdinalIgnoreCase)&&
+                    l.Bounds.IntersectsWith(recovered.Bounds)))
+                    labels.Add(recovered);
+        // Run after focused recovery too: a newly recovered welcome anchor
+        // must get the same footer and pixel-backed Play verification as a
+        // welcome phrase recognized by the full-frame pass.
+        if(labels.Any(l=>l.Text.Contains("Welcome to Old School RuneScape",StringComparison.OrdinalIgnoreCase)))
+        {
+            labels.AddRange(await ReadWorldFooter(bitmap,engine));
+            if(WelcomePlayButtonReader.Read(bitmap,labels) is VisualLabel playButton)
+                labels.Add(playButton);
+        }
         // Native P12 chat glyphs remain usable without any OCR inference.
         if(NativeCharacterFontReader.Read(bitmap) is VisualLabel nativePrompt)
         {
@@ -690,15 +724,18 @@ internal sealed class VisualStartup:IDisposable
             labels.AddRange(await ContextMenuOcr.Read(bitmap,engine,anchor));
         return labels;
     }
-    private static async Task<IReadOnlyList<VisualLabel>> ReadWorldFooter(Bitmap bitmap,OcrEngine engine)
+    private static async Task<IReadOnlyList<VisualLabel>> ReadWorldFooter(Bitmap bitmap,OcrEngine engine,bool smooth=false)
     {
         var crop=new Rectangle(0,Math.Max(0,bitmap.Height-100),bitmap.Width/2,Math.Min(100,bitmap.Height));
+        using var cleaned=smooth?GameplayHudOcr.Contrast(bitmap,crop):null;
         using var enlarged=new Bitmap(crop.Width*4,crop.Height*4);
         using(var g=Graphics.FromImage(enlarged))
         {
-            g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            g.InterpolationMode=smooth?System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic:
+                System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode=System.Drawing.Drawing2D.PixelOffsetMode.Half;
-            g.DrawImage(bitmap,new Rectangle(Point.Empty,enlarged.Size),crop,GraphicsUnit.Pixel);
+            g.DrawImage(cleaned??bitmap,new Rectangle(Point.Empty,enlarged.Size),
+                cleaned is null?crop:new Rectangle(Point.Empty,crop.Size),GraphicsUnit.Pixel);
         }
         var result=await RecognizeRaw(enlarged,engine);
         var labels=new List<VisualLabel>();
@@ -714,7 +751,11 @@ internal sealed class VisualStartup:IDisposable
             if(match.Success)labels.Add(new("World "+match.Groups[1].Value,bounds));
         }
         labels.AddRange(WorldFooterPolicy.Read(mapped,bitmap.Size));
-        footerDiagnostic=$"world_candidates={labels.Count} switch_marker="+mapped.Any(l=>l.Text.Contains("switch",StringComparison.OrdinalIgnoreCase));
+        if(NativeWorldDigitReader.ReadFooter(bitmap,mapped) is VisualLabel nativeWorld)
+            labels.Add(nativeWorld);
+        footerDiagnostic=$"world_candidates={labels.Count} switch_marker="+mapped.Any(l=>l.Text.Contains("switch",StringComparison.OrdinalIgnoreCase))+
+            $" contrast={smooth}";
+        if(labels.Count==0&&!smooth)return await ReadWorldFooter(bitmap,engine,smooth:true);
         return labels;
     }
     internal static async Task<OcrResult> RecognizeRaw(Bitmap bitmap,OcrEngine engine)
@@ -765,6 +806,20 @@ internal sealed class VisualStartup:IDisposable
             var footer=await ReadWorldFooter(native,engine);
             if(!footer.Any(l=>l.Text=="World 397"))
                 throw new InvalidOperationException("Native footer OCR regression");
+            using var disconnect=new Bitmap(1000,600);
+            using(var graphics=Graphics.FromImage(disconnect))
+            using(var small=new Font("Segoe UI",10))
+            {
+                graphics.Clear(Color.FromArgb(37,48,25));
+                graphics.DrawString("You were disconnected from the server.",small,Brushes.Yellow,350,235);
+                graphics.DrawString("Try again",small,Brushes.White,450,305);
+            }
+            var recovery=await Recognize(disconnect,engine);
+            var recovering=await Recognize(disconnect,engine,postPlay:true);
+            if(GameScreenReader.Read(new(new IntPtr(5),new(0,0,1000,600),DateTimeOffset.UtcNow,recovery)).Stage!=VisibleGameStage.Disconnected||
+                recovery.Count(l=>l.Text.Equals("Try again",StringComparison.OrdinalIgnoreCase))!=1||
+                !SessionRecovery.Disconnected(recovering))
+                throw new InvalidOperationException("Focused disconnected-screen OCR regression");
             using var worldGrid=new Bitmap(1000,600);
             var gridLabels=new List<VisualLabel>{new("Select a world",new(20,5,100,15))};
             using(var g=Graphics.FromImage(worldGrid))

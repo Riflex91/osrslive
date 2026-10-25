@@ -4,13 +4,14 @@ using Windows.Media.Ocr;
 
 namespace OSRSLiveDiagnostics;
 
-// Second-pass OCR only after an independently verified Play Now action.
+// Focused OCR for post-Play prompts and unknown startup/recovery screens.
 // Deliberately returns a few known non-secret UI phrases, never raw OCR text,
 // account names, chat, tokens, or screenshots. A candidate phrase alone does
 // not authorize input: VisualStartupPolicy also requires a Welcome anchor and
 // the earlier verified world selection.
 internal static class PostPlayScreenReader
 {
+    internal static string RecoveryDiagnostic {get;private set;}="not_read";
     private static readonly Rectangle Region=new(180,100,640,415);
     private static readonly Regex ClickHere=new(
         @"^click\s+here\s+to\s+play\s*[!.]?$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant);
@@ -39,8 +40,11 @@ internal static class PostPlayScreenReader
                 continue;
             string line=Normalize(label.Text);
             string? known=ClickHere.IsMatch(line)?ClickText:
-                Welcome.IsMatch(line)?WelcomeText:
-                Connecting.IsMatch(line)?ConnectingText:null;
+                Welcome.IsMatch(line)?(line.Equals("Welcome to Old School RuneScape",StringComparison.OrdinalIgnoreCase)?
+                    "Welcome to Old School RuneScape":WelcomeText):
+                Connecting.IsMatch(line)?ConnectingText:
+                SessionRecovery.Disconnected(new[]{label with{Text=line}})?line:
+                line.Equals("Try again",StringComparison.OrdinalIgnoreCase)?"Try again":null;
             if(known is null)continue;
             output.Add(new(known,label.Bounds));
         }
@@ -50,11 +54,13 @@ internal static class PostPlayScreenReader
             output.RemoveAll(l=>l.Text==ClickText);
         if(output.Count(l=>l.Text==WelcomeText)>1)
             output.RemoveAll(l=>l.Text==WelcomeText);
+        if(output.Count(l=>l.Text=="Try again")>1)
+            output.RemoveAll(l=>l.Text=="Try again");
         return output;
     }
 
     internal static async Task<IReadOnlyList<VisualLabel>> Read(
-        Bitmap bitmap,OcrEngine engine,IReadOnlyList<VisualLabel> existing)
+        Bitmap bitmap,OcrEngine engine,IReadOnlyList<VisualLabel> existing,bool recovery=false,bool smooth=false)
     {
         if(bitmap.Size!=DockedWindowLayout.GameSize||
             existing.Any(l=>l.Text.Contains("password",StringComparison.OrdinalIgnoreCase)||
@@ -64,14 +70,17 @@ internal static class PostPlayScreenReader
             return Array.Empty<VisualLabel>();
         // Only this bounded region is enlarged. This avoids inventory, private
         // chat, account name and footer content being sent into this OCR pass.
-        int factor=(int)Math.Clamp((long)OcrEngine.MaxImageDimension/Region.Width,1L,3L);
-        using var enlarged=new Bitmap(Region.Width*factor,Region.Height*factor);
+        var region=recovery?new Rectangle(250,190,500,180):Region;
+        int factor=(int)Math.Clamp((long)OcrEngine.MaxImageDimension/region.Width,1L,smooth?4L:3L);
+        using var cleaned=recovery?GameplayHudOcr.Contrast(bitmap,region):null;
+        using var enlarged=new Bitmap(region.Width*factor,region.Height*factor);
         using(var g=Graphics.FromImage(enlarged))
         {
             g.Clear(Color.Black);
-            g.InterpolationMode=InterpolationMode.NearestNeighbor;
+            g.InterpolationMode=smooth?InterpolationMode.HighQualityBicubic:InterpolationMode.NearestNeighbor;
             g.PixelOffsetMode=PixelOffsetMode.Half;
-            g.DrawImage(bitmap,new Rectangle(Point.Empty,enlarged.Size),Region,GraphicsUnit.Pixel);
+            g.DrawImage(cleaned??bitmap,new Rectangle(Point.Empty,enlarged.Size),
+                cleaned is null?region:new Rectangle(Point.Empty,region.Size),GraphicsUnit.Pixel);
         }
         var result=await VisualStartup.RecognizeRaw(enlarged,engine);
         var candidates=new List<VisualLabel>();
@@ -79,15 +88,30 @@ internal static class PostPlayScreenReader
         {
             if(line.Words.Count==0)continue;
             var union=line.Words.Select(w=>new Rectangle(
-                Region.X+(int)Math.Floor(w.BoundingRect.X/factor),
-                Region.Y+(int)Math.Floor(w.BoundingRect.Y/factor),
+                region.X+(int)Math.Floor(w.BoundingRect.X/factor),
+                region.Y+(int)Math.Floor(w.BoundingRect.Y/factor),
                 (int)Math.Ceiling(w.BoundingRect.Width/factor),
                 (int)Math.Ceiling(w.BoundingRect.Height/factor))).Aggregate(Rectangle.Union);
             // Each phrase must occur within one OCR line, not through an
             // arbitrary combination of unrelated screen text.
             candidates.Add(new(string.Join(" ",line.Words.Select(w=>w.Text)),union));
         }
-        return MatchKnownPhrases(candidates,bitmap.Size);
+        var known=MatchKnownPhrases(candidates,bitmap.Size);
+        if(recovery)
+        {
+            string[] words=candidates.SelectMany(l=>Normalize(l.Text).Split(' ')).Select(w=>w.Trim('.','!')).ToArray();
+            RecoveryDiagnostic=$"lines={candidates.Count} known_phrases={known.Count} "+
+                $"disconnect_word={words.Any(w=>w.Equals("disconnected",StringComparison.OrdinalIgnoreCase))} "+
+                $"server_word={words.Any(w=>w.Equals("server",StringComparison.OrdinalIgnoreCase))} "+
+                $"you_word={words.Any(w=>w.Equals("You",StringComparison.OrdinalIgnoreCase))} "+
+                $"were_word={words.Any(w=>w.Equals("were",StringComparison.OrdinalIgnoreCase))} "+
+                $"from_word={words.Any(w=>w.Equals("from",StringComparison.OrdinalIgnoreCase))} "+
+                $"the_word={words.Any(w=>w.Equals("the",StringComparison.OrdinalIgnoreCase))} "+
+                $"retry_word={words.Any(w=>w.Equals("again",StringComparison.OrdinalIgnoreCase))} contrast=true smooth={smooth}";
+            if(!smooth&&!SessionRecovery.Disconnected(known))
+                return await Read(bitmap,engine,existing,recovery:true,smooth:true);
+        }
+        return known;
     }
 
     internal static void SelfTest()
@@ -114,6 +138,10 @@ internal static class PostPlayScreenReader
         if(MatchKnownPhrases(new[]{new VisualLabel("Click the link here to play",
             new Rectangle(400,270,220,20))},DockedWindowLayout.GameSize).Count!=0)
             throw new Exception("Post-play OCR fabricated a command from unrelated text.");
+        var recoveredWelcome=MatchKnownPhrases(new[]{new VisualLabel("Welcome to Old School RuneScape",
+            new Rectangle(350,200,300,15))},DockedWindowLayout.GameSize);
+        if(recoveredWelcome.SingleOrDefault()?.Text!="Welcome to Old School RuneScape")
+            throw new Exception("Focused first welcome must retain its full anchor for footer and Play verification.");
         Console.WriteLine("POST PLAY READER PASS: exact centered phrases, ambiguity/viewport/privacy guards");
     }
 }

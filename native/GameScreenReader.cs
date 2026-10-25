@@ -106,8 +106,8 @@ internal static class GameScreenReader
         {
             if(Has("Select a world"))return Result(VisibleGameStage.WorldSelection);
             if(Has("Connecting to server")||Has("Please wait"))return Result(VisibleGameStage.Connecting);
-            if(Has("CLICK HERE TO PLAY"))return Result(VisibleGameStage.Welcome);
-            if(Has("Play Now"))return Result(VisibleGameStage.Login);
+            if(Has("CLICK HERE TO PLAY")||labels.Any(l=>l.Kind==VisualLabelKind.EnterButton))return Result(VisibleGameStage.Welcome);
+            if(Has("Play Now")||labels.Any(l=>l.Kind==VisualLabelKind.PlayButton))return Result(VisibleGameStage.Login);
             return Result(VisibleGameStage.Unknown);
         }
         var focusedPrompts=labels.Where(l=>l.Kind==VisualLabelKind.CharacterPrompt).ToArray();
