@@ -812,6 +812,38 @@ internal sealed class VisualStartup:IDisposable
                     new Rectangle(0,0,1000,600),DateTimeOffset.UtcNow,focused25)).Stage!=VisibleGameStage.InGame||
                 focused25.Any(l=>l.Kind==VisualLabelKind.Minimap||l.Kind==VisualLabelKind.Hitpoints))
                 throw new InvalidOperationException("Verified inventory menu must use complete focused OCR and preserve native InGame evidence without inventing health");
+            // The live HUD can be independently verified while Hough returns
+            // no minimap. Read a red health icon + real OCR digits without
+            // turning it into navigation pixels or trusting the skill level.
+            using var healthWithoutMap=new Bitmap(nativeContext);
+            using(var g=Graphics.FromImage(healthWithoutMap))
+            using(var font=new Font("Segoe UI",18))
+            {
+                g.DrawString("24",font,Brushes.White,715,70);
+                g.FillEllipse(Brushes.Red,770,82,20,18);
+            }
+            if(HudVision.Minimap(healthWithoutMap) is not null)
+                throw new InvalidOperationException("Standalone health fixture unexpectedly has a minimap");
+            var redHealth=await ExecutionVision.ReadHealth(healthWithoutMap,engine,
+                Array.Empty<VisualLabel>());
+            var independentHp=ExecutionVision.Read(healthWithoutMap,redHealth);
+            if(redHealth.Count(l=>l.Kind==VisualLabelKind.Hitpoints)!=1||
+                redHealth.Single(l=>l.Kind==VisualLabelKind.Hitpoints).Text!="24"||
+                independentHp?.Hitpoints!=24||independentHp.Navigation is not null)
+                throw new InvalidOperationException("Pixel-verified red health icon must independently OCR 24 without minimap navigation");
+            using var noHealthOrb=new Bitmap(healthWithoutMap);
+            using(var g=Graphics.FromImage(noHealthOrb))
+                g.FillRectangle(Brushes.Black,760,75,40,35);
+            var absentHeart=await ExecutionVision.ReadHealth(noHealthOrb,engine,
+                Array.Empty<VisualLabel>());
+            if(absentHeart.Any(l=>l.Kind==VisualLabelKind.Hitpoints))
+                throw new InvalidOperationException("Visible number alone without red orb must never become HP");
+            using var noHudForHp=new Bitmap(healthWithoutMap);
+            using(var g=Graphics.FromImage(noHudForHp))
+                g.FillRectangle(Brushes.Black,430,575,87,24);
+            if((await ExecutionVision.ReadHealth(noHudForHp,engine,Array.Empty<VisualLabel>()))
+                .Any(l=>l.Kind==VisualLabelKind.Hitpoints))
+                throw new InvalidOperationException("Unverified HUD must never authorize standalone health OCR");
             // Never activate the shortcut from just an Inventory plate or from
             // partial menu text. The original complete OCR path remains.
             using var missingHudFooter=new Bitmap(nativeContext);

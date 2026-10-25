@@ -68,6 +68,68 @@ internal static class HudVision
             }).ToArray();
         return UniquePixelVerifiedMinimap(image,candidates);
     }
+    // The native red hitpoints orb is independent of minimap localization.
+    // Collect actual connected red-pixel components in the upper-right HUD;
+    // never infer HP from a level, location, or a hard-coded numeric value.
+    // Ambiguous red icons are rejected instead of guessing an orb.
+    internal static IReadOnlyList<Rectangle> RedHealthIconCandidates(Bitmap image)
+    {
+        if(image.Size!=DockedWindowLayout.GameSize)return Array.Empty<Rectangle>();
+        var region=new Rectangle(700,30,150,125);
+        int width=region.Width,height=region.Height;
+        var red=new bool[width*height];
+        var seen=new bool[red.Length];
+        for(int y=0;y<height;y++)for(int x=0;x<width;x++)
+        {
+            var color=image.GetPixel(region.X+x,region.Y+y);
+            red[y*width+x]=color.R>120&&color.R>color.G*1.5&&
+                color.R>color.B*1.5;
+        }
+        var queue=new int[red.Length];
+        var found=new List<Rectangle>();
+        for(int i=0;i<red.Length;i++)
+        {
+            if(!red[i]||seen[i])continue;
+            int head=0,tail=1,n=0,minX=width,minY=height,maxX=0,maxY=0;
+            queue[0]=i;seen[i]=true;
+            while(head<tail)
+            {
+                int p=queue[head++],px=p%width,py=p/width;
+                n++;minX=Math.Min(minX,px);minY=Math.Min(minY,py);
+                maxX=Math.Max(maxX,px);maxY=Math.Max(maxY,py);
+                for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++)
+                {
+                    int xx=px+dx,yy=py+dy;
+                    if(xx<0||xx>=width||yy<0||yy>=height)continue;
+                    int next=yy*width+xx;
+                    if(!red[next]||seen[next])continue;
+                    seen[next]=true;queue[tail++]=next;
+                }
+            }
+            var box=new Rectangle(region.X+minX,region.Y+minY,
+                maxX-minX+1,maxY-minY+1);
+            if(n is >=12 and <=650&&box.Width is >=6 and <=44&&
+                box.Height is >=6 and <=44&&box.Left>=730&&box.Right<=838&&
+                box.Top>=50&&box.Bottom<=145)
+                found.Add(box);
+        }
+        return found;
+    }
+
+    // A unique red icon only proposes a crop LEFT of its actual pixels.
+    // It is not HP evidence until focused Windows OCR independently reads
+    // one or two digits from this crop and the icon is still red.
+    internal static Rectangle? StandaloneHealthNumber(Bitmap image)
+    {
+        var icons=RedHealthIconCandidates(image);
+        if(icons.Count!=1)return null;
+        var icon=icons[0];
+        var number=new Rectangle(icon.Left-54,
+            icon.Top+icon.Height/2-15,44,30);
+        return new Rectangle(Point.Empty,image.Size).Contains(number)&&
+            number.Right<icon.Left&&HeartRightOf(image,number)?number:null;
+    }
+
     internal static Rectangle? HealthNumber(Bitmap image,Rectangle map,IReadOnlyList<VisualLabel> labels)
     {
         var area=new Rectangle(Math.Max(700,map.Left-95),Math.Max(0,map.Top+8),105,75);

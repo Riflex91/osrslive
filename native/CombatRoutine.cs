@@ -86,7 +86,10 @@ internal sealed class CombatRoutine
         this.game=game;this.journal=journal;this.atlas=atlas;this.maxHp=maxHp;this.report=report??(_=>{});
         if(game.Driver is WindowVisualGameDriver driver)driver.Guard=_=>Check();
     }
-    private int? Hp=>game.Driver.Current.Pixels?.Navigation?.Hitpoints;
+    // Pixel-verified red health orb can be read without a Hough minimap;
+    // absent navigation still blocks map clicks and travel separately.
+    private int? Hp=>game.Driver.Current.Pixels?.Hitpoints??
+        game.Driver.Current.Pixels?.Navigation?.Hitpoints;
     private void Check()
     {
         if(CombatPolicy.Danger(game.Driver.Current.Labels))throw new RoutineBlockedException("COMBAT_DANGEROUS_SCREEN_STOPPED");
@@ -101,6 +104,8 @@ internal sealed class CombatRoutine
                     $"navigation_pixels={frame.Pixels?.Navigation is not null} "+
                     $"hp_ocr_marker={frame.Labels.Any(l=>l.Kind==VisualLabelKind.Hitpoints)} "+
                     $"hp_navigation_readable={frame.Pixels?.Navigation?.Hitpoints is not null} "+
+                    $"hp_standalone_readable={frame.Pixels?.Hitpoints is not null} "+
+                    $"heart_pixel_evidence={frame.Pixels?.HealthEvidence??"unavailable"} "+
                     $"native_hud_marker={frame.Labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
                     "screenshot_persisted=false no_combat_input=true");
             }
