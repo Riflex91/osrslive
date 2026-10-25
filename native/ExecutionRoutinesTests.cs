@@ -119,7 +119,7 @@ internal static class ExecutionRoutinesTests
             "unreadable context menu blocks after bounded observation without repeating click");
         var cancellable=new InventoryMenuDriver(menu,closes:true);
         var checkedInventory=await new GameInteractions(cancellable).Inventory(CancellationToken.None);
-        Require(checkedInventory.Items.Count==1&&checkedInventory.Items[0].Name=="Logs"&&
+        Require(checkedInventory.Items.Count==1&&checkedInventory.Items[0].Name=="logs"&&
             checkedInventory.EmptySlots==27&&
             cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
             cancellable.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==2&&
