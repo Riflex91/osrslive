@@ -100,9 +100,11 @@ internal static class ExecutionRoutinesTests
         bool blocked=false;
         try{await interactions.Choose(new(100,100,5,5),"Deposit-All Logs",CancellationToken.None);}
         catch(RoutineBlockedException){blocked=true;}
-        Require(blocked&&fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{GameInputKind.RightClick,GameInputKind.LeftClick})&&
-            fake.Inputs[^1].Bounds==menu.Single(l=>l.Text=="Cancel").Bounds,
-            "missing target clicks ONLY verified Cancel, never destructive action or Escape");
+        Require(blocked&&fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{
+                GameInputKind.RightClick,GameInputKind.LeftClick,GameInputKind.Hover})&&
+            fake.Inputs[1].Bounds==menu.Single(l=>l.Text=="Cancel").Bounds&&
+            fake.Inputs[2].Bounds.Contains(new Point(500,400)),
+            "missing target clicks ONLY verified Cancel then moves mouse away; no Escape");
         fake=new ScriptedDriver(menu);
         await new GameInteractions(fake).Choose(new(100,100,5,5),"Use Logs",CancellationToken.None);
         Require(fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{GameInputKind.RightClick,GameInputKind.LeftClick}),"observe menu before exact selection");
@@ -117,6 +119,23 @@ internal static class ExecutionRoutinesTests
         catch(RoutineBlockedException ex){blocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
         Require(blocked&&never.Inputs.Count==1&&never.Observations==3,
             "unreadable context menu blocks after bounded observation without repeating click");
+        var baseSlots=Enumerable.Range(0,28).Select(i=>
+            new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,i>0)).ToArray();
+        var basePixels=new ExecutionPixels(baseSlots,1,InventoryTabActive:true,
+            InventoryPanelSignature:813);
+        var chromeOnly=basePixels with{InventoryPanelSignature=927};
+        var oneTransient=chromeOnly with {Slots=baseSlots.Select((v,i)=>
+            i==27?v with {Signature=88777}:v).ToArray()};
+        var clickedChanged=chromeOnly with {Slots=baseSlots.Select((v,i)=>
+            i==0?v with {Signature=88777}:v).ToArray()};
+        var severalChanged=chromeOnly with {Slots=baseSlots.Select((v,i)=>
+            i is 6 or 27?v with {Signature=88777}:v).ToArray()};
+        Require(GameInteractions.InventoryRestored(basePixels,chromeOnly,0)&&
+            GameInteractions.InventoryRestored(basePixels,oneTransient,0)&&
+            !GameInteractions.InventoryRestored(basePixels,clickedChanged,0)&&
+            !GameInteractions.InventoryRestored(basePixels,severalChanged,0)&&
+            !GameInteractions.InventoryRestored(basePixels,chromeOnly with{InventoryTabActive=false},0),
+            "Cancel confirmation tolerates hover chrome but not occupied slot, popup or tab changes");
         var cancellable=new InventoryMenuDriver(menu,closes:true);
         var checkedInventory=await new GameInteractions(cancellable).Inventory(CancellationToken.None);
         Require(checkedInventory.Items.Count==1&&checkedInventory.Items[0].Name=="logs"&&
@@ -201,7 +220,8 @@ internal static class ExecutionRoutinesTests
             var slots=Enumerable.Range(0,28).Select(i=>
                 new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,i>0)).ToArray();
             before=new ExecutionPixels(slots,1,InventoryTabActive:true,InventoryPanelSignature:813);
-            covered=before with {InventoryPanelSignature=914};
+            covered=before with {InventoryPanelSignature=914,
+                Slots=slots.Select((v,i)=>i<3?v with{Signature=v.Signature+1000}:v).ToArray()};
             Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
                 DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),before);
         }
@@ -220,7 +240,10 @@ internal static class ExecutionRoutinesTests
                 Current=Current with {Labels=menu,Pixels=covered};
             else if(input.Kind==GameInputKind.LeftClick&&Inputs.Any(i=>i.Kind==GameInputKind.RightClick)&&
                 menu.Any(l=>l.Text=="Cancel"&&l.Bounds==input.Bounds)&&closes)
-                Current=Current with {Labels=Array.Empty<VisualLabel>(),Pixels=before};
+                // Only panel chrome has changed. Slot sprites are identical
+                // to the pre-menu frame even when the whole-panel hash differs.
+                Current=Current with {Labels=Array.Empty<VisualLabel>(),
+                    Pixels=before with{InventoryPanelSignature=999}};
             Current=Current with {CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
             return Task.CompletedTask;
         }
