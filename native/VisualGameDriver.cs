@@ -281,7 +281,11 @@ internal sealed class GameInteractions
         var menu=await OpenMenu(destination,ct);
         string expected="Use "+source.Name+" -> "+target;
         var hit=menu.Exact(expected);
-        if(hit is null){await Escape(ct);throw new RoutineBlockedException("USE_TARGET_NOT_VERIFIED");}
+        if(hit is null)
+        {
+            await DismissMenu(menu,ct);
+            throw new RoutineBlockedException("USE_TARGET_NOT_VERIFIED");
+        }
         await Click(hit.Bounds,ct);
     }
 }
