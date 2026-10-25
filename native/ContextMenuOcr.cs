@@ -70,6 +70,27 @@ internal static class ContextMenuOcr
         return ReadRegion(image,engine,region,5,contrast,nearest:true);
     }
 
+    // A right-click in the final inventory column can appear without a
+    // broad OCR Cancel hit even when native pixels changed. This bounded
+    // observer is tied to that right-edge click only. It cannot authorize
+    // an action without independently read header, Examine and Cancel.
+    internal static Rectangle CornerRegion(Point anchor,Size size)
+    {
+        const int width=320,height=180;
+        if(size!=DockedWindowLayout.GameSize||
+            anchor.X<880||anchor.X>=size.Width||
+            anchor.Y<470||anchor.Y>=size.Height)return Rectangle.Empty;
+        return new Rectangle(size.Width-width,size.Height-height,width,height);
+    }
+
+    internal static Task<List<VisualLabel>> ReadCornerRows(
+        Bitmap image,OcrEngine engine,Point anchor,bool contrast)
+    {
+        var region=CornerRegion(anchor,image.Size);
+        if(region.IsEmpty)return Task.FromResult(new List<VisualLabel>());
+        return ReadRegion(image,engine,region,4,contrast,nearest:true);
+    }
+
     internal static async Task<IReadOnlyList<VisualLabel>> Read(
         Bitmap image,OcrEngine engine,Point anchor)
     {
@@ -122,6 +143,21 @@ internal static class ContextMenuOcr
                     if(await Verify(image,engine,anchor,labels,requireExamine:true)
                         is { } menu)return menu;
                 }
+        }
+        else if(!CornerRegion(anchor,image.Size).IsEmpty)
+        {
+            // No Cancel survived broad OCR at the bottom-right click.
+            // Re-read only original screenshot pixels in the final-column
+            // menu area; never send a second click or infer any menu entry.
+            for(int pass=0;pass<2;pass++)
+            {
+                var labels=await ReadCornerRows(image,engine,anchor,
+                    contrast:pass==0);
+                diagnosticCandidates.AddRange(labels.Select(l=>
+                    l with{Kind=VisualLabelKind.ContextMenuCandidate}));
+                if(await Verify(image,engine,anchor,labels,requireExamine:true)
+                    is { } menu)return menu;
+            }
         }
         // Partial OCR remains diagnostic only: never invent an Examine item,
         // a header, or a successful right-click from Cancel alone.
@@ -352,6 +388,15 @@ internal static class ContextMenuOcr
                 tight.Width>=Region(point,size).Width)
                 throw new Exception("Tight menu OCR must retain the click in a smaller viewport crop");
         }
+        var corner=CornerRegion(new Point(902,508),size);
+        if(corner.IsEmpty||corner.Left!=680||corner.Top!=420||
+            corner.Right!=size.Width||corner.Bottom!=size.Height||
+            !corner.Contains(new Point(902,508))||
+            !corner.Contains(new Rectangle(850,576,75,14))||
+            CornerRegion(new Point(860,508),size)!=Rectangle.Empty||
+            CornerRegion(new Point(902,328),size)!=Rectangle.Empty||
+            CornerRegion(new Point(1000,508),size)!=Rectangle.Empty)
+            throw new Exception("Only a final-column click permits a bounded OCR observation to the right viewport edge");
         var textArea=new Rectangle(680,440,320,160);
         var examineWord=new VisualLabel("Examine",new Rectangle(786,568,55,13));
         var itemWord=new VisualLabel("Logs",new Rectangle(846,568,42,13));

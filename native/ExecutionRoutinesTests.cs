@@ -80,6 +80,49 @@ internal static class ExecutionRoutinesTests
         Require(missingHudBlocked&&missingHudCaptures==3&&
             ReferenceEquals(missingHud.Current,initialHudFrame),
             "three unreadable HUD frames block without replacing the last verified frame");
+        int staleCaptures=0,staleDispatches=0;
+        var staleReports=new List<string>();
+        var staleOnce=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            staleCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=staleCaptures==1?DateTimeOffset.UtcNow.AddSeconds(-5):
+                    DateTimeOffset.UtcNow,Labels=hudLabels});
+        },(_,input,token)=>{
+            staleDispatches++;return Task.FromResult(true);
+        },staleReports.Add);
+        var refreshed=await staleOnce.ObserveAsync(CancellationToken.None);
+        Require(staleCaptures==2&&staleDispatches==0&&
+            GameScreenReader.Read(refreshed).Stage==VisibleGameStage.InGame&&
+            staleReports.Count==1&&staleReports[0].StartsWith("FRAME_REOBSERVING",StringComparison.Ordinal),
+            "slow OCR rejects stale captured pixels and observes a fresh frame without another click");
+        int persistentlyStaleCount=0;
+        var persistentlyStale=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            persistentlyStaleCount++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                CapturedUtc=DateTimeOffset.UtcNow.AddSeconds(-5)});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        bool staleBlocked=false;
+        try{await persistentlyStale.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {staleBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(staleBlocked&&persistentlyStaleCount==3&&
+            ReferenceEquals(persistentlyStale.Current,initialHudFrame),
+            "persistently stale pixel captures must block without replacing the verified frame");
+        int wrongWindowCount=0;
+        var wrongWindow=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            wrongWindowCount++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                Window=new IntPtr(12),CapturedUtc=DateTimeOffset.UtcNow});
+        },(_,input,token)=>Task.FromResult(true),_=>{});
+        bool geometryBlocked=false;
+        try{await wrongWindow.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {geometryBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(geometryBlocked&&wrongWindowCount==1,
+            "new window handles remain an immediate hard stop without retry");
         int reusedHudCaptures=0;
         var reusedTime=DateTimeOffset.UtcNow;
         var reusedHud=new WindowVisualGameDriver(initialHudFrame,_=>

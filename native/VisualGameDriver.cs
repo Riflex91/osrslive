@@ -28,23 +28,42 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
         // Never accept that frame as gameplay evidence, and NEVER dispatch
         // another input to recover. Re-observe at most twice, requiring a
         // fresh, independently recognized InGame frame from the same window.
-        DateTimeOffset lastUnknown=default;
+        DateTimeOffset lastRejected=default;
+        string lastReason="GAMEPLAY_HUD_NOT_VERIFIED";
+        bool reportedStale=false;
         for(int attempt=0;attempt<3;attempt++)
         {
             if(attempt>0)await Task.Delay(150,ct);
             var next=await capture(ct);
-            if(next is null||next.Window!=Current.Window||next.ScreenBounds!=Current.ScreenBounds||
-                DateTimeOffset.UtcNow-next.CapturedUtc>TimeSpan.FromSeconds(2))
+            if(next is null||next.Window!=Current.Window||next.ScreenBounds!=Current.ScreenBounds)
                 throw new RoutineBlockedException("FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED");
+            var age=DateTimeOffset.UtcNow-next.CapturedUtc;
+            if(age>TimeSpan.FromSeconds(2))
+            {
+                // The image was fresh at capture time, but multiple full-frame
+                // OCR passes can take more than two seconds to complete. Such
+                // a frame is NOT safe for clicks. Discard and request a new
+                // independent screenshot, without any additional game input.
+                lastReason="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";
+                if(next.CapturedUtc>lastRejected)lastRejected=next.CapturedUtc;
+                if(!reportedStale)
+                {
+                    reportedStale=true;
+                    report($"FRAME_REOBSERVING stale_ocr_capture=true age_ms={(int)age.TotalMilliseconds} "+
+                        $"attempt={attempt+1} same_window=true");
+                }
+                continue;
+            }
             var stage=GameScreenReader.Read(next).Stage;
             if(stage==VisibleGameStage.InGame)
             {
-                if(lastUnknown!=default&&next.CapturedUtc<=lastUnknown)continue;
+                if(lastRejected!=default&&next.CapturedUtc<=lastRejected)continue;
                 Current=next;Guard?.Invoke(next);return next;
             }
             if(stage!=VisibleGameStage.Unknown)
                 throw new RoutineBlockedException("GAME_SESSION_LEFT_EXECUTION_SCREEN");
-            lastUnknown=next.CapturedUtc;
+            lastReason="GAMEPLAY_HUD_NOT_VERIFIED";
+            if(next.CapturedUtc>lastRejected)lastRejected=next.CapturedUtc;
             if(attempt==0)
             {
                 string footer=string.Join(" ",next.Labels.Where(l=>
@@ -59,7 +78,7 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
                     $"chat_control_labels={chatControls}");
             }
         }
-        throw new RoutineBlockedException("GAMEPLAY_HUD_NOT_VERIFIED");
+        throw new RoutineBlockedException(lastReason);
     }
     internal void Diagnostic(string message)=>report(message);
     public async Task InputAsync(GameInput input,CancellationToken ct)

@@ -698,6 +698,20 @@ internal sealed class VisualStartup:IDisposable
             if(ExecutionUi.Menu(footerContrast) is not null||
                 ExecutionUi.Menu(footerOriginal) is not null)
                 throw new InvalidOperationException("Examine and Cancel alone cannot invent a missing menu header");
+            // At final-column slot 23 even broad OCR Cancel can be absent.
+            // The cursor-specific corner crop must independently see a
+            // complete native-pixel menu, without requiring a pre-read Cancel.
+            var cornerContrast=await ContextMenuOcr.ReadCornerRows(
+                lowerEdgeMenu,engine,new Point(902,508),contrast:true);
+            var cornerOriginal=await ContextMenuOcr.ReadCornerRows(
+                lowerEdgeMenu,engine,new Point(902,508),contrast:false);
+            if(ExecutionUi.Menu(cornerContrast)?.Exact("Examine Logs") is null&&
+                ExecutionUi.Menu(cornerOriginal)?.Exact("Examine Logs") is null)
+                throw new InvalidOperationException("Last-column independent menu OCR must read real Examine and Cancel");
+            var emptyCorner=await ContextMenuOcr.ReadCornerRows(
+                farRightRows,engine,new Point(902,508),contrast:true);
+            if(ExecutionUi.Menu(emptyCorner) is not null)
+                throw new InvalidOperationException("Cancel/Examine without a real menu header is not an action");
             using var cornerWithoutHeader=new Bitmap(bottomRightMenu);
             using(var g=Graphics.FromImage(cornerWithoutHeader))
                 g.FillRectangle(Brushes.Black,new Rectangle(745,370,225,35));
