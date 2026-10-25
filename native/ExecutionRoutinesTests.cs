@@ -108,6 +108,21 @@ internal static class ExecutionRoutinesTests
         fake=new ScriptedDriver(menu);
         await new GameInteractions(fake).Choose(new(100,100,5,5),"Use Logs",CancellationToken.None);
         Require(fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{GameInputKind.RightClick,GameInputKind.LeftClick}),"observe menu before exact selection");
+        var targetMissing=new ScriptedDriver(menu);
+        bool missingUseBlocked=false;
+        try
+        {
+            await new GameInteractions(targetMissing).UseItem(
+                new InventoryItem(0,"logs",1,1,ExecutionUi.InventorySlot(0)),
+                new Rectangle(220,150,12,12),"Range",CancellationToken.None);
+        }
+        catch(RoutineBlockedException ex)
+        {missingUseBlocked=ex.Message=="USE_TARGET_NOT_VERIFIED";}
+        Require(missingUseBlocked&&targetMissing.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==2&&
+            targetMissing.Inputs.Any(i=>i.Kind==GameInputKind.LeftClick&&
+                i.Bounds==menu.Single(l=>l.Text=="Cancel").Bounds)&&
+            targetMissing.Inputs.All(i=>i.Kind!=GameInputKind.Escape),
+            "unverified Use target closes via real Cancel, not Escape");
         var late=new ScriptedDriver(menu,delayObservations:2);
         var lateResult=await new GameInteractions(late).OpenMenu(new(100,100,5,5),CancellationToken.None);
         Require(lateResult.Exact("Use Logs") is not null&&late.Observations>=2&&
