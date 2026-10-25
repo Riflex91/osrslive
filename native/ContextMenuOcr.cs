@@ -28,7 +28,9 @@ internal static class ContextMenuOcr
             return Array.Empty<VisualLabel>();
         // Every OCR result must physically come from the clicked window, and
         // each pass must independently contain a header and terminal Cancel.
-        // No row/index heuristic fills missing OCR lines.
+        // No row/index heuristic fills missing OCR lines. Keep non-actionable
+        // OCR candidates solely for counting diagnostics when this fails.
+        var diagnosticCandidates=new List<VisualLabel>();
         for(int pass=0;pass<2;pass++)
         {
             const int scale=3,padding=12;
@@ -59,6 +61,8 @@ internal static class ContextMenuOcr
                 if(region.Contains(bounds)&&line.Text.Length is >0 and <=90)
                     labels.Add(new(line.Text,bounds));
             }
+            diagnosticCandidates.AddRange(labels.Select(l=>
+                l with {Kind=VisualLabelKind.ContextMenuCandidate}));
             if(ExecutionUi.Menu(labels) is not ContextMenu parsed||parsed.Entries.Count==0)
                 continue;
             var header=labels.Single(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
@@ -82,7 +86,9 @@ internal static class ContextMenuOcr
                 Math.Abs(l.Bounds.Left-header.Bounds.Left)<30)
                 .Select(l=>l with {Kind=VisualLabelKind.ContextMenuLine}).ToArray();
         }
-        return Array.Empty<VisualLabel>();
+        // Candidate labels are deliberately NOT recognized menu lines, so
+        // neither interactions nor item identification can use partial OCR.
+        return diagnosticCandidates;
     }
 
     internal static void SelfTest()
