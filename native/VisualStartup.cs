@@ -693,6 +693,21 @@ internal sealed class VisualStartup:IDisposable
         };
         if(!queued)
         {SetState("INPUT_DISPATCH_FAILED_REOBSERVING");return false;}
+        // Capture the BEFORE-right-click inventory evidence here. The
+        // subsequent screenshot may contain a context menu overlay covering
+        // the same slot; only this baseline is usable for blank classification.
+        if(kind==GameInputKind.RightClick&&frame.Pixels is { InventoryTabActive:true } baseline)
+        {
+            int slot=Enumerable.Range(0,28).FirstOrDefault(i=>
+                ExecutionUi.InventorySlot(i).Contains(point),-1);
+            if(slot>=0)
+                log.Add(Severity.INFO,"GAMEPLAY","INVENTORY_PRE_CLICK_DIAGNOSTIC",
+                    $"slot={slot} empty_candidates={baseline.Slots.Count(s=>s.Empty)} "+
+                    $"slot_empty={baseline.Slots[slot].Empty} "+
+                    (slot==0?"empty_pixel_quality="+baseline.InventorySlot0Diagnostic:
+                        "empty_pixel_quality=other_slot_not_sampled")+
+                    " image_phase=BEFORE_RIGHT_CLICK");
+        }
         // Context OCR only runs after a successful directed right-click, and
         // the anchor is invalidated by the very next non-right-click input.
         // Captured frames are always independent of the dispatched input.
