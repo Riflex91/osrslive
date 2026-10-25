@@ -617,6 +617,23 @@ internal sealed class VisualStartup:IDisposable
             if(ExecutionUi.Menu(focusedContext)?.Exact("Use Logs") is null||
                 !focusedContext.All(l=>l.Kind==VisualLabelKind.ContextMenuLine))
                 throw new InvalidOperationException("Right-click anchored focused context-menu OCR regression");
+            // Simulate real-client OCR: the menu body is readable, but the
+            // heading was entirely missed by the broad recognition pass.
+            // Only independently reading pixels that actually spell the
+            // heading may recover it.
+            var menuBody=new[]{
+                new VisualLabel("Examine Logs",new Rectangle(40,96,135,19)),
+                new VisualLabel("Cancel",new Rectangle(40,124,85,19))
+            };
+            var recoveredHeader=await ContextMenuOcr.RecoverHeader(
+                contextFixture,engine,new Point(60,72),menuBody);
+            if(recoveredHeader is null||recoveredHeader.Text!="Choose Option"||
+                recoveredHeader.Bounds.Top>=menuBody[0].Bounds.Top)
+                throw new InvalidOperationException("Focused header-only OCR recovery regression");
+            using var noHeader=new Bitmap(contextFixture);
+            using(var g=Graphics.FromImage(noHeader))g.FillRectangle(Brushes.Black,15,25,245,40);
+            if(await ContextMenuOcr.RecoverHeader(noHeader,engine,new Point(60,72),menuBody) is not null)
+                throw new InvalidOperationException("Header cannot be inferred from Examine/Cancel alone");
             using var inventoryFixture=new Bitmap(1000,600);
             using(var g=Graphics.FromImage(inventoryFixture))
             using(var font=new Font("Segoe UI",8))
