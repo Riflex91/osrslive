@@ -100,7 +100,9 @@ internal static class ExecutionRoutinesTests
         bool blocked=false;
         try{await interactions.Choose(new(100,100,5,5),"Deposit-All Logs",CancellationToken.None);}
         catch(RoutineBlockedException){blocked=true;}
-        Require(blocked&&fake.Inputs.All(i=>i.Kind!=GameInputKind.LeftClick),"wrong menu cannot send destructive left click");
+        Require(blocked&&fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{GameInputKind.RightClick,GameInputKind.LeftClick})&&
+            fake.Inputs[^1].Bounds==menu.Single(l=>l.Text=="Cancel").Bounds,
+            "missing target clicks ONLY verified Cancel, never destructive action or Escape");
         fake=new ScriptedDriver(menu);
         await new GameInteractions(fake).Choose(new(100,100,5,5),"Use Logs",CancellationToken.None);
         Require(fake.Inputs.Select(i=>i.Kind).SequenceEqual(new[]{GameInputKind.RightClick,GameInputKind.LeftClick}),"observe menu before exact selection");
@@ -115,6 +117,32 @@ internal static class ExecutionRoutinesTests
         catch(RoutineBlockedException ex){blocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
         Require(blocked&&never.Inputs.Count==1&&never.Observations==3,
             "unreadable context menu blocks after bounded observation without repeating click");
+        var cancellable=new InventoryMenuDriver(menu,closes:true);
+        var checkedInventory=await new GameInteractions(cancellable).Inventory(CancellationToken.None);
+        Require(checkedInventory.Items.Count==1&&checkedInventory.Items[0].Name=="Logs"&&
+            checkedInventory.EmptySlots==27&&
+            cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
+            cancellable.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==2&&
+            cancellable.Inputs.All(i=>i.Kind!=GameInputKind.Escape),
+            "menu Cancel restores verified inventory before scanning other slots");
+        var stuckMenu=new InventoryMenuDriver(menu,closes:false);
+        bool stuckBlocked=false;
+        try{await new GameInteractions(stuckMenu).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {stuckBlocked=ex.Message=="CONTEXT_MENU_CANCEL_NOT_CONFIRMED";}
+        Require(stuckBlocked&&stuckMenu.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
+            stuckMenu.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==2&&
+            stuckMenu.Inputs.All(i=>i.Kind!=GameInputKind.Escape),
+            "menu that survives a queued Cancel must block BEFORE any second right-click");
+        var noCancelMenu=new ContextMenu(new[]{
+            new MenuEntry("Examine Logs",new Rectangle(30,82,180,14))
+        });
+        var noCancelDriver=new InventoryMenuDriver(menu,closes:true);
+        bool noCancelBlocked=false;
+        try{await new GameInteractions(noCancelDriver).DismissMenu(noCancelMenu,CancellationToken.None);}
+        catch(RoutineBlockedException ex){noCancelBlocked=ex.Message=="CONTEXT_CANCEL_NOT_VERIFIED";}
+        Require(noCancelBlocked&&noCancelDriver.Inputs.Count==0,
+            "missing or ambiguous Cancel never authorizes an invented click");
         var order=new TradeOrder("test-buy","iron axe",1,100,false,500,now);
         var facts=new ProgressionFacts(Ironman:false,FreeGeSlots:1);
         Require(TradeRoutine.Validate(order,facts,Stock(now,("coins",600)),now) is null,"bounded affordable purchase");
@@ -156,6 +184,45 @@ internal static class ExecutionRoutinesTests
         finally{if(Directory.Exists(directory))Directory.Delete(directory,true);}
         Console.WriteLine("EXECUTION ROUTINES PASS: context selection, independent yields, recipe deltas, supply gates, GE invoices/receipts/partial fills, durable deduplication");
     }
+    private sealed class InventoryMenuDriver:IVisualGameDriver
+    {
+        private readonly IReadOnlyList<VisualLabel> menu;
+        private readonly bool closes;
+        internal readonly List<GameInput> Inputs=new();
+        private readonly ExecutionPixels before;
+        private readonly ExecutionPixels covered;
+        public VisualFrame Current {get;private set;}
+        internal InventoryMenuDriver(IReadOnlyList<VisualLabel> labels,bool closes)
+        {
+            menu=labels;this.closes=closes;
+            var slots=Enumerable.Range(0,28).Select(i=>
+                new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,i>0)).ToArray();
+            before=new ExecutionPixels(slots,1,InventoryTabActive:true,InventoryPanelSignature:813);
+            covered=before with {InventoryPanelSignature=914};
+            Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
+                DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),before);
+        }
+        public Task<VisualFrame> ObserveAsync(CancellationToken ct)
+        {
+            Current=Current with {CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
+            return Task.FromResult(Current);
+        }
+        public Task InputAsync(GameInput input,CancellationToken ct)
+        {
+            Inputs.Add(input);
+            if(input.Kind==GameInputKind.Hover)
+                Current=Current with {Labels=new VisualLabel[]{
+                    new("Inventory",new Rectangle(12,8,70,14))}};
+            else if(input.Kind==GameInputKind.RightClick)
+                Current=Current with {Labels=menu,Pixels=covered};
+            else if(input.Kind==GameInputKind.LeftClick&&Inputs.Any(i=>i.Kind==GameInputKind.RightClick)&&
+                menu.Any(l=>l.Text=="Cancel"&&l.Bounds==input.Bounds)&&closes)
+                Current=Current with {Labels=Array.Empty<VisualLabel>(),Pixels=before};
+            Current=Current with {CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class InventoryGridDriver:IVisualGameDriver
     {
         internal readonly List<GameInput> Inputs=new();
@@ -225,8 +292,9 @@ internal static class ExecutionRoutinesTests
             if(waitingForMenu&&Observations>=delayObservations)
             {
                 waitingForMenu=false;
-                Current=Current with {Labels=menu,CapturedUtc=DateTimeOffset.UtcNow};
+                Current=Current with {Labels=menu};
             }
+            Current=Current with {CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
             return Task.FromResult(Current);
         }
         public Task InputAsync(GameInput input,CancellationToken ct)
@@ -237,7 +305,10 @@ internal static class ExecutionRoutinesTests
                 waitingForMenu=true;Observations=0;
                 Current=Current with {Labels=Array.Empty<VisualLabel>()};
             }
-            Current=Current with{CapturedUtc=DateTimeOffset.UtcNow};
+            if(input.Kind==GameInputKind.LeftClick&&
+                menu.Any(l=>l.Text=="Cancel"&&l.Bounds==input.Bounds))
+                Current=Current with {Labels=Array.Empty<VisualLabel>()};
+            Current=Current with{CapturedUtc=Current.CapturedUtc.AddMilliseconds(200)};
             return Task.CompletedTask;
         }
     }
