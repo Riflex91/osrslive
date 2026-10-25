@@ -137,6 +137,22 @@ internal static class VisualStartupPolicy
     }
 }
 
+// A post-entry screen that remains unknown must stop in a visible,
+// recoverable, fail-closed state. Only fresh recognized UI can authorize input.
+internal static class PostEnterUnknownScreenPolicy
+{
+    internal static readonly TimeSpan DiagnosticAfter=TimeSpan.FromSeconds(12);
+    internal static readonly TimeSpan BlockAfter=TimeSpan.FromSeconds(30);
+    internal static bool IsUnknownAfterEnter(string previousAction,DateTimeOffset lastAction,
+        DateTimeOffset now,VisibleGameStage stage)=>
+        previousAction=="ENTER_GAME"&&lastAction!=DateTimeOffset.MinValue&&
+        now>=lastAction&&stage==VisibleGameStage.Unknown;
+    internal static bool ShouldBlock(string previousAction,DateTimeOffset lastAction,
+        DateTimeOffset now,VisibleGameStage stage,string decisionState)=>
+        IsUnknownAfterEnter(previousAction,lastAction,now,stage)&&
+        now-lastAction>=BlockAfter&&decisionState=="WAITING_FOR_RECOGNIZED_SCREEN";
+}
+
 internal sealed class VisualStartup:IDisposable
 {
     private readonly Diagnostics log;
@@ -161,6 +177,8 @@ internal sealed class VisualStartup:IDisposable
     private DateTimeOffset pendingPlayFrame,pendingEnterFrame;
     private string lastPostPlayDiagnostic="";
     private DateTimeOffset lastPostPlayDiagnosticAt=DateTimeOffset.MinValue;
+    private WelcomePanelPixels lastWelcomePixels;
+    private bool postEnterUnknownDiagnosed;
     private int? observedSelectedWorld;
     private IntPtr observedWindow;
     private readonly BackgroundWindowCapture backgroundCapture=new();
@@ -199,7 +217,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -313,6 +331,18 @@ internal sealed class VisualStartup:IDisposable
         var decision=VisualStartupPolicy.Decide(observed.Labels,preferredWorld,
             preferredWorld is not null&&observedSelectedWorld==preferredWorld);
         DiagnoseWorldGrid(observed,preferredWorld,decision);
+        if(PostEnterUnknownScreenPolicy.ShouldBlock(previousAction,lastAction,DateTimeOffset.UtcNow,
+            Game.LastObservation!.Stage,decision.State))
+        {
+            const string blocked="BLOCKED_POST_ENTER_UNRECOGNIZED_SCREEN";
+            if(State!=blocked)
+                log.Add(Severity.WARN,"VISUAL_STARTUP",blocked,
+                    "elapsed_s="+(int)(DateTimeOffset.UtcNow-lastAction).TotalSeconds+
+                    " entry_button_not_visible=true known_hud_not_visible=true "+
+                    "new_input_dispatched=false screenshot_persisted=false");
+            SetState(blocked);
+            return;
+        }
         if(decision.State=="PLAY_SELECTED_CHARACTER"&&decision.Click is Rectangle playButton)
         {
             // Must see the same button from two independent fresh frames.
@@ -388,6 +418,7 @@ internal sealed class VisualStartup:IDisposable
             return null;
         }
         RenderObserver.ObserveBitmap(captured.Image,captured.CapturedUtc);
+        lastWelcomePixels=NativeWelcomePanelReader.Inspect(captured.Image);
         var point=new POINT();
         if(!ClientToScreen(target,ref point))return null;
         var bounds=new Rectangle(point.X,point.Y,captured.Image.Width,captured.Image.Height);
@@ -857,6 +888,7 @@ internal sealed class VisualStartup:IDisposable
         if(decision.State.StartsWith("WORLD_PAGE_"))pageActions++;
         previousAction=decision.State;
         lastAction=DateTimeOffset.UtcNow;
+        if(decision.State=="ENTER_GAME")postEnterUnknownDiagnosed=false;
         SetState(decision.State+"_REQUESTED");
         log.Add(Severity.INFO,"VISUAL_INPUT","ACTION_DISPATCHED",
             $"action={decision.State} input=WINDOW_MESSAGE background=true global_cursor_moved=false "+
@@ -911,6 +943,21 @@ internal sealed class VisualStartup:IDisposable
             $"enter_marker={enter} native_enter_card={nativeCard} connecting_marker={connecting} chat_controls={chat} "+
             $"labels={labels.Count} decision_source=VISIBLE_OCR auth_verified=false";
         DateTimeOffset now=DateTimeOffset.UtcNow;
+        if(!postEnterUnknownDiagnosed&&
+            PostEnterUnknownScreenPolicy.IsUnknownAfterEnter(previousAction,lastAction,now,
+                Game.LastObservation?.Stage??VisibleGameStage.Unknown)&&
+            now-lastAction>=PostEnterUnknownScreenPolicy.DiagnosticAfter)
+        {
+            postEnterUnknownDiagnosed=true;
+            var px=lastWelcomePixels;
+            log.Add(Severity.INFO,"VISUAL_STARTUP","POST_ENTER_PIXEL_DIAGNOSTIC",
+                $"elapsed_s={(int)(now-lastAction).TotalSeconds} parchment_banner={px.Banner} "+
+                $"red_center={px.RedCenter} side_tiles={px.SideTiles} white_caption={px.Caption} "+
+                $"minimap_marker={labels.Any(l=>l.Kind==VisualLabelKind.Minimap)} "+
+                $"skills_icon_marker={labels.Any(l=>l.Kind==VisualLabelKind.SkillsButton)} "+
+                $"native_hud_marker={labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
+                "screenshot_persisted=false retry_input=false");
+        }
         if(result==lastPostPlayDiagnostic&&now-lastPostPlayDiagnosticAt<TimeSpan.FromSeconds(20))
             return;
         lastPostPlayDiagnostic=result;
@@ -1120,6 +1167,24 @@ internal static class VisualStartupTests
         Require(WorldPageReader.Read(arrowImage,pageLabels).Count==0,"blank arrow area blocks pagination");
         using(var g=Graphics.FromImage(arrowImage))g.FillRectangle(Brushes.Gray,835,290,48,20);
         Require(WorldPageReader.Read(arrowImage,pageLabels).Count==0,"flat grey patch is not an arrow");
+        var postEnterAt=DateTimeOffset.UtcNow;
+        Require(!PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(29),
+            VisibleGameStage.Unknown,"WAITING_FOR_RECOGNIZED_SCREEN"),
+            "post-entry unknown is allowed a bounded transition window");
+        Require(PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+            VisibleGameStage.Unknown,"WAITING_FOR_RECOGNIZED_SCREEN"),
+            "prolonged unrecognized post-entry screen blocks without another click");
+        Require(!PostEnterUnknownScreenPolicy.ShouldBlock("PLAY_SELECTED_CHARACTER",postEnterAt,postEnterAt.AddSeconds(31),
+            VisibleGameStage.Unknown,"WAITING_FOR_RECOGNIZED_SCREEN")&&
+            !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+                VisibleGameStage.Connecting,"WAITING_FOR_RECOGNIZED_SCREEN")&&
+            !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+                VisibleGameStage.InGame,"WAITING_FOR_RECOGNIZED_SCREEN")&&
+            !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+                VisibleGameStage.Unknown,"MANUAL_AUTHENTICATION_REQUIRED")&&
+            !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
+                VisibleGameStage.Unknown,"ENTER_GAME"),
+            "known stage, guarded prompt and different actions cannot be timed out");
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),Label("CLICK HERE TO PLAY",80)},417,true).State=="ENTER_GAME",
             "welcome transition");
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),
