@@ -124,7 +124,10 @@ internal static class ExecutionRoutinesTests
             cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
             cancellable.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)==2&&
             cancellable.Inputs.All(i=>i.Kind!=GameInputKind.Escape),
-            "menu Cancel restores verified inventory before scanning other slots");
+            "menu Cancel restores verified inventory before scanning other slots"+
+            $" items={checkedInventory.Items.Count} name={(checkedInventory.Items.FirstOrDefault()?.Name??"none")}"+
+            $" empty={checkedInventory.EmptySlots} right={cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)}"+
+            $" left={cancellable.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)}");
         var stuckMenu=new InventoryMenuDriver(menu,closes:false);
         bool stuckBlocked=false;
         try{await new GameInteractions(stuckMenu).Inventory(CancellationToken.None);}
