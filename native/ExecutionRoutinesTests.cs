@@ -83,6 +83,14 @@ internal static class ExecutionRoutinesTests
         var corruptFocused=focusedMenu.Where(l=>l.Text!="Cancel").Concat(menu).ToArray();
         Require(ExecutionUi.Menu(corruptFocused) is null,
             "incomplete focused menu fails closed instead of falling back to another source");
+        // Partial OCR candidates may be logged as COUNTS, but must never be
+        // used to authorize an item menu, even if a complete header/cancel
+        // pair is present as unverified candidate glyphs.
+        var diagnosticOnly=menu.Select(l=>
+            l with {Kind=VisualLabelKind.ContextMenuCandidate}).ToArray();
+        Require(ExecutionUi.Menu(diagnosticOnly) is null&&
+            diagnosticOnly.Count(l=>l.Kind==VisualLabelKind.ContextMenuLine)==0,
+            "partial context-menu OCR diagnostic evidence is non-actionable");
         var parsed=ExecutionUi.Menu(menu);
         Require(parsed?.Exact("Drop Logs") is not null&&parsed.Exact("Deposit-All Logs") is null,"unrelated OCR cannot enter a context menu");
         Require(ExecutionUi.Menu(menu.Append(L("Choose Option",400,5)).ToArray()) is null,"ambiguous menu headers blocked");
