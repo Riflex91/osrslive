@@ -64,7 +64,9 @@ internal static class NativeMenuHeaderReader
         }
         if(bestX<0||(second!=int.MinValue&&best-second<45))return null;
         if(Math.Abs(bestX-examine.Bounds.Left)>22||
-            bestY>=examine.Bounds.Top||bestY+Height>=cancel.Bounds.Top)
+            bestY>=examine.Bounds.Top||bestY+Height>=cancel.Bounds.Top||
+            anchor.X<bestX-20||anchor.X>bestX+Width+20||
+            anchor.Y<bestY-25||anchor.Y>bestY+Height+20)
             return null;
         return new("Choose Option",new Rectangle(bestX,bestY,Width,Height));
     }
