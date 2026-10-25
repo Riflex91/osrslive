@@ -81,21 +81,39 @@ internal sealed class GameInteractions
     // ESC controls an interface and cannot reliably cancel the native
     // right-click popup. Click ONLY verified Cancel and observe actual closure.
     // The full panel hash includes hover chrome; rely on item-slot pixels.
-    internal static bool InventoryRestored(ExecutionPixels? baseline,ExecutionPixels? observed,
-        int clickedSlot)
+    // Distinguish a transient border/hover effect from a still-overlaid
+    // context menu. The latter obscures many item interiors, not just chrome.
+    internal sealed record InventoryMatchEvidence(
+        bool Valid,int Exact,int Core,int Stable,bool ClickedExact,bool ClickedCore,bool Restored);
+    internal static InventoryMatchEvidence InventoryMatch(
+        ExecutionPixels? baseline,ExecutionPixels? observed,int clickedSlot)
     {
         if(baseline is null||observed is null||!baseline.InventoryTabActive||
             !observed.InventoryTabActive||baseline.Slots.Count!=28||observed.Slots.Count!=28||
-            clickedSlot is <0 or >=28)return false;
-        if(baseline.Slots[clickedSlot].Signature!=observed.Slots[clickedSlot].Signature)
-            return false;
-        int same=0;
+            clickedSlot is <0 or >=28)
+            return new(false,0,0,0,false,false,false);
+        int exact=0,core=0,stable=0;
+        bool clickedExact=false,clickedCore=false;
         for(int i=0;i<28;i++)
-            if(baseline.Slots[i].Signature==observed.Slots[i].Signature)same++;
-        // Allow at most one transient cell change, never a menu overlay
-        // across multiple cells or a change to the item being inspected.
-        return same>=27;
+        {
+            var a=baseline.Slots[i];var b=observed.Slots[i];
+            bool e=a.Signature==b.Signature;
+            bool c=a.CoreSignature!=0&&b.CoreSignature!=0&&
+                a.CoreSignature==b.CoreSignature;
+            if(e)exact++;
+            if(c)core++;
+            if(e||c)stable++;
+            if(i==clickedSlot){clickedExact=e;clickedCore=c;}
+        }
+        // A native popup over the item grid covers several icon interiors.
+        // Permit a single transient edge/slot effect, never a changed
+        // clicked item or a continuing overlay.
+        bool restored=(clickedExact||clickedCore)&&stable>=27;
+        return new(true,exact,core,stable,clickedExact,clickedCore,restored);
     }
+    internal static bool InventoryRestored(
+        ExecutionPixels? baseline,ExecutionPixels? observed,int clickedSlot)=>
+        InventoryMatch(baseline,observed,clickedSlot).Restored;
 
     internal async Task DismissMenu(ContextMenu menu,CancellationToken ct,
         ExecutionPixels? expectedInventory=null,int clickedSlot=-1)
@@ -124,8 +142,9 @@ internal sealed class GameInteractions
             }
             var frame=Driver.Current;
             if(frame.CapturedUtc<=prior||frame.CapturedUtc<last)continue;
-            bool? pixelsRestored=expectedInventory is null?null:
-                InventoryRestored(expectedInventory,frame.Pixels,clickedSlot);
+            var slotMatch=expectedInventory is null?null:
+                InventoryMatch(expectedInventory,frame.Pixels,clickedSlot);
+            bool? pixelsRestored=slotMatch?.Restored;
             bool menuParsed=ExecutionUi.Menu(frame.Labels) is not null;
             bool menuTextVisible=frame.Labels.Any(l=>
                 l.Kind==VisualLabelKind.ContextMenuLine||
@@ -135,6 +154,10 @@ internal sealed class GameInteractions
                 trace.Diagnostic($"CONTEXT_CANCEL_OBSERVATION attempt={attempt+1} "+
                     $"tab_active={frame.Pixels?.InventoryTabActive??false} "+
                     $"slots_restored={pixelsRestored?.ToString()??"not_applicable"} "+
+                    $"full_matches={slotMatch?.Exact??-1} core_matches={slotMatch?.Core??-1} "+
+                    $"stable_slots={slotMatch?.Stable??-1} "+
+                    $"clicked_full_same={slotMatch?.ClickedExact??false} "+
+                    $"clicked_core_same={slotMatch?.ClickedCore??false} "+
                     $"menu_parsed={menuParsed} menu_text_seen={menuTextVisible}");
             if((pixelsRestored??!menuTextVisible)&&!menuParsed&&!menuTextVisible)
             {if(++stable>=2)return;}
