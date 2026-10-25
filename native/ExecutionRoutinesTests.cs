@@ -151,6 +151,22 @@ internal static class ExecutionRoutinesTests
             !GameInteractions.InventoryRestored(basePixels,severalChanged,0)&&
             !GameInteractions.InventoryRestored(basePixels,chromeOnly with{InventoryTabActive=false},0),
             "Cancel confirmation tolerates hover chrome but not occupied slot, popup or tab changes");
+        var spriteSlots=baseSlots.Select((v,i)=>
+            v with{CoreSignature=(ulong)(i+500)}).ToArray();
+        var spriteBefore=basePixels with{Slots=spriteSlots};
+        var hoverBorders=spriteBefore with{Slots=spriteSlots.Select((v,i)=>
+            v with{Signature=v.Signature+5000}).ToArray()};
+        var coveredSprites=spriteBefore with{Slots=spriteSlots.Select((v,i)=>
+            i<5?v with{Signature=v.Signature+100,CoreSignature=v.CoreSignature+100}:v)
+            .ToArray()};
+        var changedItem=spriteBefore with{Slots=spriteSlots.Select((v,i)=>
+            i==0?v with{Signature=v.Signature+100,CoreSignature=v.CoreSignature+100}:v)
+            .ToArray()};
+        var hoverMatch=GameInteractions.InventoryMatch(spriteBefore,hoverBorders,0);
+        Require(hoverMatch.Restored&&hoverMatch.Exact==0&&hoverMatch.Core==28&&
+            !GameInteractions.InventoryRestored(spriteBefore,coveredSprites,0)&&
+            !GameInteractions.InventoryRestored(spriteBefore,changedItem,0),
+            "all hover-sensitive outer pixels may change but authentic item interiors must match; overlays fail");
         var cancellable=new InventoryMenuDriver(menu,closes:true);
         var checkedInventory=await new GameInteractions(cancellable).Inventory(CancellationToken.None);
         Require(checkedInventory.Items.Count==1&&checkedInventory.Items[0].Name=="logs"&&
