@@ -84,7 +84,8 @@ internal sealed class GameInteractions
     // Distinguish a transient border/hover effect from a still-overlaid
     // context menu. The latter obscures many item interiors, not just chrome.
     internal sealed record InventoryMatchEvidence(
-        bool Valid,int Exact,int Core,int Stable,bool ClickedExact,bool ClickedCore,bool Restored);
+        bool Valid,int Exact,int Core,int Stable,bool ClickedExact,bool ClickedCore,bool Restored,
+        string ChangedSlots="none");
     internal static InventoryMatchEvidence InventoryMatch(
         ExecutionPixels? baseline,ExecutionPixels? observed,int clickedSlot)
     {
@@ -93,6 +94,7 @@ internal sealed class GameInteractions
             clickedSlot is <0 or >=28)
             return new(false,0,0,0,false,false,false);
         int exact=0,core=0,stable=0;
+        var changed=new List<int>();
         bool clickedExact=false,clickedCore=false;
         for(int i=0;i<28;i++)
         {
@@ -103,13 +105,15 @@ internal sealed class GameInteractions
             if(e)exact++;
             if(c)core++;
             if(e||c)stable++;
+            else changed.Add(i);
             if(i==clickedSlot){clickedExact=e;clickedCore=c;}
         }
         // A native popup over the item grid covers several icon interiors.
         // Permit a single transient edge/slot effect, never a changed
         // clicked item or a continuing overlay.
         bool restored=(clickedExact||clickedCore)&&stable>=27;
-        return new(true,exact,core,stable,clickedExact,clickedCore,restored);
+        return new(true,exact,core,stable,clickedExact,clickedCore,restored,
+            changed.Count==0?"none":string.Join(",",changed));
     }
     internal static bool InventoryRestored(
         ExecutionPixels? baseline,ExecutionPixels? observed,int clickedSlot)=>
@@ -158,6 +162,7 @@ internal sealed class GameInteractions
                     $"stable_slots={slotMatch?.Stable??-1} "+
                     $"clicked_full_same={slotMatch?.ClickedExact??false} "+
                     $"clicked_core_same={slotMatch?.ClickedCore??false} "+
+                    $"changed_slots={slotMatch?.ChangedSlots??"unknown"} "+
                     $"menu_parsed={menuParsed} menu_text_seen={menuTextVisible}");
             if((pixelsRestored??!menuTextVisible)&&!menuParsed&&!menuTextVisible)
             {if(++stable>=2)return;}
@@ -198,6 +203,13 @@ internal sealed class GameInteractions
     internal async Task<InventoryState> Inventory(CancellationToken ct,bool ensureTab=true)
     {
         if(ensureTab)await OpenInventory(ct);
+        // Baseline and post-Cancel screenshots must be taken with the mouse
+        // in the SAME neutral location. Previously the initial reference
+        // image was captured while the mouse hovered on the Inventory tab,
+        // but after Cancel it was moved to (500,400). Differences in hover
+        // decoration then appeared as permanently changed inventory cells.
+        // Only a mouse movement; never click into the world.
+        await Driver.InputAsync(new(GameInputKind.Hover,new Rectangle(498,398,5,5)),ct);
         if(Driver.Current.Pixels is null)throw new RoutineBlockedException("UNSUPPORTED_INVENTORY_LAYOUT");
         if(!Driver.Current.Pixels.InventoryTabActive)
             throw new RoutineBlockedException("INVENTORY_TAB_NOT_VISUALLY_OPEN");
