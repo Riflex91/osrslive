@@ -77,11 +77,55 @@ internal sealed class GameInteractions
         }
         throw new RoutineBlockedException("CONTEXT_MENU_NOT_READABLE");
     }
+    // OSRS Escape is an optional keybind for closing an interface, not a
+    // reliable context-menu cancellation key. Only click the *observed*,
+    // unambiguous Cancel entry in a previously verified real menu.
+    internal async Task DismissMenu(ContextMenu menu,CancellationToken ct,
+        ulong? expectedInventoryPanelSignature=null)
+    {
+        var cancel=menu.Exact("Cancel");
+        if(cancel is null||cancel.Bounds.IsEmpty||
+            !new Rectangle(Point.Empty,DockedWindowLayout.GameSize).Contains(cancel.Bounds))
+            throw new RoutineBlockedException("CONTEXT_CANCEL_NOT_VERIFIED");
+        DateTimeOffset prior=Driver.Current.CapturedUtc;
+        await Click(cancel.Bounds,ct);
+        int stable=0;
+        for(int attempt=0;attempt<5;attempt++)
+        {
+            if(attempt>0)
+            {
+                await Task.Delay(150,ct);
+                await Driver.ObserveAsync(ct);
+            }
+            var frame=Driver.Current;
+            if(frame.CapturedUtc<=prior)continue;
+            prior=frame.CapturedUtc;
+            // With an inventory baseline, absence of OCR text is NOT enough:
+            // the screenshot must show the original panel pixels restored.
+            bool restored=expectedInventoryPanelSignature is ulong expected?
+                frame.Pixels is {InventoryTabActive:true} pixels&&
+                pixels.InventoryPanelSignature==expected:
+                !frame.Labels.Any(l=>l.Kind==VisualLabelKind.ContextMenuLine||
+                    l.Kind==VisualLabelKind.Text&&
+                    l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
+            if(restored&&ExecutionUi.Menu(frame.Labels) is null)
+            {
+                if(++stable>=2)return;
+            }
+            else stable=0;
+        }
+        throw new RoutineBlockedException("CONTEXT_MENU_CANCEL_NOT_CONFIRMED");
+    }
+
     internal async Task Choose(Rectangle box,string action,CancellationToken ct)
     {
         var menu=await OpenMenu(box,ct);
         var hit=menu.Exact(action);
-        if(hit is null){await Escape(ct);throw new RoutineBlockedException("EXACT_CONTEXT_ACTION_NOT_FOUND");}
+        if(hit is null)
+        {
+            await DismissMenu(menu,ct);
+            throw new RoutineBlockedException("EXACT_CONTEXT_ACTION_NOT_FOUND");
+        }
         await Click(hit.Bounds,ct);
     }
     internal async Task OpenInventory(CancellationToken ct)
@@ -130,7 +174,8 @@ internal sealed class GameInteractions
         var items=new List<InventoryItem>();int empty=0;
         for(int i=0;i<28;i++)
         {
-            var before=Driver.Current.Pixels!.Slots[i];
+            var beforeFrame=Driver.Current;
+            var before=beforeFrame.Pixels!.Slots[i];
             if(cache.TryGetValue(i,out var cached)&&cached.Signature==before.Signature)
             {items.Add(cached);continue;}
             if(emptyCache.TryGetValue(i,out ulong emptyHash)&&emptyHash==before.Signature){empty++;continue;}
@@ -151,8 +196,12 @@ internal sealed class GameInteractions
                 var item=new InventoryItem(i,name,ExecutionCatalog.Stackable(name)?before.Quantity:1,before.Signature,before.Bounds);
                 cache[i]=item;emptyCache.Remove(i);items.Add(item);
             }
-            else{await Escape(ct);throw new RoutineBlockedException("AMBIGUOUS_OR_NON_INVENTORY_SLOT");}
-            await Escape(ct);
+            else
+            {
+                await DismissMenu(menu,ct,beforeFrame.Pixels.InventoryPanelSignature);
+                throw new RoutineBlockedException("AMBIGUOUS_OR_NON_INVENTORY_SLOT");
+            }
+            await DismissMenu(menu,ct,beforeFrame.Pixels.InventoryPanelSignature);
         }
         // Inventory movement while it was being inspected invalidates the whole
         // observation. Menu overlays are gone before comparing signatures.
@@ -178,7 +227,7 @@ internal sealed class GameInteractions
             if(!hint)continue;
             var menu=await OpenMenu(box,ct);
             string? found=options.FirstOrDefault(n=>menu.Exact(action+" "+n) is not null);
-            await Escape(ct);if(found is not null)return new(box,action,found);
+            await DismissMenu(menu,ct);if(found is not null)return new(box,action,found);
         }
         throw new RoutineBlockedException("REQUIRED_OBJECT_NOT_IDENTIFIED_IN_VISIBLE_SCENE");
     }
