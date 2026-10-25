@@ -389,7 +389,13 @@ internal sealed class GameInteractions
                 throw new RoutineBlockedException("AMBIGUOUS_OR_NON_INVENTORY_SLOT");
             }
             await DismissMenu(menu,ct,beforeFrame.Pixels,i);
-            learned.Add(new(before,items[^1],menu));
+            var evidence=new ItemMenuEvidence(before,items[^1],menu);
+            learned.Add(evidence);
+            // This one identity is now independently confirmed. An unrelated
+            // later slot failure need not discard it. Never publish a complete
+            // inventory result until the final whole-inventory check below.
+            if(Driver.Current.Pixels!.Slots[i].IdentityDigest==before.IdentityDigest)
+                knowledge?.Learn(new[]{evidence},Driver.Current.CapturedUtc);
         }
         // Inventory movement while it was being inspected invalidates the whole
         // observation. Menu overlays are gone before comparing signatures.
@@ -398,9 +404,6 @@ internal sealed class GameInteractions
                 ExecutionCatalog.Stackable(item.Name)&&Driver.Current.Pixels.Slots[item.Slot].Quantity!=item.Quantity)||
             emptyCache.Where(e=>!items.Any(i=>i.Slot==e.Key)).Any(e=>Driver.Current.Pixels!.Slots[e.Key].Signature!=e.Value))
             throw new RoutineBlockedException("INVENTORY_CHANGED_DURING_READ");
-        // Commit identity/menu evidence only after the whole inventory and
-        // menu dismissal are verified. Cancelled/partial scans teach nothing.
-        knowledge?.Learn(learned,Driver.Current.CapturedUtc);
         inventoryReport?.Invoke($"cached_items={cachedItems} scanned_items={learned.Count} empty_slots={empty} "+
             $"duration_ms={(long)System.Diagnostics.Stopwatch.GetElapsedTime(readStarted).TotalMilliseconds}");
         return new(items,empty,Driver.Current.CapturedUtc);

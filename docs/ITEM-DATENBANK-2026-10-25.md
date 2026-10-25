@@ -26,12 +26,15 @@ drei stabile Frames. Unveränderte Itembilder benötigen kein erneutes Kontextme
 unbekannte, geänderte, abgelaufene oder mehrdeutige Bilder werden neu gelesen.
 Jeder einzelne Pixel fließt in die SHA-256-Signatur ein. Mengen kommen immer
 aus dem aktuellen Frame; ein früher bekannter Münzbestand wird nie übernommen.
-Vor dem Rückgabewert und vor Datenbankschreibvorgängen werden alle während des
-Scans gesehenen vollständigen Slot-Signaturen erneut verglichen.
+Vor dem vollständigen Inventarergebnis werden alle während des Scans gesehenen
+vollständigen Slot-Signaturen erneut verglichen.
 
-Nur vollständige, bestätigte Inventardurchläufe lernen Item-/Menüeinträge.
-Ein Abbruch, ein nicht geschlossenes Menü oder ein verändertes Inventar legt
-keine neuen Einträge an. Die Datenbank führt keine Aktionen aus: Eine gespeicherte
+Einzelne Item-/Menüeinträge werden erst gelernt, wenn das jeweilige Menü
+nachweislich geschlossen und das vollständige Itembild unverändert ist.
+Ein Fehler an einem späteren Slot verwirft diese bereits bestätigte Identität
+nicht; er verhindert weiterhin ein vollständiges Inventarergebnis. Ein
+unbestätigtes Menü oder verändertes Itembild wird nicht gelernt.
+Die Datenbank führt keine Aktionen aus: Eine gespeicherte
 Aktion erlaubt keinen Klick auf ein ungeprüftes Menü. Unbekannte Mengen und
 mehrdeutige Anzeigen behalten die bestehenden Sperren.
 
@@ -42,7 +45,7 @@ mehrdeutige Anzeigen behalten die bestehenden Sperren.
 zwischen erstem und wiederholtem Durchlauf. Ein Datenbankfehler wird sichtbar
 gemeldet; nur unmittelbar bestätigte Sitzungsdaten können dann im Speicher
 weiterverwendet werden. Ein unbekanntes zukünftiges Datenbankschema wird nicht
-überschrieben. SQLite-WAL und eine Transaktion je bestätigtem Inventar schützen
+überschrieben. SQLite-WAL und eine Transaktion je bestätigtem Item schützen
 die zusammengehörigen Katalogeinträge.
 
 Die Datenbank verbessert die Inventarerkennung. Sie ersetzt keine Karten-
