@@ -475,6 +475,10 @@ internal sealed class VisualStartup:IDisposable
                 string.Join(",",rawCrop.Where(l=>l.Bounds.Top>=bottom-75&&
                     l.Bounds.Top<bottom&&Math.Abs(l.Bounds.Left-anchor.X)<=160)
                     .Select(l=>l.Bounds.Top).Distinct().OrderBy(y=>y).Take(12)):"none";
+            // Pixel positions only: reveal whether right-edge OCR is reading
+            // an upward or downward popup, without logging item names.
+            string cropPositions=string.Join(",",rawCrop.Take(8)
+                .Select(l=>$"{l.Bounds.Left}:{l.Bounds.Top}"));
             int headers=labels.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
             int cancels=labels.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
             // The panel hash is from the frame BEFORE the right-click. A
@@ -486,7 +490,8 @@ internal sealed class VisualStartup:IDisposable
             bool slotZero=pixels?.Slots.FirstOrDefault()?.Empty??false;
             string diagnostic=$"anchor_x={anchor.X} anchor_y={anchor.Y} focused_lines={focused} "+
                 $"header_candidates={headers} cancel_candidates={cancels} parsed={menu is not null} "+
-                $"entries={menu?.Entries.Count??0} inventory_tab_active={pixels?.InventoryTabActive??false} "+
+                $"entries={menu?.Entries.Count??0} crop_xy={(cropPositions.Length==0?"none":cropPositions)} "+
+                $"inventory_tab_active={pixels?.InventoryTabActive??false} "+
                 $"empty_candidates={empty} slot0_empty={slotZero} panel_changed={changed?.ToString()??"unknown"} "+
                 $"empty_pixel_quality={pixels?.InventorySlot0Diagnostic??"unavailable"} "+
                 $"crop_raw_lines={rawCrop.Length} crop_headers={cropHeaders} "+
@@ -789,6 +794,56 @@ internal sealed class VisualStartup:IDisposable
             if(ExecutionUi.Menu(cornerContrast)?.Exact("Examine Logs") is null&&
                 ExecutionUi.Menu(cornerOriginal)?.Exact("Examine Logs") is null)
                 throw new InvalidOperationException("Last-column independent menu OCR must read real Examine and Cancel");
+            // Live slot 19: (902,472) can render the context menu upward.
+            // The old corner crop y=420..600 loses an upper heading even
+            // though the right-click changes the inventory-panel pixels.
+            using var flippedRowFour=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(flippedRowFour))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,755,350);
+                g.DrawString("Use Logs",font,Brushes.White,755,375);
+                g.DrawString("Examine Logs",font,Brushes.White,755,400);
+                g.DrawString("Cancel",font,Brushes.White,755,425);
+            }
+            var rowFourAnchor=new Point(902,472);
+            var aboveContrast=await ContextMenuOcr.ReadRightEdgeRows(
+                flippedRowFour,engine,rowFourAnchor,above:true,contrast:true);
+            var aboveOriginal=await ContextMenuOcr.ReadRightEdgeRows(
+                flippedRowFour,engine,rowFourAnchor,above:true,contrast:false);
+            bool HasFullMenu(IReadOnlyList<VisualLabel> labels)=>
+                ExecutionUi.Menu(labels)?.Exact("Examine Logs") is not null&&
+                ExecutionUi.Menu(labels)?.Exact("Cancel") is not null;
+            if(!HasFullMenu(aboveContrast)&&!HasFullMenu(aboveOriginal))
+                throw new InvalidOperationException("Slot-19 upper right edge must OCR real header, Examine and Cancel");
+            var verifiedUpper=await ContextMenuOcr.Read(flippedRowFour,engine,rowFourAnchor);
+            if(ExecutionUi.Menu(verifiedUpper)?.Exact("Examine Logs") is null)
+                throw new InvalidOperationException("Slot-19 flipped menu requires independently verified full menu");
+            // The lower alternative still recognizes menus opening down.
+            using var downwardRowFour=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(downwardRowFour))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,755,456);
+                g.DrawString("Use Logs",font,Brushes.White,755,480);
+                g.DrawString("Examine Logs",font,Brushes.White,755,504);
+                g.DrawString("Cancel",font,Brushes.White,755,528);
+            }
+            var belowContrast=await ContextMenuOcr.ReadRightEdgeRows(
+                downwardRowFour,engine,rowFourAnchor,above:false,contrast:true);
+            var belowOriginal=await ContextMenuOcr.ReadRightEdgeRows(
+                downwardRowFour,engine,rowFourAnchor,above:false,contrast:false);
+            if(!HasFullMenu(belowContrast)&&!HasFullMenu(belowOriginal))
+                throw new InvalidOperationException("Slot-19 lower right edge must OCR real header, Examine and Cancel");
+            using var missingUpperHeading=new Bitmap(flippedRowFour);
+            using(var g=Graphics.FromImage(missingUpperHeading))
+                g.FillRectangle(Brushes.Black,new Rectangle(744,344,235,31));
+            var noUpperHeader=await ContextMenuOcr.ReadRightEdgeRows(
+                missingUpperHeading,engine,rowFourAnchor,above:true,contrast:true);
+            if(ExecutionUi.Menu(noUpperHeader) is not null)
+                throw new InvalidOperationException("Edge menu without a visible header is not actionable");
             var emptyCorner=await ContextMenuOcr.ReadCornerRows(
                 farRightRows,engine,new Point(902,508),contrast:true);
             if(ExecutionUi.Menu(emptyCorner) is not null)

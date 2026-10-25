@@ -91,6 +91,27 @@ internal static class ContextMenuOcr
         return ReadRegion(image,engine,region,4,contrast,nearest:true);
     }
 
+    // A rightmost-column menu can open either below the cursor or flip
+    // above it. The legacy corner crop starts at y=420 and may cut off the
+    // heading of an upward-flipped menu at row 4 (anchor y~472).
+    // Read bounded independent views of BOTH placements on the same frame.
+    internal static Rectangle RightEdgeRegion(Point anchor,Size size,bool above)
+    {
+        const int width=320,height=190;
+        if(size!=DockedWindowLayout.GameSize||anchor.X<880||anchor.X>=size.Width||
+            anchor.Y<460||anchor.Y>560)return Rectangle.Empty;
+        int top=above?anchor.Y-height+14:anchor.Y-38;
+        return new Rectangle(size.Width-width,Math.Clamp(top,0,size.Height-height),width,height);
+    }
+
+    internal static Task<List<VisualLabel>> ReadRightEdgeRows(
+        Bitmap image,OcrEngine engine,Point anchor,bool above,bool contrast)
+    {
+        var region=RightEdgeRegion(anchor,image.Size,above);
+        return region.IsEmpty?Task.FromResult(new List<VisualLabel>()):
+            ReadRegion(image,engine,region,5,contrast,nearest:true);
+    }
+
     internal static async Task<IReadOnlyList<VisualLabel>> Read(
         Bitmap image,OcrEngine engine,Point anchor)
     {
@@ -159,6 +180,19 @@ internal static class ContextMenuOcr
                     is { } menu)return menu;
             }
         }
+        // If the corner view cannot prove the menu, isolate the two actual
+        // on-screen placements at higher resolution. No click is retried.
+        if(!RightEdgeRegion(anchor,image.Size,above:false).IsEmpty)
+            foreach(bool above in new[]{false,true})
+                for(int pass=0;pass<2;pass++)
+                {
+                    var labels=await ReadRightEdgeRows(image,engine,anchor,above,
+                        contrast:pass==0);
+                    diagnosticCandidates.AddRange(labels.Select(l=>
+                        l with{Kind=VisualLabelKind.ContextMenuCandidate}));
+                    if(await Verify(image,engine,anchor,labels,requireExamine:true)
+                        is { } menu)return menu;
+                }
         // Partial OCR remains diagnostic only: never invent an Examine item,
         // a header, or a successful right-click from Cancel alone.
         return diagnosticCandidates;
@@ -397,6 +431,17 @@ internal static class ContextMenuOcr
             CornerRegion(new Point(902,328),size)!=Rectangle.Empty||
             CornerRegion(new Point(1000,508),size)!=Rectangle.Empty)
             throw new Exception("Only a final-column click permits a bounded OCR observation to the right viewport edge");
+        var edgeAnchor=new Point(902,472);
+        var edgeUpper=RightEdgeRegion(edgeAnchor,size,above:true);
+        var edgeLower=RightEdgeRegion(edgeAnchor,size,above:false);
+        if(edgeUpper.IsEmpty||!edgeUpper.Contains(edgeAnchor)||
+            !edgeUpper.Contains(new Rectangle(755,350,130,20))||
+            edgeLower.IsEmpty||!edgeLower.Contains(edgeAnchor)||
+            !edgeLower.Contains(new Rectangle(755,565,130,20))||
+            RightEdgeRegion(new Point(860,472),size,above:true)!=Rectangle.Empty||
+            RightEdgeRegion(new Point(902,328),size,above:false)!=Rectangle.Empty||
+            RightEdgeRegion(new Point(902,472),new Size(950,600),above:true)!=Rectangle.Empty)
+            throw new Exception("Rightmost-column OCR must observe both flipped placements without leaving the verified viewport");
         var textArea=new Rectangle(680,440,320,160);
         var examineWord=new VisualLabel("Examine",new Rectangle(786,568,55,13));
         var itemWord=new VisualLabel("Logs",new Rectangle(846,568,42,13));
