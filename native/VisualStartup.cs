@@ -153,6 +153,19 @@ internal static class PostEnterUnknownScreenPolicy
         now-lastAction>=BlockAfter&&decisionState=="WAITING_FOR_RECOGNIZED_SCREEN";
 }
 
+// In an already-open native inventory context menu the item quantities and
+// character/skill OCR crops are obscured or irrelevant. Preserve the complete
+// game-HUD read if independent native HUD pixels are not confirmed.
+internal static class InventoryMenuOcrPolicy
+{
+    internal static bool IsContext(Bitmap bitmap,Point? anchor)=>
+        anchor is Point point&&bitmap.Size==DockedWindowLayout.GameSize&&
+        InventoryTabPolicy.Active(bitmap)&&
+        Enumerable.Range(0,28).Any(i=>ExecutionUi.InventorySlot(i).Contains(point));
+    internal static bool FastHud(bool inventoryContext,bool nativeHudVerified)=>
+        inventoryContext&&nativeHudVerified;
+}
+
 internal sealed class VisualStartup:IDisposable
 {
     private readonly Diagnostics log;
@@ -422,10 +435,19 @@ internal sealed class VisualStartup:IDisposable
         var point=new POINT();
         if(!ClientToScreen(target,ref point))return null;
         var bounds=new Rectangle(point.X,point.Y,captured.Image.Width,captured.Image.Height);
+        long ocrStart=System.Diagnostics.Stopwatch.GetTimestamp();
         var labels=await Recognize(captured.Image,ocr!,
             postPlay: recovery.Recovering||previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME",
             contextAnchor:contextMenuAnchor);
         ct.ThrowIfCancellationRequested();
+        var ocrElapsed=System.Diagnostics.Stopwatch.GetElapsedTime(ocrStart);
+        if(contextMenuAnchor is Point&&ocrElapsed>=TimeSpan.FromMilliseconds(1400))
+            log.Add(Severity.INFO,"GAMEPLAY","MENU_OCR_TIMING",
+                $"duration_ms={(int)ocrElapsed.TotalMilliseconds} "+
+                $"frame_age_ms={(int)(DateTimeOffset.UtcNow-captured.CapturedUtc).TotalMilliseconds} "+
+                $"native_hud={labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
+                $"inventory_active={InventoryTabPolicy.Active(captured.Image)} "+
+                "screenshot_persisted=false");
         var pixels=ExecutionVision.Read(captured.Image,labels);
         if(contextMenuAnchor is Point anchor)
         {
@@ -532,27 +554,53 @@ internal sealed class VisualStartup:IDisposable
         var focusedWorlds=await WorldGridOcr.Read(bitmap,engine,labels);
         labels.AddRange(focusedWorlds.Count>0?focusedWorlds:WorldGridReader.Classify(labels));
         labels.AddRange(WorldPageReader.Read(bitmap,labels));
-        foreach(var focused in await GameplayHudOcr.Read(bitmap,engine))
+        bool inventoryContext=InventoryMenuOcrPolicy.IsContext(bitmap,contextAnchor);
+        bool nativeHudVerified=false;
+        if(inventoryContext)
         {
-            labels.RemoveAll(l=>l.Kind==focused.Kind&&l.Text.Equals(focused.Text,StringComparison.OrdinalIgnoreCase)&&l.Bounds.IntersectsWith(focused.Bounds));
-            labels.Add(focused);
+            // A directed inventory right-click has its own menu OCR below.
+            // First check the actual minimap, tab icon and chat-footer pixels.
+            // If all native HUD anchors survive the overlay, expensive
+            // chat/skill/quantity OCR cannot add action evidence for this
+            // already-open menu and need not delay its screenshot.
+            labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
+            if(NativeGameHudReader.Skills(bitmap) is VisualLabel nativeSkills)
+                labels.Add(nativeSkills);
+            if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel nativeHud)
+            {
+                labels.Add(nativeHud);
+                nativeHudVerified=true;
+            }
         }
+        if(!InventoryMenuOcrPolicy.FastHud(inventoryContext,nativeHudVerified))
+            foreach(var focused in await GameplayHudOcr.Read(bitmap,engine))
+            {
+                labels.RemoveAll(l=>l.Kind==focused.Kind&&l.Text.Equals(focused.Text,StringComparison.OrdinalIgnoreCase)&&l.Bounds.IntersectsWith(focused.Bounds));
+                labels.Add(focused);
+            }
         labels=labels.Distinct().ToList();
-        // The native chat line uses P12 raster glyphs; a complete username
-        // plus ':' plus its blue input cursor is independently observable
-        // without relying on unreliable enlarged Windows OCR.
+        // Native P12 chat glyphs remain usable without any OCR inference.
         if(NativeCharacterFontReader.Read(bitmap) is VisualLabel nativePrompt)
         {
             labels.RemoveAll(l=>l.Kind==VisualLabelKind.CharacterPrompt);
             labels.Add(nativePrompt);
         }
-        labels.AddRange(await CharacterSummaryReader.Read(bitmap,engine));
-        labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
-        labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
-        if(NativeGameHudReader.Skills(bitmap) is VisualLabel skillsButton)labels.Add(skillsButton);
-        if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel hud)labels.Add(hud);
-        if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
-            labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
+        if(!inventoryContext)
+        {
+            labels.AddRange(await CharacterSummaryReader.Read(bitmap,engine));
+            labels.AddRange(await SkillGridOcr.Read(bitmap,engine,labels));
+            labels.AddRange(await ExecutionVision.ReadHealth(bitmap,engine,labels));
+            if(NativeGameHudReader.Skills(bitmap) is VisualLabel skillsButton)
+                labels.Add(skillsButton);
+            if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel hud)
+                labels.Add(hud);
+            if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),
+                DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
+                labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
+        }
+        // While a menu is open, item-stack digits may be obscured or confused
+        // with menu OCR. The neutral pre-click and post-Cancel captures still
+        // read quantities normally and validate the final inventory deltas.
         if(contextAnchor is Point anchor)
             // Even a global "Choose Option / Cancel" pair can miss an item's
             // Examine entry. The focused view must get its own chance to read
@@ -1185,6 +1233,28 @@ internal static class VisualStartupTests
             !PostEnterUnknownScreenPolicy.ShouldBlock("ENTER_GAME",postEnterAt,postEnterAt.AddSeconds(31),
                 VisibleGameStage.Unknown,"ENTER_GAME"),
             "known stage, guarded prompt and different actions cannot be timed out");
+        using(var menuScreen=new Bitmap(1000,600))
+        {
+            using(var p=Graphics.FromImage(menuScreen))
+            using(var selected=new SolidBrush(Color.FromArgb(125,31,28)))
+                p.FillRectangle(selected,InventoryTabPolicy.Icon);
+            Require(InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(902,544))&&
+                InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(776,436))&&
+                !InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(500,400))&&
+                !InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(838,582)),
+                "OCR fast path requires real selected Inventory tab and an actual item-slot right-click");
+            Require(!InventoryMenuOcrPolicy.FastHud(true,false)&&
+                InventoryMenuOcrPolicy.FastHud(true,true)&&
+                !InventoryMenuOcrPolicy.FastHud(false,true),
+                "full HUD OCR must remain available unless native pixels independently verify the HUD");
+            using(var p=Graphics.FromImage(menuScreen))
+                p.FillRectangle(Brushes.Black,InventoryTabPolicy.Icon);
+            Require(!InventoryMenuOcrPolicy.IsContext(menuScreen,new Point(902,544)),
+                "unselected Inventory tab cannot bypass full visual OCR");
+            using var wrongMenuViewport=new Bitmap(950,600);
+            Require(!InventoryMenuOcrPolicy.IsContext(wrongMenuViewport,new Point(902,544)),
+                "unverified capture geometry cannot use inventory menu fast path");
+        }
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),Label("CLICK HERE TO PLAY",80)},417,true).State=="ENTER_GAME",
             "welcome transition");
         Require(VisualStartupPolicy.Decide(new[]{Label("Welcome",10),
