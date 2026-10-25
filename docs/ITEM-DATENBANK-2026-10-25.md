@@ -14,6 +14,18 @@ Spielbilder und Menü-Klickkoordinaten werden dort nicht gespeichert.
 Darstellungsprofil und einer zufälligen Sitzungskennung zu. Widersprüchliche
 Namen für dieselben Pixel werden als mehrdeutig markiert.
 
+`reference_items` enthält IDs und normalisierte Referenznamen aus der öffentlichen
+OSRS-Wiki-Preis-Mapping-API. Der Katalog wird höchstens einmal pro Programmstart
+geprüft und nach sieben Tagen aktualisiert. Netzwerkprobleme lassen gespeicherte
+Referenzen und die eingebauten Methodennamen verfügbar. OCR-Schreibweisen, die
+keinem Referenznamen entsprechen, werden als unbestätigte Beobachtungen gespeichert
+und nicht für Wiedererkennung freigegeben. Es gibt keine automatische unscharfe
+Korrektur wie „bi9“ → „big“. Eine später tatsächlich gelesene gültige Schreibweise
+kann eine unbestätigte Identität ersetzen; widersprüchliche gültige Namen bleiben
+gesperrt. Schema 1 wird um den Referenzkatalog auf Schema 2 erweitert.
+
+Referenzquelle: https://prices.runescape.wiki/api/v1/osrs/mapping
+
 Die schnelle Wiedererkennung verwendet nur bestätigte Beobachtungen der
 aktuellen Sitzung, höchstens fünf Minuten nach ihrer direkten Menüprüfung.
 Sie überlebt neue Aufgabenzyklen und `GameInteractions`-Objekte. Charakter-,

@@ -52,13 +52,18 @@ internal static class ItemKnowledgeStoreTests
                 Require(store.Recognize(slot,now) is null,"conflicting names for identical pixels invalidate recognition");
                 store.ResetSession();
                 Require(store.Recognize(slot,now) is null,"session reset removes recognition authorization");
+                store.Learn(new[]{Evidence("bi9 bones")},now);
+                Require(store.Recognize(slot,now) is null,"unverified OCR spelling cannot become a reusable item identity");
+                store.Learn(new[]{Evidence("logs")},now);
+                Require(store.Recognize(slot,now)?.Name=="logs","a later directly observed canonical name can replace an untrusted spelling");
+                store.ResetSession();
                 store.Learn(new[]{Evidence("logs")},now);
             }
             using(var reopened=new ItemKnowledgeStore(path))
                 Require(reopened.Recognize(slot,now) is null,"persistent catalogue cannot impersonate a fresh session observation");
             using(var future=new SqliteConnection("Data Source="+path+";Pooling=False"))
             {
-                future.Open();using var command=future.CreateCommand();command.CommandText="PRAGMA user_version=2";command.ExecuteNonQuery();
+                future.Open();using var command=future.CreateCommand();command.CommandText="PRAGMA user_version=3";command.ExecuteNonQuery();
             }
             var schemaReports=new List<string>();
             using(var futureStore=new ItemKnowledgeStore(path,schemaReports.Add))futureStore.Learn(new[]{Evidence("logs")},now);

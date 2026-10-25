@@ -25,7 +25,8 @@ internal sealed class GameplayCoordinator:IDisposable
     internal GameplayCoordinator(Diagnostics log)
     {
         this.log=log;directory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","agent");
-        itemKnowledge=new(Path.Combine(directory,"items.sqlite"),message=>log.Add(Severity.WARN,"ITEM_DATABASE","UNAVAILABLE",message));
+        itemKnowledge=new(Path.Combine(directory,"items.sqlite"),message=>log.Add(
+            message.StartsWith("ITEM_REFERENCE_READY",StringComparison.Ordinal)?Severity.INFO:Severity.WARN,"ITEM_DATABASE","STATUS",message));
     }
     internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();Set("WAITING_FOR_SKILLS");}
     private void Set(string state)
@@ -119,6 +120,7 @@ internal sealed class GameplayCoordinator:IDisposable
             else
             {
                 Set("READING_INVENTORY_FOR_AUTOMATIC_ACTIVITY");
+                await itemKnowledge.EnsureReference(budget.Token);
                 var inventory=await game.Inventory(budget.Token);
                 // An unsubmitted purchase intent may wait while supplied work
                 // proceeds. Never replace it with a second acquisition chain.

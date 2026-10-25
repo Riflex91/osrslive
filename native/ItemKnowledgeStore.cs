@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Text.Json;
 
 namespace OSRSLiveDiagnostics;
 
@@ -15,10 +16,61 @@ internal sealed class ItemKnowledgeStore:IDisposable
     private SqliteConnection? connection;
     private bool unavailable;
     private string session=Guid.NewGuid().ToString("N");
+    private bool referenceAttempted;
+    private readonly HashSet<string> canonical=new(
+        ExecutionCatalog.Training.SelectMany(s=>new[]{s.Product,s.Input,s.SecondInput,s.Tool})
+            .Where(s=>!string.IsNullOrEmpty(s)&&s is not ("axe" or "pickaxe")).Select(s=>s!)
+            .Concat(F2PProgression.Axes.Select(t=>t.Item)).Concat(F2PProgression.Pickaxes.Select(t=>t.Item))
+            .Concat(CombatPolicy.Food).Concat(CombatPolicy.Specs.SelectMany(s=>s.Weapons))
+            .Concat(new[]{"coins","pure essence","bronze arrow","air rune","mind rune"}),StringComparer.OrdinalIgnoreCase);
     internal static readonly TimeSpan Lifetime=TimeSpan.FromMinutes(5);
     internal ItemKnowledgeStore(string path,Action<string>? report=null)
     {this.path=path;this.report=report??(_=>{});}
     internal void ResetSession(){identities.Clear();session=Guid.NewGuid().ToString("N");}
+    internal async Task EnsureReference(CancellationToken ct)
+    {
+        if(referenceAttempted||unavailable)return;
+        referenceAttempted=true;
+        try
+        {
+            var db=Open();DateTimeOffset newest=default;
+            using(var command=db.CreateCommand())
+            {
+                command.CommandText="SELECT normalized_name,fetched_utc FROM reference_items";
+                using var reader=command.ExecuteReader();
+                while(reader.Read())
+                {
+                    canonical.Add(reader.GetString(0));
+                    if(DateTimeOffset.TryParse(reader.GetString(1),out var time)&&time>newest)newest=time;
+                }
+            }
+            var now=DateTimeOffset.UtcNow;
+            if(newest<=now&&now-newest<TimeSpan.FromDays(7))return;
+            using var http=new HttpClient{Timeout=TimeSpan.FromSeconds(12)};
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("OSRS-Play/1.7.2 (+https://github.com/Riflex91/osrslive; item-name-reference)");
+            using var response=await http.GetAsync("https://prices.runescape.wiki/api/v1/osrs/mapping",ct);
+            response.EnsureSuccessStatusCode();
+            using var json=JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            var entries=json.RootElement.EnumerateArray().Select(e=>(Id:e.GetProperty("id").GetInt32(),
+                Name:ExecutionCatalog.Normalize(e.GetProperty("name").GetString()!)))
+                .Where(e=>e.Id>0&&e.Name.Length is >0 and <=100).ToArray();
+            if(entries.Length<1000)throw new InvalidDataException("ITEM_REFERENCE_INCOMPLETE");
+            using var transaction=db.BeginTransaction();
+            foreach(var entry in entries)
+                Execute(db,transaction,"INSERT INTO reference_items(item_id,normalized_name,fetched_utc) VALUES($id,$name,$time) "+
+                    "ON CONFLICT(item_id) DO UPDATE SET normalized_name=excluded.normalized_name,fetched_utc=excluded.fetched_utc",
+                    ("$id",entry.Id),("$name",entry.Name),("$time",now.ToString("O")));
+            transaction.Commit();
+            foreach(var entry in entries)canonical.Add(entry.Name);
+            report($"ITEM_REFERENCE_READY names={entries.Length} source=OSRS_WIKI_MAPPING");
+        }
+        catch(OperationCanceledException) when(!ct.IsCancellationRequested)
+        {report("ITEM_REFERENCE_UNAVAILABLE reason=TIMEOUT cached_or_builtin_names_only=true");}
+        catch(Exception ex) when(ex is HttpRequestException or JsonException or InvalidDataException or KeyNotFoundException or InvalidOperationException or FormatException)
+        {report("ITEM_REFERENCE_UNAVAILABLE reason="+ex.GetType().Name+" previously_verified_names_only=true");}
+        catch(Exception ex) when(ex is SqliteException or IOException or UnauthorizedAccessException)
+        {Disable(ex);}
+    }
     private static bool Digest(string? digest)=>digest is {Length:64}&&digest.All(Uri.IsHexDigit);
     internal InventoryItem? Recognize(ObservedSlot slot,DateTimeOffset now)
     {
@@ -41,10 +93,10 @@ internal sealed class ItemKnowledgeStore:IDisposable
         foreach(var e in accepted)
         {
             string key=e.Slot.IdentityDigest!;
-            if(identities.TryGetValue(key,out var prior)&&
-                (prior.Ambiguous||prior.Name!=e.Item.Name))
-                identities[key]=prior with{Ambiguous=true};
-            else identities[key]=new(e.Item.Name,now);
+            if(identities.TryGetValue(key,out var prior)&&canonical.Contains(prior.Name)&&
+                (prior.Ambiguous||prior.Name!=e.Item.Name))identities[key]=prior with{Ambiguous=true};
+            else identities[key]=new(e.Item.Name,now,Ambiguous:!canonical.Contains(e.Item.Name));
+            if(!canonical.Contains(e.Item.Name))report("ITEM_NAME_UNVERIFIED cache_authorized=false");
         }
         if(accepted.Length==0||unavailable)return;
         try
@@ -62,7 +114,7 @@ internal sealed class ItemKnowledgeStore:IDisposable
                         ("$name",e.Item.Name),("$action",action),("$time",now.ToString("O")));
                 Execute(db,transaction,"INSERT INTO visual_observations(session_id,digest,item_name,profile,verified_utc,ambiguous) "+
                     "VALUES($session,$digest,$name,'native-1000x600-rgba32-v1',$time,$ambiguous) "+
-                    "ON CONFLICT(session_id,digest) DO UPDATE SET verified_utc=excluded.verified_utc,ambiguous=excluded.ambiguous",
+                    "ON CONFLICT(session_id,digest) DO UPDATE SET item_name=excluded.item_name,verified_utc=excluded.verified_utc,ambiguous=excluded.ambiguous",
                     ("$session",session),("$digest",e.Slot.IdentityDigest!),("$name",e.Item.Name),
                     ("$time",now.ToString("O")),("$ambiguous",identities[e.Slot.IdentityDigest!].Ambiguous?1:0));
             }
@@ -70,8 +122,7 @@ internal sealed class ItemKnowledgeStore:IDisposable
         }
         catch(Exception ex) when(ex is SqliteException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
-            unavailable=true;connection?.Dispose();connection=null;
-            report("ITEM_DATABASE_UNAVAILABLE reason="+ex.GetType().Name+" verified_session_cache_only=true");
+            Disable(ex);
         }
     }
     private SqliteConnection Open()
@@ -86,16 +137,22 @@ internal sealed class ItemKnowledgeStore:IDisposable
             using(var version=db.CreateCommand())
             {
                 version.CommandText="PRAGMA user_version";
-                if(Convert.ToInt32(version.ExecuteScalar()) is not (0 or 1))
+                if(Convert.ToInt32(version.ExecuteScalar()) is not (0 or 1 or 2))
                     throw new InvalidDataException("ITEM_DATABASE_SCHEMA_UNSUPPORTED");
             }
             Execute(db,null,"PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; "+
                 "CREATE TABLE IF NOT EXISTS items(name TEXT PRIMARY KEY,first_seen_utc TEXT NOT NULL,last_seen_utc TEXT NOT NULL); "+
                 "CREATE TABLE IF NOT EXISTS menu_actions(item_name TEXT NOT NULL REFERENCES items(name),context TEXT NOT NULL,action TEXT NOT NULL,last_seen_utc TEXT NOT NULL,PRIMARY KEY(item_name,context,action)); "+
-                "CREATE TABLE IF NOT EXISTS visual_observations(session_id TEXT NOT NULL,digest TEXT NOT NULL,item_name TEXT NOT NULL REFERENCES items(name),profile TEXT NOT NULL,verified_utc TEXT NOT NULL,ambiguous INTEGER NOT NULL,PRIMARY KEY(session_id,digest)); PRAGMA user_version=1;");
+                    "CREATE TABLE IF NOT EXISTS visual_observations(session_id TEXT NOT NULL,digest TEXT NOT NULL,item_name TEXT NOT NULL REFERENCES items(name),profile TEXT NOT NULL,verified_utc TEXT NOT NULL,ambiguous INTEGER NOT NULL,PRIMARY KEY(session_id,digest)); "+
+                    "CREATE TABLE IF NOT EXISTS reference_items(item_id INTEGER PRIMARY KEY,normalized_name TEXT NOT NULL,fetched_utc TEXT NOT NULL); PRAGMA user_version=2;");
             connection=db;return db;
         }
         catch{db.Dispose();throw;}
+    }
+    private void Disable(Exception ex)
+    {
+        unavailable=true;connection?.Dispose();connection=null;
+        report("ITEM_DATABASE_UNAVAILABLE reason="+ex.GetType().Name+" verified_session_cache_only=true");
     }
     private static void Execute(SqliteConnection db,SqliteTransaction? transaction,string sql,params (string Name,object Value)[] args)
     {
