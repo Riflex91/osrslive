@@ -217,6 +217,16 @@ internal static class ExecutionRoutinesTests
             $" items={checkedInventory.Items.Count} name={(checkedInventory.Items.FirstOrDefault()?.Name??"none")}"+
             $" empty={checkedInventory.EmptySlots} right={cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)}"+
             $" left={cancellable.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)}");
+        var cancelOnlyLabels=new[]{L("Choose Option",30,30),L("Cancel",30,98)};
+        var cancelOnlyDriver=new InventoryMenuDriver(cancelOnlyLabels,closes:true);
+        bool cancelOnlyBlocked=false;
+        try{await new GameInteractions(cancelOnlyDriver).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){cancelOnlyBlocked=ex.Message=="AMBIGUOUS_OR_NON_INVENTORY_SLOT";}
+        Require(cancelOnlyBlocked&&
+            cancelOnlyDriver.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1&&
+            cancelOnlyDriver.Inputs.Any(i=>i.Kind==GameInputKind.LeftClick&&
+                i.Bounds==cancelOnlyLabels[1].Bounds),
+            "Cancel-only menu must be safely dismissed, never treated as an empty inventory slot");
         var stuckMenu=new InventoryMenuDriver(menu,closes:false);
         bool stuckBlocked=false;
         try{await new GameInteractions(stuckMenu).Inventory(CancellationToken.None);}

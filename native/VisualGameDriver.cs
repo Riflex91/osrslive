@@ -275,9 +275,11 @@ internal sealed class GameInteractions
                 throw new RoutineBlockedException("INVENTORY_TAB_LOST_BEFORE_RIGHT_CLICK");
             var menu=await OpenMenu(before.Bounds,ct);
             var examines=menu.Entries.Where(e=>e.Text.StartsWith("Examine ",StringComparison.OrdinalIgnoreCase)).ToArray();
-            if(examines.Length==0&&menu.Entries.Count==1&&menu.Exact("Cancel") is not null)
-            {emptyCache[i]=before.Signature;cache.Remove(i);empty++;}
-            else if(examines.Length==1)
+            // A Cancel-only OCR result may be an occupied item's partially
+            // recognized menu. Empty slots are authorized ONLY by the two
+            // independent native-pixel observations above, never by the
+            // absence of a readable Examine line.
+            if(examines.Length==1)
             {
                 string name=ExecutionCatalog.Normalize(examines[0].Text[8..]);
                 if(name.Length==0||name.Length>50)throw new RoutineBlockedException("INVALID_ITEM_NAME");

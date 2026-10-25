@@ -34,6 +34,44 @@ internal static class NativeMenuHeaderReader
         int maxX=Math.Min(image.Width-Width,examine.Bounds.Left+12);
         int minY=Math.Max(0,Math.Max(examine.Bounds.Top-120,anchor.Y-38));
         int maxY=Math.Min(image.Height-Height,Math.Min(examine.Bounds.Top-14,anchor.Y+40));
+        var best=Find(image,minX,maxX,minY,maxY);
+        if(best is null)return null;
+        int x=best.Value.X,y=best.Value.Y;
+        if(Math.Abs(x-examine.Bounds.Left)>22||
+            y>=examine.Bounds.Top||y+Height>=cancel.Bounds.Top||
+            anchor.X<x-20||anchor.X>x+Width+20||
+            anchor.Y<y-25||anchor.Y>y+Height+20)
+            return null;
+        return new("Choose Option",new Rectangle(x,y,Width,Height));
+    }
+
+    // On a bottom-row right-click the menu may flip above the cursor.
+    // A real, separately OCR-recognized Cancel bounds the search; the exact
+    // 93x14 native heading must still match original pixels uniquely.
+    internal static VisualLabel? ReadNearCancel(Bitmap image,Point anchor,VisualLabel cancel)
+    {
+        if(image.Size!=DockedWindowLayout.GameSize||
+            !cancel.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase)||
+            anchor.X<0||anchor.X>=image.Width||anchor.Y<0||anchor.Y>=image.Height||
+            !new Rectangle(Point.Empty,image.Size).Contains(cancel.Bounds)||
+            Math.Abs(cancel.Bounds.Left-anchor.X)>130)return null;
+        int minX=Math.Max(0,cancel.Bounds.Left-24);
+        int maxX=Math.Min(image.Width-Width,cancel.Bounds.Left+15);
+        int minY=Math.Max(0,cancel.Bounds.Top-250);
+        int maxY=Math.Min(image.Height-Height,cancel.Bounds.Top-20);
+        var best=Find(image,minX,maxX,minY,maxY);
+        if(best is null)return null;
+        int x=best.Value.X,y=best.Value.Y;
+        if(Math.Abs(x-cancel.Bounds.Left)>24||y+Height>=cancel.Bounds.Top)
+            return null;
+        var menuArea=Rectangle.FromLTRB(Math.Max(0,x-30),Math.Max(0,y-30),
+            Math.Min(image.Width,x+220),Math.Min(image.Height,cancel.Bounds.Bottom+35));
+        if(!menuArea.Contains(anchor))return null;
+        return new("Choose Option",new Rectangle(x,y,Width,Height));
+    }
+
+    private static Point? Find(Bitmap image,int minX,int maxX,int minY,int maxY)
+    {
         if(minX>maxX||minY>maxY)return null;
         int best=int.MinValue,second=int.MinValue,bestX=-1,bestY=-1;
         for(int y=minY;y<=maxY;y++)
@@ -48,8 +86,6 @@ internal static class NativeMenuHeaderReader
                 {if(Ink(c))matchedInk++;}
                 else if(Backdrop(c))matchedBackground++;
             }
-            // Both the actual glyph and the black surrounding header must
-            // match. A plain brown inventory cell is never a text match.
             if(matchedInk<InkPixels*90/100||
                 matchedBackground<(Width*Height-InkPixels)*95/100)continue;
             int score=matchedInk*2+matchedBackground;
@@ -63,12 +99,7 @@ internal static class NativeMenuHeaderReader
                 second=Math.Max(second,score);
         }
         if(bestX<0||(second!=int.MinValue&&best-second<45))return null;
-        if(Math.Abs(bestX-examine.Bounds.Left)>22||
-            bestY>=examine.Bounds.Top||bestY+Height>=cancel.Bounds.Top||
-            anchor.X<bestX-20||anchor.X>bestX+Width+20||
-            anchor.Y<bestY-25||anchor.Y>bestY+Height+20)
-            return null;
-        return new("Choose Option",new Rectangle(bestX,bestY,Width,Height));
+        return new Point(bestX,bestY);
     }
 
     internal static void SelfTest()
@@ -91,6 +122,23 @@ internal static class NativeMenuHeaderReader
             throw new Exception("Verified brown-grey native menu header not decoded");
         if(Read(bitmap,new Point(450,300),examine,cancel) is not null)
             throw new Exception("Unrelated click must not authorize a menu header");
+        using var flipped=new Bitmap(1000,600);
+        using(var g=Graphics.FromImage(flipped))
+        {
+            g.Clear(Color.FromArgb(70,61,51));
+            g.FillRectangle(Brushes.Black,new Rectangle(780,384,135,32));
+        }
+        for(int py=0;py<Height;py++)for(int px=0;px<Width;px++)
+            if(HasInk(px,py))flipped.SetPixel(790+px,393+py,Color.FromArgb(93,84,71));
+        var flippedCancel=new VisualLabel("Cancel",new Rectangle(788,480,52,13));
+        var flippedAnchor=new Point(860,508);
+        if(ReadNearCancel(flipped,flippedAnchor,flippedCancel)?.Text!="Choose Option"||
+            ReadNearCancel(flipped,new Point(500,508),flippedCancel) is not null)
+            throw new Exception("Flipped native menu header requires real glyphs and the correct click anchor");
+        for(int py=0;py<Height;py++)for(int px=0;px<Width;px++)
+            if(HasInk(px,py))flipped.SetPixel(790+px,393+py,Color.Black);
+        if(ReadNearCancel(flipped,flippedAnchor,flippedCancel) is not null)
+            throw new Exception("A Cancel OCR hit cannot invent a flipped native header");
         // A missing or damaged header must NEVER be supplied from menu
         // geometry or from Examine/Cancel alone.
         for(int py=0;py<Height;py++)for(int px=0;px<Width;px++)

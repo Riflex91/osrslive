@@ -20,90 +20,144 @@ internal static class ContextMenuOcr
         return new Rectangle(x,y,width,height);
     }
 
+    // A compact, cursor-anchored second view isolates menus that flip up and
+    // left at the bottom/right inventory edge. It never changes click targets.
+    internal static Rectangle TightRegion(Point anchor,Size size)
+    {
+        const int width=280,height=270;
+        if(size.Width<width||size.Height<height||anchor.X<0||anchor.Y<0||
+            anchor.X>=size.Width||anchor.Y>=size.Height)return Rectangle.Empty;
+        return new Rectangle(Math.Clamp(anchor.X-185,0,size.Width-width),
+            Math.Clamp(anchor.Y-210,0,size.Height-height),width,height);
+    }
+
     internal static async Task<IReadOnlyList<VisualLabel>> Read(
         Bitmap image,OcrEngine engine,Point anchor)
     {
         var region=Region(anchor,image.Size);
         if(region.IsEmpty||image.Size!=DockedWindowLayout.GameSize)
             return Array.Empty<VisualLabel>();
-        // Every OCR result must physically come from the clicked window, and
-        // each pass must independently contain a header and terminal Cancel.
-        // No row/index heuristic fills missing OCR lines. Keep non-actionable
-        // OCR candidates solely for counting diagnostics when this fails.
         var diagnosticCandidates=new List<VisualLabel>();
+        // Broad OCR remains the primary read; each pass must independently
+        // verify its own labels before anything becomes an actionable menu.
         for(int pass=0;pass<2;pass++)
         {
-            const int scale=3,padding=12;
-            using var crop=pass==0?
-                GameplayHudOcr.Contrast(image,region):
-                image.Clone(region,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            using var sheet=new Bitmap(region.Width*scale+padding*2,
-                region.Height*scale+padding*2);
-            using(var graphics=Graphics.FromImage(sheet))
-            {
-                graphics.Clear(Color.White);
-                graphics.InterpolationMode=pass==0?
-                    System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor:
-                    System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                graphics.DrawImage(crop,new Rectangle(padding,padding,
-                    crop.Width*scale,crop.Height*scale));
-            }
-            var raw=await VisualStartup.RecognizeRaw(sheet,engine);
-            var labels=new List<VisualLabel>();
-            foreach(var line in raw.Lines.Where(l=>l.Words.Count>0))
-            {
-                var bounds=line.Words.Select(w=>new Rectangle(
-                    (int)Math.Floor((w.BoundingRect.X-padding)/(double)scale)+region.X,
-                    (int)Math.Floor((w.BoundingRect.Y-padding)/(double)scale)+region.Y,
-                    Math.Max(1,(int)Math.Ceiling(w.BoundingRect.Width/scale)),
-                    Math.Max(1,(int)Math.Ceiling(w.BoundingRect.Height/scale))))
-                    .Aggregate(Rectangle.Union);
-                if(region.Contains(bounds)&&line.Text.Length is >0 and <=90)
-                    labels.Add(new(line.Text,bounds));
-            }
+            var labels=await ReadRegion(image,engine,region,3,
+                contrast:pass==0,nearest:pass==0);
             diagnosticCandidates.AddRange(labels.Select(l=>
-                l with {Kind=VisualLabelKind.ContextMenuCandidate}));
-            // Live OCR sees Examine and Cancel but frequently misses the
-            // small yellow "Choose Option" heading in a 400x430 crop. Retry
-            // ONLY its visible pixels at a small, anchored 220x~75 region.
-            // A valid header must be read from pixels, never inferred from
-            // the existence of an Examine/Cancel pair.
-            if(!labels.Any(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase))&&
-                labels.Any(l=>l.Text.Trim().StartsWith("Examine ",StringComparison.OrdinalIgnoreCase))&&
-                labels.Any(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase)))
-            {
-                var recovered=await RecoverHeader(image,engine,anchor,labels);
-                if(recovered is not null)labels.Add(recovered);
-            }
-            if(ExecutionUi.Menu(labels) is not ContextMenu parsed||parsed.Entries.Count==0)
-                continue;
-            var header=labels.Single(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
-            var cancel=labels.Where(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase)&&
-                l.Bounds.Top>header.Bounds.Bottom&&Math.Abs(l.Bounds.Left-header.Bounds.Left)<30)
-                .OrderBy(l=>l.Bounds.Top).First();
-            // The menu must sit next to (or be flipped around) the actual
-            // right-click position, not elsewhere in the game window.
-            var menuBounds=Rectangle.FromLTRB(
-                Math.Max(0,header.Bounds.Left-18),Math.Max(0,header.Bounds.Top-8),
-                Math.Min(image.Width,header.Bounds.Left+290),
-                Math.Min(image.Height,cancel.Bounds.Bottom+8));
-            // Near the lower/right viewport edge the native menu can flip
-            // above or beside the click, leaving a small gap at its border.
-            // Accept a nearby visible menu, never one elsewhere in the frame.
-            menuBounds.Inflate(24,24);
-            menuBounds.Intersect(new Rectangle(Point.Empty,image.Size));
-            if(!menuBounds.Contains(anchor))continue;
-            return labels.Where(l=>l.Bounds.Top>=header.Bounds.Top&&
-                l.Bounds.Bottom<=cancel.Bounds.Bottom+2&&
-                Math.Abs(l.Bounds.Left-header.Bounds.Left)<30)
-                .Select(l=>l with {Kind=VisualLabelKind.ContextMenuLine}).ToArray();
+                l with{Kind=VisualLabelKind.ContextMenuCandidate}));
+            if(await Verify(image,engine,anchor,labels) is { } menu)return menu;
         }
-        // Candidate labels are deliberately NOT recognized menu lines, so
-        // neither interactions nor item identification can use partial OCR.
+        // The 400x430 view can blend the flipped menu text with inventory and
+        // chat labels. Only a real Cancel OCR hit authorizes bounded tighter
+        // observation of the SAME screenshot. No new mouse input is sent.
+        if(diagnosticCandidates.Any(l=>l.Text.Trim().Equals("Cancel",
+            StringComparison.OrdinalIgnoreCase)))
+        {
+            var tight=TightRegion(anchor,image.Size);
+            if(!tight.IsEmpty)
+                for(int pass=0;pass<2;pass++)
+                {
+                    var labels=await ReadRegion(image,engine,tight,4,
+                        contrast:pass==0,nearest:true);
+                    diagnosticCandidates.AddRange(labels.Select(l=>
+                        l with{Kind=VisualLabelKind.ContextMenuCandidate}));
+                    if(await Verify(image,engine,anchor,labels,requireExamine:true)
+                        is { } menu)return menu;
+                }
+        }
+        // Partial OCR remains diagnostic only: never invent an Examine item,
+        // a header, or a successful right-click from Cancel alone.
         return diagnosticCandidates;
     }
 
-    // This is the only header fallback. The independent OCR must actually
+    private static async Task<List<VisualLabel>> ReadRegion(Bitmap image,OcrEngine engine,
+        Rectangle region,int scale,bool contrast,bool nearest)
+    {
+        const int padding=12;
+        using var crop=contrast?GameplayHudOcr.Contrast(image,region):
+            image.Clone(region,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var sheet=new Bitmap(region.Width*scale+padding*2,
+            region.Height*scale+padding*2);
+        using(var graphics=Graphics.FromImage(sheet))
+        {
+            graphics.Clear(Color.White);
+            graphics.InterpolationMode=nearest?
+                System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor:
+                System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            graphics.DrawImage(crop,new Rectangle(padding,padding,
+                crop.Width*scale,crop.Height*scale));
+        }
+        var raw=await VisualStartup.RecognizeRaw(sheet,engine);
+        var labels=new List<VisualLabel>();
+        foreach(var line in raw.Lines.Where(l=>l.Words.Count>0))
+        {
+            var bounds=line.Words.Select(w=>new Rectangle(
+                (int)Math.Floor((w.BoundingRect.X-padding)/(double)scale)+region.X,
+                (int)Math.Floor((w.BoundingRect.Y-padding)/(double)scale)+region.Y,
+                Math.Max(1,(int)Math.Ceiling(w.BoundingRect.Width/scale)),
+                Math.Max(1,(int)Math.Ceiling(w.BoundingRect.Height/scale))))
+                .Aggregate(Rectangle.Union);
+            string value=line.Text.Trim();
+            // Windows OCR occasionally merges words in line.Text even when
+            // its individual word boxes are separate. Join only words read
+            // within this one line and only for exact known menu prefixes.
+            string words=string.Join(" ",line.Words.Select(w=>w.Text.Trim())
+                .Where(w=>w.Length>0));
+            if(words.StartsWith("Examine ",StringComparison.OrdinalIgnoreCase)||
+                words.Equals("Choose Option",StringComparison.OrdinalIgnoreCase)||
+                words.Equals("Cancel",StringComparison.OrdinalIgnoreCase))
+                value=words;
+            if(region.Contains(bounds)&&value.Length is >0 and <=90)
+                labels.Add(new(value,bounds));
+        }
+        return labels;
+    }
+
+    private static async Task<IReadOnlyList<VisualLabel>?> Verify(
+        Bitmap image,OcrEngine engine,Point anchor,IReadOnlyList<VisualLabel> source,
+        bool requireExamine=false)
+    {
+        var labels=source.ToList();
+        var examines=labels.Where(l=>l.Text.Trim().StartsWith("Examine ",
+            StringComparison.OrdinalIgnoreCase)).ToArray();
+        if(requireExamine&&examines.Length!=1)return null;
+        if(!labels.Any(l=>l.Text.Trim().Equals("Choose Option",
+            StringComparison.OrdinalIgnoreCase))&&examines.Length==1)
+        {
+            var recovered=await RecoverHeader(image,engine,anchor,labels);
+            if(recovered is null)
+            {
+                var cancels=labels.Where(l=>l.Text.Trim().Equals("Cancel",
+                    StringComparison.OrdinalIgnoreCase)).ToArray();
+                if(cancels.Length==1)
+                    recovered=NativeMenuHeaderReader.ReadNearCancel(image,anchor,cancels[0]);
+            }
+            if(recovered is not null)labels.Add(recovered);
+        }
+        if(ExecutionUi.Menu(labels) is not ContextMenu parsed||parsed.Entries.Count==0)
+            return null;
+        var header=labels.Single(l=>l.Text.Trim().Equals("Choose Option",
+            StringComparison.OrdinalIgnoreCase));
+        var cancel=labels.Where(l=>l.Text.Trim().Equals("Cancel",
+            StringComparison.OrdinalIgnoreCase)&&
+            l.Bounds.Top>header.Bounds.Bottom&&Math.Abs(l.Bounds.Left-header.Bounds.Left)<30)
+            .OrderBy(l=>l.Bounds.Top).First();
+        var menuBounds=Rectangle.FromLTRB(
+            Math.Max(0,header.Bounds.Left-18),Math.Max(0,header.Bounds.Top-8),
+            Math.Min(image.Width,header.Bounds.Left+290),
+            Math.Min(image.Height,cancel.Bounds.Bottom+8));
+        menuBounds.Inflate(24,24);
+        menuBounds.Intersect(new Rectangle(Point.Empty,image.Size));
+        if(!menuBounds.Contains(anchor))return null;
+        return labels.Where(l=>l.Bounds.Top>=header.Bounds.Top&&
+            l.Bounds.Bottom<=cancel.Bounds.Bottom+2&&
+            Math.Abs(l.Bounds.Left-header.Bounds.Left)<30)
+            .Select(l=>l with {Kind=VisualLabelKind.ContextMenuLine}).ToArray();
+    }
+
+    // Pixel-backed header recovery for themes and ordinary menu placements.
+    // The independent OCR must actually
     // read "Choose Option" (or its two precisely aligned words) from the
     // captured frame. No geometry alone fabricates the menu's identity.
     internal static async Task<VisualLabel?> RecoverHeader(
@@ -183,9 +237,18 @@ internal static class ContextMenuOcr
             if(!new Rectangle(Point.Empty,size).Contains(region)||!region.Contains(point))
                 throw new Exception("Context-menu OCR crop must include verified click and stay inside game window");
         }
+        foreach(var point in new[]{new Point(860,508),new Point(902,508),
+            new Point(776,328)})
+        {
+            var tight=TightRegion(point,size);
+            if(!new Rectangle(Point.Empty,size).Contains(tight)||!tight.Contains(point)||
+                tight.Width>=Region(point,size).Width)
+                throw new Exception("Tight menu OCR must retain the click in a smaller viewport crop");
+        }
         if(Region(new Point(-1,20),size)!=Rectangle.Empty||
             Region(new Point(20,600),size)!=Rectangle.Empty||
-            Region(new Point(20,20),new Size(300,300))!=Rectangle.Empty)
+            Region(new Point(20,20),new Size(300,300))!=Rectangle.Empty||
+            TightRegion(new Point(-1,508),size)!=Rectangle.Empty)
             throw new Exception("Unsupported context-menu geometry must fail closed");
     }
 }

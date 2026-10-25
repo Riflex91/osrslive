@@ -404,6 +404,9 @@ internal sealed class VisualStartup:IDisposable
             int cropHeaders=rawCrop.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
             int cropCancels=rawCrop.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
             int cropExamines=rawCrop.Count(l=>l.Text.Trim().StartsWith("Examine ",StringComparison.OrdinalIgnoreCase));
+            string cancelTops=string.Join(",",rawCrop.Where(l=>
+                l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase))
+                .Select(l=>l.Bounds.Top).Distinct().OrderBy(y=>y));
             int headers=labels.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
             int cancels=labels.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
             // The panel hash is from the frame BEFORE the right-click. A
@@ -419,7 +422,8 @@ internal sealed class VisualStartup:IDisposable
                 $"empty_candidates={empty} slot0_empty={slotZero} panel_changed={changed?.ToString()??"unknown"} "+
                 $"empty_pixel_quality={pixels?.InventorySlot0Diagnostic??"unavailable"} "+
                 $"crop_raw_lines={rawCrop.Length} crop_headers={cropHeaders} "+
-                $"crop_cancels={cropCancels} crop_examines={cropExamines} image_phase=AFTER_RIGHT_CLICK";
+                $"crop_cancels={cropCancels} crop_examines={cropExamines} "+
+                $"crop_cancel_y={(cancelTops.Length>0?cancelTops:"none")} image_phase=AFTER_RIGHT_CLICK";
             if(diagnostic!=lastContextDiagnostic)
             {
                 lastContextDiagnostic=diagnostic;
@@ -617,6 +621,27 @@ internal sealed class VisualStartup:IDisposable
             if(ExecutionUi.Menu(focusedContext)?.Exact("Use Logs") is null||
                 !focusedContext.All(l=>l.Kind==VisualLabelKind.ContextMenuLine))
                 throw new InvalidOperationException("Right-click anchored focused context-menu OCR regression");
+            // Reproduce an item menu near the lower-right inventory edge,
+            // where the native popup may be flipped in both directions.
+            using var bottomRightMenu=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(bottomRightMenu))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,770,380);
+                g.DrawString("Use Logs",font,Brushes.White,770,408);
+                g.DrawString("Examine Logs",font,Brushes.White,770,436);
+                g.DrawString("Cancel",font,Brushes.White,770,464);
+            }
+            var cornerMenu=await ContextMenuOcr.Read(bottomRightMenu,engine,new Point(860,508));
+            if(ExecutionUi.Menu(cornerMenu)?.Exact("Examine Logs") is null)
+                throw new InvalidOperationException("Bottom-right flipped menu OCR regression");
+            using var cornerWithoutHeader=new Bitmap(bottomRightMenu);
+            using(var g=Graphics.FromImage(cornerWithoutHeader))
+                g.FillRectangle(Brushes.Black,new Rectangle(745,370,225,35));
+            var missingCornerHeader=await ContextMenuOcr.Read(cornerWithoutHeader,engine,new Point(860,508));
+            if(ExecutionUi.Menu(missingCornerHeader) is not null)
+                throw new InvalidOperationException("Bottom-right menu header cannot be inferred from Cancel");
             // Simulate real-client OCR: the menu body is readable, but the
             // heading was entirely missed by the broad recognition pass.
             // Only independently reading pixels that actually spell the
