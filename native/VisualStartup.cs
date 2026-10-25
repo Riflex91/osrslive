@@ -199,6 +199,7 @@ internal sealed class VisualStartup:IDisposable
     private readonly BackgroundWindowCapture backgroundCapture=new();
     private readonly SessionRecovery recovery=new();
     private readonly ConnectivityWatch connectivity=new();
+    private RoutineResult? minimapZoomResult;
     private string lastRecoveryState="";
     private DateTimeOffset lastVerifiedHud;
     internal string CaptureState=>backgroundCapture.State;
@@ -210,7 +211,17 @@ internal sealed class VisualStartup:IDisposable
     // Called immediately after independent in-game OCR confirmation, before
     // potentially long-running inventory/production executor work.
     internal Action? VisuallyConfirmedSession;
-    internal bool Paused {get;set;}
+    private bool paused;
+    internal bool Paused
+    {
+        get=>paused;
+        set
+        {
+            if(paused&&!value&&minimapZoomResult?.Status==RoutineStatus.Blocked)
+                minimapZoomResult=null; // Manual resume can retry after enabling minimap zoom in the client.
+            paused=value;
+        }
+    }
     internal bool ObserveOnly {get;set;}
     internal string State {get;private set;}="WAITING_FOR_WINDOW";
     internal VisualStartup(Diagnostics log,OfficialLiveRenderObserver? renderObserver=null)
@@ -230,9 +241,9 @@ internal sealed class VisualStartup:IDisposable
         if((GetAsyncKeyState(0x77)&0x8000)!=0)Paused=true; // F8 emergency pause
         if(Paused){SetState("PAUSED");return;}
         if(target==IntPtr.Zero||!IsWindow(target))
-        {backgroundCapture.Release();SetState("WAITING_FOR_WINDOW");return;}
+        {backgroundCapture.Release();minimapZoomResult=null;SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();minimapZoomResult=null;recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -265,7 +276,7 @@ internal sealed class VisualStartup:IDisposable
         DiagnoseSkillOcr(observed);
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
         else if(lastVerifiedHud!=default&&DateTimeOffset.UtcNow-lastVerifiedHud>TimeSpan.FromSeconds(3))
-        {Gameplay.Reset();lastVerifiedHud=default;}
+        {Gameplay.Reset();minimapZoomResult=null;lastVerifiedHud=default;}
         DiagnosePostPlay(observed);
         if(!ObserveOnly&&Game.Confirmed is not null)
             VisuallyConfirmedSession?.Invoke();
@@ -279,7 +290,7 @@ internal sealed class VisualStartup:IDisposable
         {
             if(recoveryDecision.ResetSubject)
             {
-                Game.Reset();Gameplay.Reset();observedSelectedWorld=null;previousAction="";repeatedActions=0;
+                Game.Reset();Gameplay.Reset();minimapZoomResult=null;observedSelectedWorld=null;previousAction="";repeatedActions=0;
                 ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();
             }
             if(lastRecoveryState!=recoveryDecision.State)
@@ -313,6 +324,39 @@ internal sealed class VisualStartup:IDisposable
                 {SetState("SKILLS_BUTTON_NOT_VERIFIED_IN_SUMMARY");return;}
                 await Dispatch(observed,new("OPEN_SKILLS_FROM_SUMMARY",icon[0].Bounds),owner,ct);
                 return;
+            }
+            if(Game.Confirmed is not null)
+            {
+                if(minimapZoomResult is null)
+                {
+                    SetState("MINIMAP_ZOOM_VISUAL_CALIBRATION");
+                    using var zoomBudget=CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    zoomBudget.CancelAfter(TimeSpan.FromSeconds(75));
+                    var zoomDriver=new WindowVisualGameDriver(observed,async token=>
+                    {
+                        if(Paused||ObserveOnly)throw new OperationCanceledException(token);
+                        bool lost=await connectivity.Lost(observedSelectedWorld??preferredWorld,true,token);
+                        var next=await Capture(target,owner,token);
+                        return next is null?null:ConnectivityWatch.Signal(next,lost);
+                    },(f,input,token)=>Dispatch(f,new("MINIMAP_ZOOM_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
+                        action=>SetState("MINIMAP_ZOOM_INPUT_"+action.ToUpperInvariant()));
+                    RoutineResult result;
+                    try{result=await new MinimapZoomRoutine(zoomDriver,()=>Paused||ObserveOnly).Run(zoomBudget.Token);}
+                    catch(OperationCanceledException) when(!ct.IsCancellationRequested)
+                    {result=new(RoutineStatus.Blocked,"MINIMAP_ZOOM_TIMED_OUT");}
+                    if(result.Status!=RoutineStatus.Waiting)
+                    {
+                        minimapZoomResult=result;
+                        log.Add(result.Status==RoutineStatus.Completed?Severity.INFO:Severity.WARN,
+                            "MINIMAP_ZOOM","RESULT",$"status={result.Status} reason={result.Reason} "+
+                            $"wheel_down_steps={result.Produced} mouse_global_untouched=true");
+                    }
+                    SetState(result.Status==RoutineStatus.Completed?"MINIMAP_ZOOM_CONFIRMED":
+                        result.Status==RoutineStatus.Waiting?"PAUSED":"BLOCKED_"+result.Reason);
+                    return; // Next tick obtains a fresh frame after zoom calibration.
+                }
+                if(minimapZoomResult.Status!=RoutineStatus.Completed)
+                {SetState("BLOCKED_"+minimapZoomResult.Reason);return;}
             }
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
             {
@@ -1078,6 +1122,8 @@ internal sealed class VisualStartup:IDisposable
                 frame.Window,contextMenuAnchor??SkillsHoverPolicy.RestPoint),
             GameInputKind.Text=>await BackgroundWindowInput.TypeTextAsync(frame.Window,point,decision.RuntimeInput!.Text!,
                 decision.RuntimeInput.Submit,()=>Paused||ObserveOnly,ct),
+            GameInputKind.WheelDown or GameInputKind.WheelUp=>BackgroundWindowInput.Wheel(frame.Window,point,
+                kind==GameInputKind.WheelDown,()=>Paused||ObserveOnly),
             _=>await BackgroundWindowInput.ClickAsync(frame.Window,point,()=>Paused||ObserveOnly,ct,kind==GameInputKind.RightClick)
         };
         if(!queued)

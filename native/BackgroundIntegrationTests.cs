@@ -16,6 +16,7 @@ internal static class BackgroundIntegrationTests
     {
         internal Action? Pressed;
         internal Action? RightPressed;
+        internal Action<int>? Scrolled;
         internal Action<char>? Character;
         protected override void WndProc(ref Message m)
         {
@@ -25,6 +26,7 @@ internal static class BackgroundIntegrationTests
             if(m.Msg==0x202)return;
             if(m.Msg==0x204){RightPressed?.Invoke();return;}
             if(m.Msg==0x205)return;
+            if(m.Msg==0x20A){Scrolled?.Invoke(unchecked((short)(((long)m.WParam>>16)&0xFFFF)));return;}
             if(m.Msg==0x102){Character?.Invoke((char)m.WParam);return;}
             base.WndProc(ref m);
         }
@@ -49,8 +51,10 @@ internal static class BackgroundIntegrationTests
             Controls.Add(target);
             int clicks=0;
             int rightClicks=0;string typed="";
+            var wheelDeltas=new List<int>();
             target.Pressed=()=>{clicks++;target.BackColor=Color.LimeGreen;};
             target.RightPressed=()=>rightClicks++;
+            target.Scrolled=delta=>wheelDeltas.Add(delta);
             target.Character=c=>typed+=c;
             try
             {
@@ -75,11 +79,15 @@ internal static class BackgroundIntegrationTests
                 bool queued=await BackgroundWindowInput.ClickAsync(Handle,new Point(50,50),()=>false,timeout.Token);
                 bool rightQueued=await BackgroundWindowInput.ClickAsync(Handle,new Point(50,50),()=>false,timeout.Token,true);
                 bool textQueued=await BackgroundWindowInput.TypeTextAsync(Handle,new Point(50,50),"125",false,()=>false,timeout.Token);
+                bool wheelDown=BackgroundWindowInput.Wheel(Handle,new Point(50,50),true,()=>false);
+                bool wheelUp=BackgroundWindowInput.Wheel(Handle,new Point(50,50),false,()=>false);
                 await Task.Delay(150,timeout.Token);
                 GetCursorPos(out var after);
                 var inputAfter=new LASTINPUTINFO{Size=(uint)Marshal.SizeOf<LASTINPUTINFO>()};GetLastInputInfo(ref inputAfter);
                 if(!queued||clicks!=1)throw new Exception("Background child did not receive exactly one click");
                 if(!rightQueued||rightClicks!=1||!textQueued||typed!="125")throw new Exception("Background right-click/text transport failed");
+                if(!wheelDown||!wheelUp||!wheelDeltas.SequenceEqual(new[]{-120,120}))
+                    throw new Exception("Background child did not receive both signed wheel directions");
                 bool userInteracted=inputBefore.Tick!=inputAfter.Tick;
                 if(!userInteracted&&(GetForegroundWindow()!=foreground||cursor.X!=after.X||cursor.Y!=after.Y))
                     throw new Exception($"Foreground/cursor changed: focus_same={GetForegroundWindow()==foreground} "+

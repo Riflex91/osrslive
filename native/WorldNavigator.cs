@@ -3,7 +3,7 @@ using Cv=OpenCvSharp;
 namespace OSRSLiveDiagnostics;
 
 internal sealed record MapLocalization(MapLocation? Location,string Status,int Features=0,
-    int Candidates=0,int BestInliers=0);
+    int Candidates=0,int BestInliers=0,int BestRatioMatches=0);
 
 internal sealed class WorldNavigator:IDisposable
 {
@@ -32,13 +32,14 @@ internal sealed class WorldNavigator:IDisposable
         using var descriptors=new Cv.Mat();sift.DetectAndCompute(image,mask,out var points,descriptors);
         if(points.Length<8||descriptors.Empty())return new(null,"MINIMAP_FEATURES_INSUFFICIENT",points.Length);
         var candidates=new List<MapLocation>();
-        int bestInliers=0;
+        int bestInliers=0,bestPairs=0;
         using var matcher=new Cv.BFMatcher(Cv.NormTypes.L2);
         foreach(var reference in Data.References)
         {
             if(reference.Descriptors.Rows<8)continue;
             var pairs=matcher.KnnMatch(descriptors,reference.Descriptors,2)
                 .Where(p=>p.Length==2&&p[0].Distance<.65*p[1].Distance).Select(p=>p[0]).ToArray();
+            bestPairs=Math.Max(bestPairs,pairs.Length);
             if(pairs.Length<8)continue;
             var from=pairs.Select(p=>points[p.QueryIdx].Pt).ToArray();var to=pairs.Select(p=>reference.Points[p.TrainIdx].Pt).ToArray();
             using var input=Cv.InputArray.Create(from);using var output=Cv.InputArray.Create(to);using var inliers=new Cv.Mat();
@@ -61,10 +62,10 @@ internal sealed class WorldNavigator:IDisposable
             candidates.Add(new(tile,t,pixels.MapBounds,count,frame.CapturedUtc));
         }
         var ranked=candidates.OrderByDescending(c=>c.Inliers).ToArray();
-        if(ranked.Length==0)return new(null,"NO_VERIFIED_MAP_MATCH",points.Length,0,bestInliers);
+        if(ranked.Length==0)return new(null,"NO_VERIFIED_MAP_MATCH",points.Length,0,bestInliers,bestPairs);
         if(ranked.Length>1&&ranked[0].Inliers<ranked[1].Inliers*1.35)
-            return new(null,"MAP_MATCH_AMBIGUOUS",points.Length,ranked.Length,bestInliers);
-        return new(ranked[0],"VERIFIED",points.Length,ranked.Length,bestInliers);
+            return new(null,"MAP_MATCH_AMBIGUOUS",points.Length,ranked.Length,bestInliers,bestPairs);
+        return new(ranked[0],"VERIFIED",points.Length,ranked.Length,bestInliers,bestPairs);
     }
     private static bool EdgesAgree(Cv.Mat actual,Cv.Mat reference,Cv.Mat mask)
     {
@@ -97,7 +98,8 @@ internal sealed class TravelRoutine
         if(firstCheck.Location is null)
         {
             report($"NAVIGATION_LOCALIZATION_{firstCheck.Status} features={firstCheck.Features} "+
-                $"candidates={firstCheck.Candidates} inliers={firstCheck.BestInliers} phase=initial no_input=true");
+                $"candidates={firstCheck.Candidates} inliers={firstCheck.BestInliers} "+
+                $"best_ratio_matches={firstCheck.BestRatioMatches} phase=initial no_input=true");
             return new(RoutineStatus.Blocked,"AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT");
         }
         var first=firstCheck.Location;
@@ -107,7 +109,8 @@ internal sealed class TravelRoutine
         {
             report($"NAVIGATION_LOCALIZATION_{(second is null?secondCheck.Status:"POSITION_CHANGED_OR_FRAME_NOT_FRESH")} "+
                 $"features={secondCheck.Features} candidates={secondCheck.Candidates} "+
-                $"inliers={secondCheck.BestInliers} phase=stationary_confirmation no_input=true");
+                $"inliers={secondCheck.BestInliers} best_ratio_matches={secondCheck.BestRatioMatches} "+
+                "phase=stationary_confirmation no_input=true");
             return new(RoutineStatus.Blocked,"AUTOMATIC_POSITION_NEEDS_TWO_STATIONARY_FRAMES");
         }
         string service=NavigationDestinations.Service(target)??target;

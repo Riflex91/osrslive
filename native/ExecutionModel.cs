@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum GameInputKind { Hover, LeftClick, RightClick, Escape, Text }
+internal enum GameInputKind { Hover, LeftClick, RightClick, Escape, Text, WheelDown, WheelUp }
 internal sealed record GameInput(GameInputKind Kind,Rectangle Bounds,string? Text=null,bool Submit=true);
 internal sealed record ObservedSlot(int Index,Rectangle Bounds,ulong Signature,bool Empty,int? Quantity=null,ulong CoreSignature=0,string? IdentityDigest=null);
 internal sealed record InventoryItem(int Slot,string Name,int? Quantity,ulong Signature,Rectangle Bounds);

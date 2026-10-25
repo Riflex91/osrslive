@@ -36,6 +36,8 @@ internal static class WorldNavigationDataTests
                 if(found is null||found.Tile.Distance(tile)>1)throw new Exception("Automatic map localisation failed for rotation/zoom: "+variant+" found="+found?.Tile);
                 if(navigator.LocateDetailed(frame).Status!="VERIFIED")
                     throw new Exception("Navigation diagnostics must distinguish an accepted map match");
+                if(navigator.LocateDetailed(frame).BestRatioMatches<8)
+                    throw new Exception("Confirmed matches must also report the initial feature-pair evidence");
                 Console.WriteLine($"REFERENCE MATCH PASS: rotation={variant.Angle} scale={variant.Scale} world={found.Tile} inliers={found.Inliers}");
                 if(variant.Angle==0)
                 {

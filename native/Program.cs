@@ -827,6 +827,7 @@ internal static class SelfTest
             ItemKnowledgeStoreTests.Run();
             ExecutionRoutinesTests.Run();
             CombatNavigationTests.Run();
+            MinimapZoomTests.Run();
             SurvivalRoutineTests.Run();
             GameScreenReaderTests.Run();
             SessionRecoveryTests.Run();

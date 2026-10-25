@@ -15,6 +15,28 @@ internal static class BackgroundWindowInput
         return expectedPid!=0&&expectedPid==actualPid&&PostMessage(destination,0x200,IntPtr.Zero,
             new IntPtr((mapped.Y&0xFFFF)<<16|(mapped.X&0xFFFF)));
     }
+    // WM_MOUSEWHEEL expects screen coordinates in lParam, unlike WM_MOUSEMOVE
+    // and button messages. Route it to the same game-owned render child as
+    // the other input, without changing the global cursor or foreground.
+    internal static bool Wheel(IntPtr window,Point position,bool down,Func<bool> shouldStop)
+    {
+        if(shouldStop()||!IsWindow(window)||IsIconic(GetAncestor(window,2))||
+            !GetClientRect(window,out var bounds)||position.X<0||position.Y<0||
+            position.X>=bounds.Right||position.Y>=bounds.Bottom)return false;
+        var local=new POINT{X=position.X,Y=position.Y};
+        IntPtr destination=Resolve(window,ref local);
+        GetWindowThreadProcessId(window,out uint expectedPid);
+        GetWindowThreadProcessId(destination,out uint actualPid);
+        if(expectedPid==0||expectedPid!=actualPid||shouldStop())return false;
+        var localParam=new IntPtr((local.Y&0xFFFF)<<16|(local.X&0xFFFF));
+        var screen=new POINT{X=local.X,Y=local.Y};
+        if(!ClientToScreen(destination,ref screen))return false;
+        IntPtr screenParam=new((screen.Y&0xFFFF)<<16|(screen.X&0xFFFF));
+        int delta=down?-120:120;
+        IntPtr wheelParam=new((delta&0xFFFF)<<16);
+        return !shouldStop()&&PostMessage(destination,0x200,IntPtr.Zero,localParam)&&
+            PostMessage(destination,0x20A,wheelParam,screenParam);
+    }
     private static IntPtr Resolve(IntPtr window,ref POINT point)
     {
         IntPtr destination=window;
@@ -89,6 +111,7 @@ internal static class BackgroundWindowInput
     [DllImport("user32.dll")]private static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")]private static extern IntPtr GetAncestor(IntPtr window,uint flags);
     [DllImport("user32.dll")]private static extern bool GetClientRect(IntPtr window,out RECT rect);
+    [DllImport("user32.dll")]private static extern bool ClientToScreen(IntPtr window,ref POINT point);
     [DllImport("user32.dll")]private static extern IntPtr ChildWindowFromPointEx(IntPtr parent,POINT point,uint flags);
     [DllImport("user32.dll")]private static extern int MapWindowPoints(IntPtr from,IntPtr to,ref POINT point,uint count);
     [DllImport("user32.dll")]private static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
