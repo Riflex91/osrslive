@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal, CharacterPrompt, CharacterSummary, CharacterSummaryName, ContextMenuLine }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal, CharacterPrompt, CharacterSummary, CharacterSummaryName, ContextMenuLine, ContextMenuCandidate }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -400,6 +400,10 @@ internal sealed class VisualStartup:IDisposable
         {
             var menu=ExecutionUi.Menu(labels);
             int focused=labels.Count(l=>l.Kind==VisualLabelKind.ContextMenuLine);
+            var rawCrop=labels.Where(l=>l.Kind==VisualLabelKind.ContextMenuCandidate).ToArray();
+            int cropHeaders=rawCrop.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
+            int cropCancels=rawCrop.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
+            int cropExamines=rawCrop.Count(l=>l.Text.Trim().StartsWith("Examine ",StringComparison.OrdinalIgnoreCase));
             int headers=labels.Count(l=>l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
             int cancels=labels.Count(l=>l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase));
             // The panel hash is from the frame BEFORE the right-click. A
@@ -413,7 +417,9 @@ internal sealed class VisualStartup:IDisposable
                 $"header_candidates={headers} cancel_candidates={cancels} parsed={menu is not null} "+
                 $"entries={menu?.Entries.Count??0} inventory_tab_active={pixels?.InventoryTabActive??false} "+
                 $"empty_candidates={empty} slot0_empty={slotZero} panel_changed={changed?.ToString()??"unknown"} "+
-                $"empty_pixel_quality={pixels?.InventorySlot0Diagnostic??"unavailable"}";
+                $"empty_pixel_quality={pixels?.InventorySlot0Diagnostic??"unavailable"} "+
+                $"crop_raw_lines={rawCrop.Length} crop_headers={cropHeaders} "+
+                $"crop_cancels={cropCancels} crop_examines={cropExamines} image_phase=AFTER_RIGHT_CLICK";
             if(diagnostic!=lastContextDiagnostic)
             {
                 lastContextDiagnostic=diagnostic;
