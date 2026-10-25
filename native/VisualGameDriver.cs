@@ -252,6 +252,29 @@ internal sealed class GameInteractions
         inventoryTab=null;
         throw new RoutineBlockedException("INVENTORY_TAB_NOT_VERIFIED");
     }
+    // A slot may gain native empty-pixel consensus while the inventory is
+    // being inspected (e.g. once other sprites finish painting). Never open
+    // a right-click menu on an independently confirmed empty cell, and never
+    // infer emptiness just because a right-click displayed no menu.
+    private async Task VerifyLateEmptySlot(ObservedSlot candidate,CancellationToken ct)
+    {
+        var previous=Driver.Current;
+        for(int attempt=0;attempt<2;attempt++)
+        {
+            await Task.Delay(180,ct);
+            var observed=await Driver.ObserveAsync(ct);
+            if(observed.CapturedUtc<=previous.CapturedUtc||
+                observed.Window!=previous.Window||
+                observed.ScreenBounds!=previous.ScreenBounds||
+                observed.Pixels is not { InventoryTabActive:true } pixels||
+                pixels.Slots.Count!=28||
+                pixels.Slots[candidate.Index] is not { Empty:true, Quantity:null } same||
+                same.Index!=candidate.Index||same.Signature!=candidate.Signature||
+                same.CoreSignature!=candidate.CoreSignature)
+                throw new RoutineBlockedException("INVENTORY_LATE_EMPTY_NOT_STABLE");
+            previous=observed;
+        }
+    }
     internal async Task<InventoryState> Inventory(CancellationToken ct,bool ensureTab=true)
     {
         if(ensureTab)await OpenInventory(ct);
@@ -309,6 +332,19 @@ internal sealed class GameInteractions
             if(verifiedEmpty.TryGetValue(i,out ulong backgroundHash)&&
                 backgroundHash==before.Signature&&before.Empty)
             {
+                emptyCache[i]=before.Signature;cache.Remove(i);empty++;
+                continue;
+            }
+            if(before.Empty)
+            {
+                // Native-pixel classification already says this cell is empty,
+                // but it was not empty in both startup reference frames.
+                // Require two NEW neutral-position captures confirming the
+                // same complete and central slot pixels before skipping it.
+                // An unstable classification blocks with no right-click.
+                if(before.Quantity is not null)
+                    throw new RoutineBlockedException("INVENTORY_EMPTY_QUANTITY_CONFLICT");
+                await VerifyLateEmptySlot(before,ct);
                 emptyCache[i]=before.Signature;cache.Remove(i);empty++;
                 continue;
             }

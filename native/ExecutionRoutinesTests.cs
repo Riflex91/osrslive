@@ -161,6 +161,19 @@ internal static class ExecutionRoutinesTests
             emptyDriver.Inputs.Any(i=>i.Kind==GameInputKind.LeftClick)&&
             emptyDriver.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
             "a visually and independently verified empty inventory skips all right clicks");
+        var lateEmptyDriver=new InventoryGridDriver(true,lateEmptyFirstSlot:true);
+        var lateEmpty=await new GameInteractions(lateEmptyDriver).Inventory(CancellationToken.None);
+        Require(lateEmpty.EmptySlots==28&&lateEmpty.Items.Count==0&&
+            lateEmptyDriver.Observations>=4&&
+            lateEmptyDriver.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "empty consensus appearing after the baseline is reverified twice, without a right-click");
+        var unstableLateEmpty=new InventoryGridDriver(true,lateEmptyFirstSlot:true,
+            lateEmptyDisappears:true);
+        bool unstableLateBlocked=false;
+        try{await new GameInteractions(unstableLateEmpty).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){unstableLateBlocked=ex.Message=="INVENTORY_LATE_EMPTY_NOT_STABLE";}
+        Require(unstableLateBlocked&&unstableLateEmpty.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "a late empty classification that disappears must block before any menu attempt");
         var unknownDriver=new InventoryGridDriver(false);
         bool unknownBlocked=false;
         try{await new GameInteractions(unknownDriver).Inventory(CancellationToken.None);}
@@ -440,16 +453,21 @@ internal static class ExecutionRoutinesTests
         internal readonly List<GameInput> Inputs=new();
         public VisualFrame Current {get;private set;}
         private readonly bool loseTabOnSlotHover,changeFirstFrame,changeEveryFrame;
+        private readonly bool lateEmptyFirstSlot,lateEmptyDisappears;
         internal int Observations {get;private set;}
         internal int ObservationsAtRightClick {get;private set;}=-1;
         internal InventoryGridDriver(bool pixelVerifiedEmpty,bool active=true,bool loseTabOnSlotHover=false,
-            bool changeFirstFrame=false,bool changeEveryFrame=false)
+            bool changeFirstFrame=false,bool changeEveryFrame=false,bool lateEmptyFirstSlot=false,
+            bool lateEmptyDisappears=false)
         {
             this.loseTabOnSlotHover=loseTabOnSlotHover;
             this.changeFirstFrame=changeFirstFrame;
             this.changeEveryFrame=changeEveryFrame;
+            this.lateEmptyFirstSlot=lateEmptyFirstSlot;
+            this.lateEmptyDisappears=lateEmptyDisappears;
             var slots=Enumerable.Range(0,28).Select(i=>
-                new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,pixelVerifiedEmpty)).ToArray();
+                new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,
+                    pixelVerifiedEmpty&&!(lateEmptyFirstSlot&&i==0))).ToArray();
             Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
                 DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),
                 new ExecutionPixels(slots,1,InventoryTabActive:active));
@@ -462,6 +480,13 @@ internal static class ExecutionRoutinesTests
                 var pixels=Current.Pixels!;
                 Current=Current with{Pixels=pixels with{Slots=pixels.Slots.Select((slot,i)=>
                     i is 2 or 3?slot with{Signature=slot.Signature+100}:slot).ToArray()}};
+            }
+            if(lateEmptyFirstSlot&&(Observations==2||lateEmptyDisappears&&Observations==3))
+            {
+                var pixels=Current.Pixels!;
+                bool empty=Observations==2;
+                Current=Current with{Pixels=pixels with{Slots=pixels.Slots.Select((slot,i)=>
+                    i==0?slot with{Empty=empty}:slot).ToArray()}};
             }
             Current=Current with {CapturedUtc=Current.CapturedUtc.AddSeconds(1)};
             return Task.FromResult(Current);
