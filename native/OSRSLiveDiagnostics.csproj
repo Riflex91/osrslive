@@ -17,7 +17,25 @@
     <DebugSymbols>false</DebugSymbols>
     <PublishTrimmed>false</PublishTrimmed>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- CI overrides these three values. Local builds stay explicit. -->
+    <OsrsBuildRun Condition="'$(OsrsBuildRun)' == ''">local</OsrsBuildRun>
+    <OsrsBuildSha Condition="'$(OsrsBuildSha)' == ''">unknown</OsrsBuildSha>
+    <OsrsBuildChannel Condition="'$(OsrsBuildChannel)' == ''">local</OsrsBuildChannel>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>OsrsBuildRun</_Parameter1>
+      <_Parameter2>$(OsrsBuildRun)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>OsrsBuildSha</_Parameter1>
+      <_Parameter2>$(OsrsBuildSha)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>OsrsBuildChannel</_Parameter1>
+      <_Parameter2>$(OsrsBuildChannel)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
   </ItemGroup>
