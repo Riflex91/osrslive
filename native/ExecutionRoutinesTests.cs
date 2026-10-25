@@ -67,6 +67,19 @@ internal static class ExecutionRoutinesTests
                 unknownDriver.Inputs[unknownRight-1].Bounds.Left+16,
                 unknownDriver.Inputs[unknownRight-1].Bounds.Top+16)),
             "unverified slots get one staged hover and one right-click; a missing menu never proves empty");
+        var settling=new InventoryGridDriver(false,changeFirstFrame:true);
+        bool settlingMenuBlocked=false;
+        try{await new GameInteractions(settling).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){settlingMenuBlocked=ex.Message=="CONTEXT_MENU_NOT_READABLE";}
+        Require(settlingMenuBlocked&&settling.ObservationsAtRightClick>=3&&
+            settling.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1,
+            "changed slots 2/3 during initial rendering require three matching neutral frames before one click");
+        var changing=new InventoryGridDriver(false,changeEveryFrame:true);
+        bool unstableBlocked=false;
+        try{await new GameInteractions(changing).Inventory(CancellationToken.None);}
+        catch(RoutineBlockedException ex){unstableBlocked=ex.Message=="INVENTORY_BASELINE_NOT_STABLE";}
+        Require(unstableBlocked&&changing.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+            "continually changing inventory pixels must block before any right-click");
         var lostTab=new InventoryGridDriver(false,loseTabOnSlotHover:true);
         bool lostTabBlocked=false;
         try{await new GameInteractions(lostTab).Inventory(CancellationToken.None);}
@@ -157,6 +170,11 @@ internal static class ExecutionRoutinesTests
             i==0?v with {Signature=88777}:v).ToArray()};
         var severalChanged=chromeOnly with {Slots=baseSlots.Select((v,i)=>
             i is 6 or 27?v with {Signature=88777}:v).ToArray()};
+        Require(GameInteractions.InventoryBaselineStable(basePixels,basePixels)&&
+            !GameInteractions.InventoryBaselineStable(basePixels,severalChanged)&&
+            !GameInteractions.InventoryBaselineStable(basePixels,oneTransient)&&
+            !GameInteractions.InventoryBaselineStable(basePixels,basePixels with{InventoryTabActive=false}),
+            "inventory reference must stabilize every slot before the first right-click");
         Require(GameInteractions.InventoryRestored(basePixels,chromeOnly,0)&&
             GameInteractions.InventoryRestored(basePixels,oneTransient,0)&&
             !GameInteractions.InventoryRestored(basePixels,clickedChanged,0)&&
@@ -305,10 +323,15 @@ internal static class ExecutionRoutinesTests
     {
         internal readonly List<GameInput> Inputs=new();
         public VisualFrame Current {get;private set;}
-        private readonly bool loseTabOnSlotHover;
-        internal InventoryGridDriver(bool pixelVerifiedEmpty,bool active=true,bool loseTabOnSlotHover=false)
+        private readonly bool loseTabOnSlotHover,changeFirstFrame,changeEveryFrame;
+        internal int Observations {get;private set;}
+        internal int ObservationsAtRightClick {get;private set;}=-1;
+        internal InventoryGridDriver(bool pixelVerifiedEmpty,bool active=true,bool loseTabOnSlotHover=false,
+            bool changeFirstFrame=false,bool changeEveryFrame=false)
         {
             this.loseTabOnSlotHover=loseTabOnSlotHover;
+            this.changeFirstFrame=changeFirstFrame;
+            this.changeEveryFrame=changeEveryFrame;
             var slots=Enumerable.Range(0,28).Select(i=>
                 new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,pixelVerifiedEmpty)).ToArray();
             Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
@@ -317,12 +340,20 @@ internal static class ExecutionRoutinesTests
         }
         public Task<VisualFrame> ObserveAsync(CancellationToken ct)
         {
+            Observations++;
+            if(changeEveryFrame||changeFirstFrame&&Observations==1)
+            {
+                var pixels=Current.Pixels!;
+                Current=Current with{Pixels=pixels with{Slots=pixels.Slots.Select((slot,i)=>
+                    i is 2 or 3?slot with{Signature=slot.Signature+100}:slot).ToArray()}};
+            }
             Current=Current with {CapturedUtc=Current.CapturedUtc.AddSeconds(1)};
             return Task.FromResult(Current);
         }
         public Task InputAsync(GameInput input,CancellationToken ct)
         {
             Inputs.Add(input);
+            if(input.Kind==GameInputKind.RightClick)ObservationsAtRightClick=Observations;
             if(input.Kind==GameInputKind.Hover)
             {
                 Current=Current with{Labels=new[]{new VisualLabel("Inventory",new Rectangle(12,8,80,12))}};

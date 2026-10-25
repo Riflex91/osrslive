@@ -8,7 +8,13 @@ namespace OSRSLiveDiagnostics;
 internal static class NativeInventoryEmptyReader
 {
     private sealed record Cell(int Index,Color Background,int StrongPixels,
-        int SaturatedPixels,int MeanDeviation,bool PlausiblyBlank);
+        int SaturatedPixels,int MeanDeviation,int MaxDeviation,bool PlausiblyBlank)
+    {
+        // A separately guarded case for truly flat native slot backgrounds.
+        // A dim sprite can pass PlausiblyBlank, but cannot be pixel-uniform.
+        internal bool NearlyUniform=>PlausiblyBlank&&StrongPixels==0&&SaturatedPixels==0&&
+            MeanDeviation==0&&MaxDeviation<=8;
+    }
     internal sealed record Result(bool[] Empty,string FirstSlotDiagnostic,IReadOnlyList<string> SlotDiagnostics);
 
     private static int Difference(Color a,Color b)=>
@@ -30,13 +36,14 @@ internal static class NativeInventoryEmptyReader
         var bg=Color.FromArgb(Median(corners.Select(c=>(int)c.R)),
             Median(corners.Select(c=>(int)c.G)),
             Median(corners.Select(c=>(int)c.B)));
-        int strong=0,saturated=0,total=0;
+        int strong=0,saturated=0,total=0,max=0;
         const int x0=7,y0=7,width=18,height=18;
         for(int y=y0;y<y0+height;y++)for(int x=x0;x<x0+width;x++)
         {
             var c=bitmap.GetPixel(r.X+x,r.Y+y);
             int d=Difference(c,bg);
             total+=d;
+            max=Math.Max(max,d);
             if(d>52)strong++;
             int hi=Math.Max(c.R,Math.Max(c.G,c.B));
             int lo=Math.Min(c.R,Math.Min(c.G,c.B));
@@ -50,7 +57,7 @@ internal static class NativeInventoryEmptyReader
             Math.Max(bg.R,Math.Max(bg.G,bg.B))-
             Math.Min(bg.R,Math.Min(bg.G,bg.B))<=62;
         bool plausible=tone&&strong<=22&&saturated<=10&&mean<=32;
-        return new(index,bg,strong,saturated,mean,plausible);
+        return new(index,bg,strong,saturated,mean,max,plausible);
     }
 
     internal static Result Classify(Bitmap bitmap)
@@ -67,7 +74,12 @@ internal static class NativeInventoryEmptyReader
             int peers=compatible.Count(other=>
                 Difference(other.Background,cell.Background)<=18&&
                 Math.Abs(other.MeanDeviation-cell.MeanDeviation)<=13);
-            if(peers>=8)empty[cell.Index]=true;
+            // The live image reports zero mean/strong deviation and six
+            // matching blank-like peers; require a stricter pixel-level test.
+            // The smaller group is allowed ONLY for near-uniform native pixels,
+            // while textured/dim candidates retain the eight-peer threshold.
+            if(peers>=8||cell.NearlyUniform&&peers>=6)
+                empty[cell.Index]=true;
         }
         // Report the cell under the actual directed right-click, not always
         // slot zero. This is diagnostic evidence, never proof of an empty item.
@@ -77,7 +89,8 @@ internal static class NativeInventoryEmptyReader
                 Difference(other.Background,cell.Background)<=18&&
                 Math.Abs(other.MeanDeviation-cell.MeanDeviation)<=13);
             return $"slot{cell.Index}_pixels=strong:{cell.StrongPixels},saturated:{cell.SaturatedPixels},"+
-                $"mean:{cell.MeanDeviation},peers:{peers},plausible:{cell.PlausiblyBlank}";
+                $"mean:{cell.MeanDeviation},max:{cell.MaxDeviation},peers:{peers},"+
+                $"uniform:{cell.NearlyUniform},plausible:{cell.PlausiblyBlank}";
         }).ToArray();
         return new(empty,samples[0],samples);
     }
@@ -151,6 +164,42 @@ internal static class NativeInventoryEmptyReader
         }
         if(Read(fullOfSameIcons).Any(x=>x))
             throw new Exception("Repeated item sprites must not be mistaken for repeated blank cells");
+        // Live regression: the first three slots contain item sprites; only
+        // six near-uniform, matching cells remain. These may be classified
+        // without treating missing menus or dim item icons as evidence.
+        using var sparse=new Bitmap(1000,600);
+        using(var g=Graphics.FromImage(sparse))g.Clear(Color.Black);
+        var flatBlanks=new HashSet<int>{3,7,11,15,19,23};
+        using var stone=new SolidBrush(Color.FromArgb(82,73,62));
+        for(int i=0;i<28;i++)
+        {
+            var r=ExecutionUi.InventorySlot(i);
+            using var g=Graphics.FromImage(sparse);
+            g.FillRectangle(stone,r);
+            if(!flatBlanks.Contains(i))
+                g.FillEllipse(Brushes.OrangeRed,new Rectangle(r.X+7,r.Y+7,18,18));
+        }
+        var pristine=Classify(sparse);
+        if(pristine.Empty.Count(x=>x)!=6||flatBlanks.Any(i=>!pristine.Empty[i])||
+            !pristine.SlotDiagnostics[3].Contains("uniform:True",StringComparison.Ordinal))
+            throw new Exception("Six independent flat blank cells must be recognized without OCR");
+        using(var g=Graphics.FromImage(sparse))
+        {
+            var r=ExecutionUi.InventorySlot(23);
+            g.FillEllipse(Brushes.OrangeRed,new Rectangle(r.X+7,r.Y+7,18,18));
+        }
+        if(Read(sparse).Any(x=>x))
+            throw new Exception("Five flat blank candidates must not establish a reliable peer group");
+        // Six identical low-contrast item shapes are not uniform backgrounds.
+        foreach(int i in flatBlanks)
+        {
+            var r=ExecutionUi.InventorySlot(i);
+            using var g=Graphics.FromImage(sparse);
+            g.FillRectangle(new SolidBrush(Color.FromArgb(110,100,90)),
+                new Rectangle(r.X+10,r.Y+10,12,12));
+        }
+        if(Read(sparse).Any(x=>x))
+            throw new Exception("Six repeated dim sprites cannot count as truly flat blank cells");
         using var falsePanel=new Bitmap(800,600);
         if(Read(falsePanel).Any(x=>x)||Classify(falsePanel).FirstSlotDiagnostic!="wrong_viewport")
             throw new Exception("Wrong viewport must not authorize inventory emptiness");

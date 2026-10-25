@@ -118,6 +118,10 @@ internal sealed class GameInteractions
     internal static bool InventoryRestored(
         ExecutionPixels? baseline,ExecutionPixels? observed,int clickedSlot)=>
         InventoryMatch(baseline,observed,clickedSlot).Restored;
+    internal static bool InventoryBaselineStable(ExecutionPixels? a,ExecutionPixels? b)=>
+        a is { InventoryTabActive:true }&&b is { InventoryTabActive:true }&&
+        a.Slots.Count==28&&b.Slots.Count==28&&
+        Enumerable.Range(0,28).All(i=>a.Slots[i].Signature==b.Slots[i].Signature);
 
     internal async Task DismissMenu(ContextMenu menu,CancellationToken ct,
         ExecutionPixels? expectedInventory=null,int clickedSlot=-1)
@@ -218,19 +222,33 @@ internal sealed class GameInteractions
         // may identify an empty slot. Unknown cells still require a readable
         // actual item menu, or fail closed.
         var verifiedEmpty=new Dictionary<int,ulong>();
+        // Immediately after opening Inventory, item sprites can finish
+        // rendering on later captured frames. A single early reference was
+        // observed to mismatch slots 2 and 3 after a valid Cancel. Require
+        // THREE consecutive neutral-position frames with identical slot
+        // pixels before inspecting items; otherwise fail closed.
         var first=Driver.Current;
-        if(first.Pixels!.Slots.Any(slot=>slot.Empty))
+        VisualFrame? second=null;
+        int stablePairs=0;
+        for(int attempt=0;attempt<5;attempt++)
         {
             await Task.Delay(180,ct);
-            var second=await Driver.ObserveAsync(ct);
-            if(second.CapturedUtc>first.CapturedUtc&&second.Pixels is not null)
-                foreach(var before in first.Pixels.Slots.Where(slot=>slot.Empty))
-                {
-                    var after=second.Pixels.Slots[before.Index];
-                    if(after.Empty&&after.Signature==before.Signature&&
-                        after.Quantity is null)
-                        verifiedEmpty[before.Index]=before.Signature;
-                }
+            var observed=await Driver.ObserveAsync(ct);
+            if(observed.CapturedUtc>first.CapturedUtc&&
+                InventoryBaselineStable(first.Pixels,observed.Pixels))
+            {
+                if(++stablePairs>=2){second=observed;break;}
+            }
+            else stablePairs=0;
+            first=observed;
+        }
+        if(second is null)throw new RoutineBlockedException("INVENTORY_BASELINE_NOT_STABLE");
+        foreach(var before in first.Pixels!.Slots.Where(slot=>slot.Empty))
+        {
+            var after=second.Pixels!.Slots[before.Index];
+            if(after.Empty&&after.Signature==before.Signature&&
+                after.Quantity is null)
+                verifiedEmpty[before.Index]=before.Signature;
         }
         var items=new List<InventoryItem>();int empty=0;
         for(int i=0;i<28;i++)
