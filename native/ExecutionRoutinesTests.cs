@@ -39,6 +39,7 @@ internal static class ExecutionRoutinesTests
         var menu=new[]{L("Choose Option",30,30),L("Use Logs",30,50),L("Drop Logs",30,66),L("Examine Logs",30,82),L("Cancel",30,98),
             L("Deposit-All Logs",400,50)};
         ContextMenuOcr.SelfTest();
+        NativeMenuHeaderReader.SelfTest();
         InventoryTabPolicy.SelfTest();
         NativeInventoryEmptyReader.SelfTest();
         var wrongPanel=new InventoryGridDriver(true,active:false);
