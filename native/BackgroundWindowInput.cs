@@ -15,16 +15,20 @@ internal static class BackgroundWindowInput
         return expectedPid!=0&&expectedPid==actualPid&&PostMessage(destination,0x200,IntPtr.Zero,
             new IntPtr((mapped.Y&0xFFFF)<<16|(mapped.X&0xFFFF)));
     }
-    // WM_MOUSEWHEEL expects screen coordinates in lParam, unlike WM_MOUSEMOVE
-    // and button messages. Route it to the same game-owned render child as
-    // the other input, without changing the global cursor or foreground.
-    internal static bool Wheel(IntPtr window,Point position,bool down,Func<bool> shouldStop)
+    // WM_MOUSEWHEEL expects screen coordinates in lParam, unlike WM_MOUSEMOVE.
+    // Most directed input goes to the render child, but OSRS may handle wheel
+    // messages on its game-window HWND instead. The caller probes the latter
+    // only after a fresh screenshot showed the child message had no effect.
+    // Both targets are checked against osclient.exe's window PID, and neither
+    // path changes the global cursor, focus, or foreground.
+    internal static bool Wheel(IntPtr window,Point position,bool down,Func<bool> shouldStop,
+        bool gameWindow=false)
     {
         if(shouldStop()||!IsWindow(window)||IsIconic(GetAncestor(window,2))||
             !GetClientRect(window,out var bounds)||position.X<0||position.Y<0||
             position.X>=bounds.Right||position.Y>=bounds.Bottom)return false;
         var local=new POINT{X=position.X,Y=position.Y};
-        IntPtr destination=Resolve(window,ref local);
+        IntPtr destination=gameWindow?window:Resolve(window,ref local);
         GetWindowThreadProcessId(window,out uint expectedPid);
         GetWindowThreadProcessId(destination,out uint actualPid);
         if(expectedPid==0||expectedPid!=actualPid||shouldStop())return false;

@@ -56,14 +56,30 @@ internal static class MinimapZoomTests
         var calibrated=await new MinimapZoomRoutine(initiallyOut,()=>false,
             (_,_)=>Task.CompletedTask).Run(CancellationToken.None);
         Require(calibrated.Status==RoutineStatus.Completed&&initiallyOut.Level==0&&
-            initiallyOut.WheelUp==1&&initiallyOut.OtherInputs==0,
+            initiallyOut.WheelUp==1&&initiallyOut.GameWindowDown==1&&initiallyOut.OtherInputs==0,
             "already-zoomed-out minimap is distinguished from ignored input by a reversible upward probe");
+        var rootOnly=new ZoomDriver(images,3,rootOnly:true);
+        var rootDiagnostics=new List<string>();
+        var recovered=await new MinimapZoomRoutine(rootOnly,()=>false,
+            (_,_)=>Task.CompletedTask,rootDiagnostics.Add).Run(CancellationToken.None);
+        Require(recovered.Status==RoutineStatus.Completed&&rootOnly.Level==0&&
+            rootOnly.WheelDown==1&&rootOnly.GameWindowDown>=5&&
+            rootOnly.WheelUp==0&&rootOnly.OtherInputs==0&&
+            rootDiagnostics.Any(line=>line.Contains("target=GAME_WINDOW")&&line.Contains("scale=")),
+            "ignored render-child wheel falls back to the verified game-window route");
+        var rootAlreadyOut=new ZoomDriver(images,0,rootOnly:true);
+        var rootRecovered=await new MinimapZoomRoutine(rootAlreadyOut,()=>false,
+            (_,_)=>Task.CompletedTask).Run(CancellationToken.None);
+        Require(rootRecovered.Status==RoutineStatus.Completed&&rootAlreadyOut.Level==0&&
+            rootAlreadyOut.GameWindowUp==1&&rootAlreadyOut.WheelUp==1,
+            "root-only wheel route can verify an initially fully zoomed-out minimap");
         var disabled=new ZoomDriver(images,3,ignoreWheel:true);
         var refused=await new MinimapZoomRoutine(disabled,()=>false,
             (_,_)=>Task.CompletedTask).Run(CancellationToken.None);
         Require(refused.Status==RoutineStatus.Blocked&&
-            refused.Reason=="MINIMAP_ZOOM_WHEEL_EFFECT_NOT_VERIFIED"&&disabled.OtherInputs==0,
-            "ignored background wheel transport must never be labelled fully zoomed out");
+            refused.Reason=="MINIMAP_ZOOM_BACKGROUND_WHEEL_NOT_OBSERVED"&&
+            disabled.GameWindowDown==1&&disabled.GameWindowUp==1&&disabled.OtherInputs==0,
+            "ignored wheel messages on both background routes must never certify the zoom stop");
         var noMinimap=new ZoomDriver(images,3,hideMap:true);
         var missing=await new MinimapZoomRoutine(noMinimap,()=>false,
             (_,_)=>Task.CompletedTask).Run(CancellationToken.None);
@@ -74,18 +90,20 @@ internal static class MinimapZoomTests
             (_,_)=>Task.CompletedTask).Run(CancellationToken.None);
         Require(waiting.Status==RoutineStatus.Waiting&&paused.WheelDown==0,
             "F8/pause prevents calibration input");
-        Console.WriteLine("MINIMAP ZOOM PASS: pixel-verified relative scale, minimum-stop confirmation, reversible maximum probe, ignored-input block and pause");
+        Console.WriteLine("MINIMAP ZOOM PASS: pixel-verified relative scale, child/game-window fallbacks, minimum-stop confirmation, reversible maximum probe, ignored-input block and pause");
     }
     private sealed class ZoomDriver:IVisualGameDriver
     {
         private readonly IReadOnlyList<byte[]> images;
-        private readonly bool ignoreWheel,hideMap;
+        private readonly bool ignoreWheel,hideMap,rootOnly;
         internal int Level{get;private set;}
-        internal int WheelDown,WheelUp,OtherInputs;
+        internal int WheelDown,WheelUp,GameWindowDown,GameWindowUp,OtherInputs;
         public VisualFrame Current{get;private set;}
-        internal ZoomDriver(IReadOnlyList<byte[]> images,int initial,bool ignoreWheel=false,bool hideMap=false)
+        internal ZoomDriver(IReadOnlyList<byte[]> images,int initial,bool ignoreWheel=false,bool hideMap=false,
+            bool rootOnly=false)
         {
-            this.images=images;this.ignoreWheel=ignoreWheel;this.hideMap=hideMap;Level=initial;
+            this.images=images;this.ignoreWheel=ignoreWheel;this.hideMap=hideMap;
+            this.rootOnly=rootOnly;Level=initial;
             Current=NewFrame(DateTimeOffset.UtcNow);
         }
         private VisualFrame NewFrame(DateTimeOffset time)=>new(new IntPtr(5),new Rectangle(0,0,1000,600),time,
@@ -98,9 +116,13 @@ internal static class MinimapZoomTests
         {
             ct.ThrowIfCancellationRequested();
             if(input.Kind==GameInputKind.WheelDown)
-            {WheelDown++;if(!ignoreWheel)Level=Math.Max(0,Level-1);}
+            {WheelDown++;if(!ignoreWheel&&!rootOnly)Level=Math.Max(0,Level-1);}
             else if(input.Kind==GameInputKind.WheelUp)
-            {WheelUp++;if(!ignoreWheel)Level=Math.Min(images.Count-1,Level+1);}
+            {WheelUp++;if(!ignoreWheel&&!rootOnly)Level=Math.Min(images.Count-1,Level+1);}
+            else if(input.Kind==GameInputKind.WheelDownGameWindow)
+            {GameWindowDown++;if(!ignoreWheel)Level=Math.Max(0,Level-1);}
+            else if(input.Kind==GameInputKind.WheelUpGameWindow)
+            {GameWindowUp++;if(!ignoreWheel)Level=Math.Min(images.Count-1,Level+1);}
             else OtherInputs++;
             Current=NewFrame(Current.CapturedUtc.AddSeconds(1));
             return Task.CompletedTask;

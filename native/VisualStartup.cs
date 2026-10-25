@@ -341,7 +341,8 @@ internal sealed class VisualStartup:IDisposable
                     },(f,input,token)=>Dispatch(f,new("MINIMAP_ZOOM_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
                         action=>SetState("MINIMAP_ZOOM_INPUT_"+action.ToUpperInvariant()));
                     RoutineResult result;
-                    try{result=await new MinimapZoomRoutine(zoomDriver,()=>Paused||ObserveOnly).Run(zoomBudget.Token);}
+                    try{result=await new MinimapZoomRoutine(zoomDriver,()=>Paused||ObserveOnly,
+                        diagnostic:message=>log.Add(Severity.INFO,"MINIMAP_ZOOM","STEP",message)).Run(zoomBudget.Token);}
                     catch(OperationCanceledException) when(!ct.IsCancellationRequested)
                     {result=new(RoutineStatus.Blocked,"MINIMAP_ZOOM_TIMED_OUT");}
                     if(result.Status!=RoutineStatus.Waiting)
@@ -1122,8 +1123,12 @@ internal sealed class VisualStartup:IDisposable
                 frame.Window,contextMenuAnchor??SkillsHoverPolicy.RestPoint),
             GameInputKind.Text=>await BackgroundWindowInput.TypeTextAsync(frame.Window,point,decision.RuntimeInput!.Text!,
                 decision.RuntimeInput.Submit,()=>Paused||ObserveOnly,ct),
-            GameInputKind.WheelDown or GameInputKind.WheelUp=>BackgroundWindowInput.Wheel(frame.Window,point,
-                kind==GameInputKind.WheelDown,()=>Paused||ObserveOnly),
+            GameInputKind.WheelDown or GameInputKind.WheelUp or
+                GameInputKind.WheelDownGameWindow or GameInputKind.WheelUpGameWindow=>
+                BackgroundWindowInput.Wheel(frame.Window,point,
+                    kind is GameInputKind.WheelDown or GameInputKind.WheelDownGameWindow,
+                    ()=>Paused||ObserveOnly,
+                    kind is GameInputKind.WheelDownGameWindow or GameInputKind.WheelUpGameWindow),
             _=>await BackgroundWindowInput.ClickAsync(frame.Window,point,()=>Paused||ObserveOnly,ct,kind==GameInputKind.RightClick)
         };
         if(!queued)

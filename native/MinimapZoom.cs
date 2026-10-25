@@ -52,10 +52,11 @@ internal static class MinimapZoomVision
     }
 }
 
-// The C++ OSRS minimap may be zoomed with the wheel, but this can be disabled
-// in client settings or rejected by the background input transport. First
-// verify the direction from fresh map geometry; then require two additional
-// DOWN steps with no scale change before claiming the minimum zoom limit.
+// The C++ OSRS minimap may zoom with the wheel, but the renderer can reject
+// background wheel messages. Probe the render child first, and if it has no
+// measurable effect, try the actual osclient.exe game-window HWND. Never
+// assume that successful PostMessage means the game consumed the input.
+// Require two final unchanged DOWN steps after a verified scale change.
 internal sealed class MinimapZoomRoutine
 {
     internal const int MaxDownSteps=24;
@@ -63,9 +64,11 @@ internal sealed class MinimapZoomRoutine
     private readonly IVisualGameDriver driver;
     private readonly Func<bool> stopped;
     private readonly Func<int,CancellationToken,Task> wait;
+    private readonly Action<string> diagnostic;
     internal MinimapZoomRoutine(IVisualGameDriver driver,Func<bool> stopped,
-        Func<int,CancellationToken,Task>? wait=null)
-    {this.driver=driver;this.stopped=stopped;this.wait=wait??Task.Delay;}
+        Func<int,CancellationToken,Task>? wait=null,Action<string>? diagnostic=null)
+    {this.driver=driver;this.stopped=stopped;this.wait=wait??Task.Delay;
+        this.diagnostic=diagnostic??(_=>{});}
 
     internal async Task<RoutineResult> Run(CancellationToken ct)
     {
@@ -96,13 +99,14 @@ internal sealed class MinimapZoomRoutine
         if(!Usable(second)||second.CapturedUtc<=initial.CapturedUtc||
             second.Pixels!.Navigation!.MapBounds!=initial.Pixels!.Navigation!.MapBounds)
             return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_INDEPENDENT_BASELINE_NOT_VERIFIED");
-        bool observedWheelEffect=false;
+        bool observedWheelEffect=false,gameWindowTarget=false;
         int unchanged=0,scrolls=0;
         for(int step=0;step<MaxDownSteps;step++)
         {
             if(stopped())return new(RoutineStatus.Waiting,"MINIMAP_ZOOM_PAUSED");
             var before=driver.Current;
-            var down=await Scroll(before,GameInputKind.WheelDown,ct);
+            var down=await Scroll(before,gameWindowTarget?
+                GameInputKind.WheelDownGameWindow:GameInputKind.WheelDown,ct);
             scrolls++;
             if(down.Scale is not double ratio)
                 return new(RoutineStatus.Blocked,down.Reason,scrolls);
@@ -111,13 +115,35 @@ internal sealed class MinimapZoomRoutine
                 return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_WHEEL_DIRECTION_UNEXPECTED",scrolls);
             if(!observedWheelEffect)
             {
-                // Already fully out and ignored wheel messages look the
-                // same. Probe one reversible UP step to distinguish them.
+                // An ignored render-child wheel message and a fully zoomed-out
+                // minimap look identical. Try the game HWND independently;
+                // never double-post one wheel gesture to two targets.
+                var gameWindowDown=await Scroll(driver.Current,GameInputKind.WheelDownGameWindow,ct);
+                scrolls++;
+                if(gameWindowDown.Scale is not double windowRatio)
+                    return new(RoutineStatus.Blocked,gameWindowDown.Reason,scrolls);
+                if(windowRatio<1-Tolerance)
+                {observedWheelEffect=true;gameWindowTarget=true;unchanged=0;continue;}
+                if(windowRatio>1+Tolerance)
+                    return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_WHEEL_DIRECTION_UNEXPECTED",scrolls);
+                // Both DOWN routes failed to show movement. A single UP on
+                // each route can distinguish the minimum zoom stop from an
+                // ignored background wheel, without certifying either blindly.
                 var up=await Scroll(driver.Current,GameInputKind.WheelUp,ct);
-                if(up.Scale is not double upRatio||upRatio<=1+Tolerance)
-                    return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_WHEEL_EFFECT_NOT_VERIFIED",scrolls);
-                observedWheelEffect=true;unchanged=0;
-                continue;
+                if(up.Scale is not double upRatio)
+                    return new(RoutineStatus.Blocked,up.Reason,scrolls);
+                if(upRatio>1+Tolerance)
+                {observedWheelEffect=true;unchanged=0;continue;}
+                if(upRatio<1-Tolerance)
+                    return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_WHEEL_DIRECTION_UNEXPECTED",scrolls);
+                var windowUp=await Scroll(driver.Current,GameInputKind.WheelUpGameWindow,ct);
+                if(windowUp.Scale is not double windowUpRatio)
+                    return new(RoutineStatus.Blocked,windowUp.Reason,scrolls);
+                if(windowUpRatio>1+Tolerance)
+                {observedWheelEffect=true;gameWindowTarget=true;unchanged=0;continue;}
+                return new(RoutineStatus.Blocked,windowUpRatio<1-Tolerance?
+                    "MINIMAP_ZOOM_WHEEL_DIRECTION_UNEXPECTED":
+                    "MINIMAP_ZOOM_BACKGROUND_WHEEL_NOT_OBSERVED",scrolls);
             }
             if(++unchanged>=2)
                 return new(RoutineStatus.Completed,"MINIMAP_FULLY_ZOOMED_OUT_VISUALLY_CONFIRMED",scrolls);
@@ -136,7 +162,11 @@ internal sealed class MinimapZoomRoutine
         if(!Usable(after)||after.Window!=before.Window||after.ScreenBounds!=before.ScreenBounds||
             after.CapturedUtc<=before.CapturedUtc)
             return new(null,0,"MINIMAP_ZOOM_POST_SCROLL_FRAME_NOT_VERIFIED");
-        return MinimapZoomVision.Compare(before.Pixels.Navigation,after.Pixels!.Navigation!);
+        var evidence=MinimapZoomVision.Compare(before.Pixels.Navigation,after.Pixels!.Navigation!);
+        diagnostic($"input={direction} target={(direction is GameInputKind.WheelDownGameWindow or GameInputKind.WheelUpGameWindow?"GAME_WINDOW":"RENDER_CHILD")} "+
+            $"scale={(evidence.Scale is double scale?scale.ToString("F4",System.Globalization.CultureInfo.InvariantCulture):"unknown")} "+
+            $"inliers={evidence.Inliers} evidence={evidence.Reason}");
+        return evidence;
     }
     private static bool Usable(VisualFrame f)=>
         f.ScreenBounds.Size==DockedWindowLayout.GameSize&&
