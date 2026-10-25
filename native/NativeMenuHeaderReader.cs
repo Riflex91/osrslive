@@ -62,7 +62,7 @@ internal static class NativeMenuHeaderReader
             else if(bestX>=0&&(Math.Abs(x-bestX)>2||Math.Abs(y-bestY)>2))
                 second=Math.Max(second,score);
         }
-        if(bestX<0||best-second<45)return null;
+        if(bestX<0||(second!=int.MinValue&&best-second<45))return null;
         if(Math.Abs(bestX-examine.Bounds.Left)>22||
             bestY>=examine.Bounds.Top||bestY+Height>=cancel.Bounds.Top)
             return null;
