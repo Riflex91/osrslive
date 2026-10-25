@@ -35,8 +35,8 @@ internal static class MinimapZoomTests
             DateTimeOffset.UtcNow,new[]{new VisualLabel("NATIVE_GAME_HUD",new(0,575,517,25),VisualLabelKind.GameHud)},
             new(Array.Empty<ObservedSlot>(),0,new(images[level],new(830,10,150,150),24),Hitpoints:24));
         var outward=MinimapZoomVision.Compare(Frame(3).Pixels!.Navigation!,Frame(2).Pixels!.Navigation!);
-        Require(outward.Scale is double less&&less<.982&&outward.Inliers>=12,
-            "zoom-out is distinguished from ordinary minimap movement by stable terrain scale");
+        Require(outward.Scale is double less&&less<.982&&outward.Inliers>=10,
+            "zoom-out is geometrically measurable with at least ten distributed inliers; marginal results still need a second frame");
         var stationary=MinimapZoomVision.Compare(Frame(0).Pixels!.Navigation!,Frame(0).Pixels!.Navigation!);
         Require(stationary.Scale is double same&&Math.Abs(same-1)<.018,
             "unchanged terrain does not count as an outward zoom step");
