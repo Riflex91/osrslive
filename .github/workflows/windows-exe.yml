@@ -18,6 +18,10 @@ on:
 permissions:
   contents: write
 
+# Pull-request artifacts use the PR head SHA, not the temporary merge ref.
+env:
+  OSRS_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 concurrency:
   group: osrslive-windows-exe-${{ github.ref }}
   cancel-in-progress: false
@@ -41,7 +45,17 @@ jobs:
           }
       - name: Build
         shell: pwsh
-        run: dotnet build native/OSRSLiveDiagnostics.csproj -c Release -r win-x64 --nologo
+        run: dotnet build native/OSRSLiveDiagnostics.csproj -c Release -r win-x64 --nologo -p:OsrsBuildRun=$env:GITHUB_RUN_ID -p:OsrsBuildSha=$env:OSRS_BUILD_SHA -p:OsrsBuildChannel=$env:GITHUB_EVENT_NAME
+      - name: Verify embedded build identity
+        shell: pwsh
+        run: |
+          $stamp = dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --build-info
+          Write-Host $stamp
+          if ($LASTEXITCODE -ne 0 -or $stamp -notmatch "build_run=$env:GITHUB_RUN_ID" -or
+              $stamp -notmatch "build_commit=$env:OSRS_BUILD_SHA" -or
+              $stamp -notmatch "build_channel=$env:GITHUB_EVENT_NAME") {
+            throw "EXE build metadata does not identify the running CI job"
+          }
       - name: Self-test
         shell: pwsh
         run: |
@@ -76,7 +90,7 @@ jobs:
       - name: Publish single self-contained EXE
         shell: pwsh
         run: |
-          dotnet publish native/OSRSLiveDiagnostics.csproj -c Release -r win-x64 --no-restore -o publish --nologo
+          dotnet publish native/OSRSLiveDiagnostics.csproj -c Release -r win-x64 --no-restore -o publish --nologo -p:OsrsBuildRun=$env:GITHUB_RUN_ID -p:OsrsBuildSha=$env:OSRS_BUILD_SHA -p:OsrsBuildChannel=$env:GITHUB_EVENT_NAME
           $exe = 'publish/OSRS-Play.exe'
           if (-not (Test-Path $exe)) { throw 'Missing EXE' }
           $additional = @(Get-ChildItem publish -File | Where-Object Name -NE 'OSRS-Play.exe')
@@ -89,7 +103,7 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: OSRS-Play-${{ github.event.pull_request.number }}-win-x64-test
+          name: OSRS-Play-${{ github.event.pull_request.number }}-run-${{ github.run_id }}-win-x64-test
           path: publish/OSRS-Play.exe
           if-no-files-found: error
           retention-days: 14
