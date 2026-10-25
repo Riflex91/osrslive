@@ -29,20 +29,44 @@ internal static class HudVision
 {
     internal static byte[] Png(Bitmap image,Rectangle crop)
     {using var bitmap=image.Clone(crop,PixelFormat.Format32bppArgb);using var stream=new MemoryStream();bitmap.Save(stream,ImageFormat.Png);return stream.ToArray();}
+    // Hough can detect decorative circles in addition to the actual
+    // minimap. Resolve ambiguity only with the independently visible white
+    // player-center pixels; two valid candidates are still rejected.
+    internal static Rectangle? UniquePixelVerifiedMinimap(Bitmap image,
+        IReadOnlyList<Rectangle> candidates)
+    {
+        if(image.Size!=DockedWindowLayout.GameSize)return null;
+        var region=new Rectangle(740,0,260,220);
+        bool WhiteCentre(Rectangle box)
+        {
+            int x=box.Left+box.Width/2,y=box.Top+box.Height/2,white=0;
+            for(int dy=-3;dy<=3;dy++)for(int dx=-3;dx<=3;dx++)
+            {
+                var c=image.GetPixel(x+dx,y+dy);
+                if(c.R>220&&c.G>220&&c.B>220)white++;
+            }
+            return white>=3;
+        }
+        var verified=candidates.Where(box=>box.Width==box.Height&&
+            box.Width is >=124 and <=170&&region.Contains(box)&&
+            WhiteCentre(box)).ToArray();
+        return verified.Length==1?verified[0]:null;
+    }
     internal static Rectangle? Minimap(Bitmap image)
     {
-        if(image.Size!=new Size(1000,600))return null;
+        if(image.Size!=DockedWindowLayout.GameSize)return null;
         using var mat=Cv.Cv2.ImDecode(Png(image,new(740,0,260,235)),Cv.ImreadModes.Grayscale);
         using var blurred=new Cv.Mat();Cv.Cv2.GaussianBlur(mat,blurred,new(5,5),1.2);
-        var circles=Cv.Cv2.HoughCircles(blurred,Cv.HoughModes.Gradient,1,45,100,32,65,88)
-            .Where(c=>c.Center.X+c.Radius<=260&&c.Center.X-c.Radius>=0&&c.Center.Y-c.Radius>=0&&c.Center.Y+c.Radius<220).ToArray();
-        if(circles.Length!=1)return null;
-        var circle=circles[0];int r=(int)Math.Round(circle.Radius)-3;
-        var box=new Rectangle(740+(int)Math.Round(circle.Center.X)-r,(int)Math.Round(circle.Center.Y)-r,r*2,r*2);
-        int white=0;int cx=box.Left+r,cy=box.Top+r;
-        for(int y=cy-3;y<=cy+3;y++)for(int x=cx-3;x<=cx+3;x++)
-        {var c=image.GetPixel(x,y);if(c.R>220&&c.G>220&&c.B>220)white++;}
-        return white>=3?box:null;
+        var candidates=Cv.Cv2.HoughCircles(blurred,Cv.HoughModes.Gradient,1,45,100,32,65,88)
+            .Where(c=>c.Center.X+c.Radius<=260&&c.Center.X-c.Radius>=0&&
+                c.Center.Y-c.Radius>=0&&c.Center.Y+c.Radius<220)
+            .Select(c=>
+            {
+                int r=(int)Math.Round(c.Radius)-3;
+                return new Rectangle(740+(int)Math.Round(c.Center.X)-r,
+                    (int)Math.Round(c.Center.Y)-r,r*2,r*2);
+            }).ToArray();
+        return UniquePixelVerifiedMinimap(image,candidates);
     }
     internal static Rectangle? HealthNumber(Bitmap image,Rectangle map,IReadOnlyList<VisualLabel> labels)
     {
