@@ -709,7 +709,8 @@ internal sealed class VisualStartup:IDisposable
         bool queued=kind switch
         {
             GameInputKind.Hover=>BackgroundWindowInput.Move(frame.Window,point),
-            GameInputKind.Escape=>BackgroundWindowInput.Escape(frame.Window),
+            GameInputKind.Escape=>BackgroundWindowInput.Escape(
+                frame.Window,contextMenuAnchor??SkillsHoverPolicy.RestPoint),
             GameInputKind.Text=>await BackgroundWindowInput.TypeTextAsync(frame.Window,point,decision.RuntimeInput!.Text!,
                 decision.RuntimeInput.Submit,()=>Paused||ObserveOnly,ct),
             _=>await BackgroundWindowInput.ClickAsync(frame.Window,point,()=>Paused||ObserveOnly,ct,kind==GameInputKind.RightClick)
