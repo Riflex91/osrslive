@@ -119,6 +119,13 @@ internal static class ContextMenuOcr
             Math.Abs(examine.Bounds.Left-cancel.Bounds.Left)>22||
             cancel.Bounds.Top-examine.Bounds.Top>125||
             Math.Abs(examine.Bounds.Left-anchor.X)>85)return null;
+        // The heading is drawn in muted brown-grey (#5d5447) on black.
+        // The generic contrast transform maps BOTH nearly to white; OCR
+        // therefore detects the item actions but routinely loses the title.
+        // Require an independently matched, authentic heading raster.
+        if(NativeMenuHeaderReader.Read(image,anchor,examine,cancel) is VisualLabel native)
+            return native;
+        // Other native themes may still be recognized by Windows OCR.
         // Some OSRS context menus open above the cursor. Probe bounded
         // strips near the click and immediately above the Examine line.
         var regions=new[]{
