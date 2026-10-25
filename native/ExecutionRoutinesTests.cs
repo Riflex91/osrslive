@@ -337,6 +337,22 @@ internal static class ExecutionRoutinesTests
             $" empty={checkedInventory.EmptySlots} right={cancellable.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)}"+
             $" left={cancellable.Inputs.Count(i=>i.Kind==GameInputKind.LeftClick)}");
         var cancelOnlyLabels=new[]{L("Choose Option",30,30),L("Cancel",30,98)};
+        string cacheDirectory=Path.Combine(Path.GetTempPath(),"osrs-cache-integration-"+Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var knowledge=new ItemKnowledgeStore(Path.Combine(cacheDirectory,"items.sqlite"));
+            var cold=new InventoryMenuDriver(menu,true,new string('A',64));
+            await new GameInteractions(cold,knowledge).Inventory(CancellationToken.None);
+            var warm=new InventoryMenuDriver(menu,true,new string('A',64),cold.Current.CapturedUtc.AddSeconds(1));
+            var reused=await new GameInteractions(warm,knowledge).Inventory(CancellationToken.None);
+            Require(reused.Items.Single().Name=="logs"&&warm.Inputs.All(i=>i.Kind!=GameInputKind.RightClick),
+                "a new task-cycle interaction reuses a full-pixel identity without opening any item menu");
+            var changed=new InventoryMenuDriver(menu,true,new string('B',64),warm.Current.CapturedUtc.AddSeconds(1));
+            await new GameInteractions(changed,knowledge).Inventory(CancellationToken.None);
+            Require(changed.Inputs.Count(i=>i.Kind==GameInputKind.RightClick)==1,
+                "changed full pixels force menu inspection despite unchanged legacy sampled signature");
+        }
+        finally{if(Directory.Exists(cacheDirectory))Directory.Delete(cacheDirectory,true);}
         var cancelOnlyDriver=new InventoryMenuDriver(cancelOnlyLabels,closes:true);
         bool cancelOnlyBlocked=false;
         try{await new GameInteractions(cancelOnlyDriver).Inventory(CancellationToken.None);}
@@ -413,16 +429,16 @@ internal static class ExecutionRoutinesTests
         private readonly ExecutionPixels before;
         private readonly ExecutionPixels covered;
         public VisualFrame Current {get;private set;}
-        internal InventoryMenuDriver(IReadOnlyList<VisualLabel> labels,bool closes)
+        internal InventoryMenuDriver(IReadOnlyList<VisualLabel> labels,bool closes,string? digest=null,DateTimeOffset? captured=null)
         {
             menu=labels;this.closes=closes;
             var slots=Enumerable.Range(0,28).Select(i=>
-                new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,i>0)).ToArray();
+                new ObservedSlot(i,ExecutionUi.InventorySlot(i),(ulong)i+1,i>0,IdentityDigest:i==0?digest:null)).ToArray();
             before=new ExecutionPixels(slots,1,InventoryTabActive:true,InventoryPanelSignature:813);
             covered=before with {InventoryPanelSignature=914,
                 Slots=slots.Select((v,i)=>i<3?v with{Signature=v.Signature+1000}:v).ToArray()};
             Current=new(new IntPtr(1),new Rectangle(0,0,1000,600),
-                DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),before);
+                captured??DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),before);
         }
         public Task<VisualFrame> ObserveAsync(CancellationToken ct)
         {

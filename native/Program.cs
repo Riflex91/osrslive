@@ -824,6 +824,7 @@ internal static class SelfTest
             AccountGoalPlannerTests.Run();
             F2PProgressionTests.Run();
             ActivitySchedulerTests.Run();
+            ItemKnowledgeStoreTests.Run();
             ExecutionRoutinesTests.Run();
             CombatNavigationTests.Run();
             SurvivalRoutineTests.Run();

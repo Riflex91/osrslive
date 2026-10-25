@@ -15,6 +15,7 @@ internal sealed class GameplayCoordinator:IDisposable
     private readonly WorldNavigator navigator=new();
     private readonly ActivityScheduler activities=new();
     private readonly string directory;
+    private readonly ItemKnowledgeStore itemKnowledge;
     private VisibleGameObservation? subject;
     private DateTimeOffset leaseUntil,nextAttempt;
     private bool uncertain;
@@ -22,8 +23,11 @@ internal sealed class GameplayCoordinator:IDisposable
     internal string State {get;private set;}="WAITING_FOR_SKILLS";
     internal bool HasSubject=>subject is not null&&DateTimeOffset.UtcNow<leaseUntil;
     internal GameplayCoordinator(Diagnostics log)
-    {this.log=log;directory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","agent");}
-    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();Set("WAITING_FOR_SKILLS");}
+    {
+        this.log=log;directory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","agent");
+        itemKnowledge=new(Path.Combine(directory,"items.sqlite"),message=>log.Add(Severity.WARN,"ITEM_DATABASE","UNAVAILABLE",message));
+    }
+    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();Set("WAITING_FOR_SKILLS");}
     private void Set(string state)
     {
         if(State==state)return;State=state;
@@ -74,7 +78,7 @@ internal sealed class GameplayCoordinator:IDisposable
         var driver=new WindowVisualGameDriver(frame,capture,async (f,input,ct)=>HasSubject&&
             (GameScreenReader.Read(f).Character is not string name||name==subject.Character)&&await dispatch(f,input,ct),
             action=>Set("INPUT_"+action.ToUpperInvariant()));
-        var game=new GameInteractions(driver);
+        var game=new GameInteractions(driver,itemKnowledge,message=>log.Add(Severity.INFO,"ITEM_DATABASE","INVENTORY_READ",message));
         RoutineResult result;
         string? activityId=null;
         bool reconcilingJournal=false;
@@ -254,5 +258,5 @@ internal sealed class GameplayCoordinator:IDisposable
         if(spec.SecondInput is not null&&(inv.Count(spec.SecondInput) is not int second||second<1))return spec.SecondInput;
         return null;
     }
-    public void Dispose(){prices.Dispose();navigator.Dispose();}
+    public void Dispose(){prices.Dispose();navigator.Dispose();itemKnowledge.Dispose();}
 }

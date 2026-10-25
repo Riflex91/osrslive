@@ -1,5 +1,7 @@
 # OSRS Play 1.7.2 – schneller Einstieg und Wiederverbindung
 
+**Item-Datenbank:** Eine lokale SQLite-Datenbank speichert bestätigte Itemnamen, Kontextaktionen und vollständige Bildsignaturen. Unveränderte Items werden innerhalb derselben Sitzung über Aufgabenzyklen hinweg wiedererkannt; Mengen und ausführbare Menüaktionen benötigen weiterhin frische Bestätigung. [Verhalten, Sitzungsgrenzen und Tests](docs/ITEM-DATENBANK-2026-10-25.md).
+
 **Weiterentwicklung der Aufgabenautomatik:** Versorgte Tätigkeiten erhalten Vorrang vor Aufgaben mit fehlendem Bedarf. Bestätigte Beschaffungs-/Zielblockaden stellen die betroffene Aufgabe mit begrenztem Backoff zurück und erlauben verfügbare Ausweicharbeit. Gewählte Reiseziele bleiben über Fortschrittsschritte bestehen; offene Journale und unklare Ergebnisse behalten ihre Sperren. [Verhalten, Tests und Grenzen](docs/AUTOMATISCHE-AUFGABENPLANUNG-2026-10-25.md).
 
 **Neu in 1.7.2:** Häufigere, weiterhin serielle Bildschirmbeobachtung und sofortige Weiterverarbeitung neu erkannter Login-Schritte. Wiederholte Klicks auf denselben Bildschirm bleiben zeitlich begrenzt. Ein Session-Controller erkennt Logout/Verbindungsverlust, stoppt Spielaktionen, prüft die Spielwelt-Verbindung und setzt den bekannten Einstieg mit Backoff fort. Die native Spielansicht kann zusätzlich über Minimap, Skills-Symbol und mehrere Bereiche der Chat-Bedienleiste erkannt werden. Charakter und vollständige Skillwerte müssen anschließend weiterhin neu bestätigt werden. [Ursache des Stillstands, Verhalten und Grenzen](docs/LOGIN-UND-RECONNECT-1.7.2.md).

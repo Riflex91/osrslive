@@ -11,6 +11,7 @@ internal static class ExecutionVision
         bool inventoryActive=InventoryTabPolicy.Active(image);
         var emptyResult=inventoryActive?NativeInventoryEmptyReader.Classify(image):null;
         var emptyEvidence=emptyResult?.Empty??new bool[28];
+        var digests=inventoryActive?InventoryDigests(image):null;
         var slots=Enumerable.Range(0,28).Select(i=>
         {
             var box=ExecutionUi.InventorySlot(i);
@@ -19,7 +20,7 @@ internal static class ExecutionVision
             var core=new Rectangle(box.X+7,box.Y+7,18,18);
             return new ObservedSlot(i,box,Signature(image,box),
                 emptyEvidence[i]&&quantities.Length==0,quantities.Length==1?quantities[0]:null,
-                Signature(image,core));
+                Signature(image,core),digests?[i]);
         }).ToArray();
         NavigationPixels? navigation=null;
         var hpLabels=labels.Where(l=>l.Kind==VisualLabelKind.Hitpoints).ToArray();
@@ -42,6 +43,27 @@ internal static class ExecutionVision
         if(slot is <0 or >=28)return "invalid_slot";
         if(pixels.InventorySlotDiagnostics is { Count:28 } all)return all[slot];
         return slot==0?pixels.InventorySlot0Diagnostic:"not_sampled";
+    }
+    internal static string[] InventoryDigests(Bitmap image)
+    {
+        if(image.Size!=DockedWindowLayout.GameSize)return Array.Empty<string>();
+        var result=new string[28];
+        var data=image.LockBits(new Rectangle(Point.Empty,image.Size),
+            System.Drawing.Imaging.ImageLockMode.ReadOnly,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try
+        {
+            var bytes=new byte[32*32*4];
+            for(int i=0;i<28;i++)
+            {
+                var box=ExecutionUi.InventorySlot(i);
+                for(int row=0;row<box.Height;row++)
+                    System.Runtime.InteropServices.Marshal.Copy(
+                        IntPtr.Add(data.Scan0,(box.Y+row)*data.Stride+box.X*4),bytes,row*box.Width*4,box.Width*4);
+                result[i]=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+            }
+        }
+        finally{image.UnlockBits(data);}
+        return result;
     }
     internal static async Task<IReadOnlyList<VisualLabel>> ReadHealth(Bitmap image,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
     {

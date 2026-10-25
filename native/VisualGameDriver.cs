@@ -103,9 +103,13 @@ internal sealed class GameInteractions
 {
     internal readonly IVisualGameDriver Driver;
     private readonly Dictionary<int,InventoryItem> cache=new();
+    private readonly Dictionary<int,string?> cacheDigests=new();
     private readonly Dictionary<int,ulong> emptyCache=new();
+    private readonly ItemKnowledgeStore? knowledge;
+    private readonly Action<string>? inventoryReport;
     private Point? inventoryTab;
-    internal GameInteractions(IVisualGameDriver driver){Driver=driver;}
+    internal GameInteractions(IVisualGameDriver driver,ItemKnowledgeStore? knowledge=null,Action<string>? inventoryReport=null)
+    {Driver=driver;this.knowledge=knowledge;this.inventoryReport=inventoryReport;}
     private static Rectangle At(Point p)=>new(p.X-2,p.Y-2,5,5);
     internal Task Click(Rectangle bounds,CancellationToken ct)=>Driver.InputAsync(new(GameInputKind.LeftClick,bounds),ct);
     internal Task Escape(CancellationToken ct)=>Driver.InputAsync(new(GameInputKind.Escape,new(1,1,4,4)),ct);
@@ -277,6 +281,7 @@ internal sealed class GameInteractions
     }
     internal async Task<InventoryState> Inventory(CancellationToken ct,bool ensureTab=true)
     {
+        long readStarted=System.Diagnostics.Stopwatch.GetTimestamp();
         if(ensureTab)await OpenInventory(ct);
         // Baseline and post-Cancel screenshots must be taken with the mouse
         // in the SAME neutral location. Previously the initial reference
@@ -321,14 +326,22 @@ internal sealed class GameInteractions
                 after.Quantity is null)
                 verifiedEmpty[before.Index]=before.Signature;
         }
-        var items=new List<InventoryItem>();int empty=0;
+        var items=new List<InventoryItem>();int empty=0,cachedItems=0;
+        var learned=new List<ItemMenuEvidence>();
+        var observedDigests=new Dictionary<int,string?>();
         for(int i=0;i<28;i++)
         {
             var beforeFrame=Driver.Current;
             var before=beforeFrame.Pixels!.Slots[i];
-            if(cache.TryGetValue(i,out var cached)&&cached.Signature==before.Signature)
-            {items.Add(cached);continue;}
-            if(emptyCache.TryGetValue(i,out ulong emptyHash)&&emptyHash==before.Signature){empty++;continue;}
+            observedDigests[i]=before.IdentityDigest;
+            if(knowledge?.Recognize(before,beforeFrame.CapturedUtc) is InventoryItem identified)
+            {items.Add(identified);emptyCache.Remove(i);cachedItems++;continue;}
+            if((knowledge is null||before.IdentityDigest is null)&&
+                cache.TryGetValue(i,out var cached)&&cached.Signature==before.Signature&&
+                cacheDigests.TryGetValue(i,out var digest)&&digest==before.IdentityDigest)
+            {items.Add(cached with{Quantity=ExecutionCatalog.Stackable(cached.Name)?before.Quantity:1});cachedItems++;continue;}
+            if(before.Empty&&before.Quantity is null&&emptyCache.TryGetValue(i,out ulong emptyHash)&&emptyHash==before.Signature)
+            {empty++;continue;}
             if(verifiedEmpty.TryGetValue(i,out ulong backgroundHash)&&
                 backgroundHash==before.Signature&&before.Empty)
             {
@@ -368,7 +381,7 @@ internal sealed class GameInteractions
                 string name=ExecutionCatalog.Normalize(examines[0].Text[8..]);
                 if(name.Length==0||name.Length>50)throw new RoutineBlockedException("INVALID_ITEM_NAME");
                 var item=new InventoryItem(i,name,ExecutionCatalog.Stackable(name)?before.Quantity:1,before.Signature,before.Bounds);
-                cache[i]=item;emptyCache.Remove(i);items.Add(item);
+                cache[i]=item;cacheDigests[i]=before.IdentityDigest;emptyCache.Remove(i);items.Add(item);
             }
             else
             {
@@ -376,13 +389,20 @@ internal sealed class GameInteractions
                 throw new RoutineBlockedException("AMBIGUOUS_OR_NON_INVENTORY_SLOT");
             }
             await DismissMenu(menu,ct,beforeFrame.Pixels,i);
+            learned.Add(new(before,items[^1],menu));
         }
         // Inventory movement while it was being inspected invalidates the whole
         // observation. Menu overlays are gone before comparing signatures.
-        if(items.Any(item=>Driver.Current.Pixels!.Slots[item.Slot].Signature!=item.Signature||
+        if(observedDigests.Any(e=>Driver.Current.Pixels!.Slots[e.Key].IdentityDigest!=e.Value)||
+            items.Any(item=>Driver.Current.Pixels!.Slots[item.Slot].Signature!=item.Signature||
                 ExecutionCatalog.Stackable(item.Name)&&Driver.Current.Pixels.Slots[item.Slot].Quantity!=item.Quantity)||
             emptyCache.Where(e=>!items.Any(i=>i.Slot==e.Key)).Any(e=>Driver.Current.Pixels!.Slots[e.Key].Signature!=e.Value))
             throw new RoutineBlockedException("INVENTORY_CHANGED_DURING_READ");
+        // Commit identity/menu evidence only after the whole inventory and
+        // menu dismissal are verified. Cancelled/partial scans teach nothing.
+        knowledge?.Learn(learned,Driver.Current.CapturedUtc);
+        inventoryReport?.Invoke($"cached_items={cachedItems} scanned_items={learned.Count} empty_slots={empty} "+
+            $"duration_ms={(long)System.Diagnostics.Stopwatch.GetElapsedTime(readStarted).TotalMilliseconds}");
         return new(items,empty,Driver.Current.CapturedUtc);
     }
     internal async Task<SceneTarget> FindObject(string action,string name,CancellationToken ct)
