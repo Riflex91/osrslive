@@ -125,7 +125,7 @@ internal static class HudVision
         if(icons.Count!=1)return null;
         var icon=icons[0];
         var number=new Rectangle(icon.Left-54,
-            icon.Top+icon.Height/2-15,44,30);
+            icon.Top+icon.Height/2-15,52,30);
         return new Rectangle(Point.Empty,image.Size).Contains(number)&&
             number.Right<icon.Left&&HeartRightOf(image,number)?number:null;
     }

@@ -52,6 +52,15 @@ internal static class ExecutionVision
         {
             if(!new Rectangle(Point.Empty,image.Size).Contains(b)||
                 !HudVision.HeartRightOf(image,b))continue;
+            // The small native HP digits use the same public P11 bitmap
+            // font as skill levels, but change colour with health. Decode
+            // exact visible glyphs before trying general-purpose OCR.
+            int? native=NativeSkillFontReader.ReadNumber(image,b,c=>
+                c.G>160&&c.G>c.R*1.4&&c.G>c.B*1.4||
+                c.R>160&&c.R>c.G*1.4&&c.R>c.B*1.4||
+                c.R>160&&c.G>140&&c.B<130);
+            if(native is int hp)
+            {found.Add(new(hp.ToString(),b,VisualLabelKind.Hitpoints));break;}
             using var contrast=GameplayHudOcr.Contrast(image,b);
             using var crop=new Bitmap(b.Width*4,b.Height*4);
             using(var g=Graphics.FromImage(crop))

@@ -846,6 +846,21 @@ internal sealed class VisualStartup:IDisposable
                 redHealth.Single(l=>l.Kind==VisualLabelKind.Hitpoints).Text!="24"||
                 independentHp?.Hitpoints!=24||independentHp.Navigation is not null)
                 throw new InvalidOperationException("Pixel-verified red health icon must independently OCR 24 without minimap navigation");
+            using var compactHealth=new Bitmap(healthWithoutMap);
+            using(var g=Graphics.FromImage(compactHealth))g.FillRectangle(Brushes.Black,700,65,68,45);
+            var compactDigits=new[]{".###./#...#/....#/...#./..#../.#.../#..../#####",
+                "#.../#.../#.../#.#./#.#./####/..#./..#."};
+            int compactX=750;
+            foreach(var pattern in compactDigits)
+            {
+                var rows=pattern.Split('/');
+                for(int y=0;y<rows.Length;y++)for(int x=0;x<rows[y].Length;x++)
+                    if(rows[y][x]=='#')compactHealth.SetPixel(compactX+x,85+y,Color.Lime);
+                compactX+=rows[0].Length+2;
+            }
+            var compactRead=await ExecutionVision.ReadHealth(compactHealth,engine,Array.Empty<VisualLabel>());
+            if(compactRead.SingleOrDefault(l=>l.Kind==VisualLabelKind.Hitpoints)?.Text!="24")
+                throw new InvalidOperationException("Native green P11 HP digits beside the orb must remain complete and decode as 24");
             using var noHealthOrb=new Bitmap(healthWithoutMap);
             using(var g=Graphics.FromImage(noHealthOrb))
                 g.FillRectangle(Brushes.Black,760,75,40,35);

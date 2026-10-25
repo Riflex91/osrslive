@@ -30,17 +30,23 @@ internal static class NativeSkillFontReader
         int x0=layout.Bounds.Left+(index%3*62+30);
         int y0=layout.Bounds.Top+(index/3*30+15);
         var region=new Rectangle(x0,y0,30,16);
-        if(!new Rectangle(Point.Empty,bitmap.Size).Contains(region))return null;
-        var mask=new bool[30,16];
-        for(int y=0;y<16;y++)for(int x=0;x<30;x++)
-            mask[x,y]=Yellow(bitmap.GetPixel(x0+x,y0+y));
+        return ReadNumber(bitmap,region,Yellow);
+    }
+    internal static int? ReadNumber(Bitmap bitmap,Rectangle region,Func<Color,bool> ink)
+    {
+        if(bitmap.Size!=DockedWindowLayout.GameSize||region.Width is <1 or >64||
+            region.Height is <8 or >32||!new Rectangle(Point.Empty,bitmap.Size).Contains(region))return null;
+        int width=region.Width,height=region.Height;
+        var mask=new bool[width,height];
+        for(int y=0;y<height;y++)for(int x=0;x<width;x++)
+            mask[x,y]=ink(bitmap.GetPixel(region.Left+x,region.Top+y));
         // Segment actual visible yellow glyphs, never infer digits from the
         // stat's cell position or the Total level checksum.
         var runs=new List<(int Left,int Right)>();
-        for(int x=0;x<30;x++)
+        for(int x=0;x<width;x++)
         {
             bool used=false;
-            for(int y=0;y<16;y++)if(mask[x,y]){used=true;break;}
+            for(int y=0;y<height;y++)if(mask[x,y]){used=true;break;}
             if(!used)continue;
             if(runs.Count>0&&runs[^1].Right==x)runs[^1]=(runs[^1].Left,x+1);
             else runs.Add((x,x+1));
@@ -50,9 +56,9 @@ internal static class NativeSkillFontReader
         int? glyphY=null;
         foreach(var run in runs)
         {
-            int top=16,bottom=0;
+            int top=height,bottom=0;
             for(int x=run.Left;x<run.Right;x++)
-            for(int y=0;y<16;y++)if(mask[x,y])
+            for(int y=0;y<height;y++)if(mask[x,y])
             {top=Math.Min(top,y);bottom=Math.Max(bottom,y+1);}
             int w=run.Right-run.Left,h=bottom-top;
             if(h!=8||(glyphY is not null&&glyphY.Value!=top))return null;
