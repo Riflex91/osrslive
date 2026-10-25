@@ -171,6 +171,12 @@ internal sealed class GameplayCoordinator:IDisposable
             if(activityId is not null)RecordActivity(activityId,result);
             retrySeconds=result.Status==RoutineStatus.Progress?1:result.Status==RoutineStatus.Completed?2:10;
             Set(result.Status.ToString().ToUpperInvariant()+"_"+result.Reason);
+            if(result.Status==RoutineStatus.Blocked&&result.Reason=="HEALING_REQUIRES_READABLE_LIVING_HEALTH")
+                log.Add(Severity.WARN,"GAMEPLAY","HEALTH_EVIDENCE",
+                    $"hp_standalone={driver.Current.Pixels?.Hitpoints?.ToString()??"unknown"} "+
+                    $"hp_navigation={driver.Current.Pixels?.Navigation?.Hitpoints?.ToString()??"unknown"} max_hp={maxHp} "+
+                    $"navigation_available={driver.Current.Pixels?.Navigation is not null} "+
+                    $"evidence={driver.Current.Pixels?.HealthEvidence??"unavailable"}");
             log.Add(result.Status is RoutineStatus.Blocked or RoutineStatus.UnknownOutcome?Severity.WARN:Severity.INFO,
                 "GAMEPLAY","ROUTINE_RESULT",$"status={result.Status} reason={result.Reason} produced={result.Produced}");
         }

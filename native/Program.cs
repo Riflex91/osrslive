@@ -826,6 +826,7 @@ internal static class SelfTest
             ActivitySchedulerTests.Run();
             ExecutionRoutinesTests.Run();
             CombatNavigationTests.Run();
+            SurvivalRoutineTests.Run();
             GameScreenReaderTests.Run();
             SessionRecoveryTests.Run();
             const string manifest="version=0.9.1\n"+

@@ -146,7 +146,7 @@ internal sealed class TravelRoutine
     private void Health()
     {
         if(CombatPolicy.Danger(game.Driver.Current.Labels))throw new RoutineBlockedException("TRAVEL_DANGEROUS_SCREEN_STOPPED");
-        if(!CombatPolicy.Healthy(game.Driver.Current.Pixels?.Navigation?.Hitpoints,hp,minimumPercent))
+        if(!CombatPolicy.Healthy(CombatPolicy.Hitpoints(game.Driver.Current.Pixels),hp,minimumPercent))
             throw new RoutineBlockedException("TRAVEL_HEALTH_UNREADABLE_OR_BELOW_THRESHOLD");
     }
 }
