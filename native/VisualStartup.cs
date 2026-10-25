@@ -636,6 +636,27 @@ internal sealed class VisualStartup:IDisposable
             var cornerMenu=await ContextMenuOcr.Read(bottomRightMenu,engine,new Point(860,508));
             if(ExecutionUi.Menu(cornerMenu)?.Exact("Examine Logs") is null)
                 throw new InvalidOperationException("Bottom-right flipped menu OCR regression");
+            // Reproduce the real slot-22 geometry: the game's Cancel OCR
+            // line is at y~584, below the previous tight crop bottom (568).
+            // All item names still have to come from independently read pixels.
+            using var lowerEdgeMenu=new Bitmap(1000,600);
+            using(var g=Graphics.FromImage(lowerEdgeMenu))
+            using(var font=new Font("Segoe UI",14))
+            {
+                g.Clear(Color.Black);
+                g.DrawString("Choose Option",font,Brushes.White,770,472);
+                g.DrawString("Use Logs",font,Brushes.White,770,492);
+                g.DrawString("Inspect Logs",font,Brushes.White,770,512);
+                g.DrawString("Drop Logs",font,Brushes.White,770,532);
+                g.DrawString("Examine Logs",font,Brushes.White,770,552);
+                g.DrawString("Cancel",font,Brushes.White,770,572);
+            }
+            var lowerEdgeRead=await ContextMenuOcr.Read(lowerEdgeMenu,engine,new Point(860,508));
+            var lowerEdgeParsed=ExecutionUi.Menu(lowerEdgeRead);
+            if(lowerEdgeParsed?.Exact("Examine Logs") is null||
+                lowerEdgeParsed.Exact("Cancel") is null||
+                lowerEdgeRead.Any(l=>l.Kind!=VisualLabelKind.ContextMenuLine))
+                throw new InvalidOperationException("Bottom-edge menu OCR must retain Examine and Cancel without inventing entries");
             using var cornerWithoutHeader=new Bitmap(bottomRightMenu);
             using(var g=Graphics.FromImage(cornerWithoutHeader))
                 g.FillRectangle(Brushes.Black,new Rectangle(745,370,225,35));

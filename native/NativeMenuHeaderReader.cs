@@ -135,6 +135,24 @@ internal static class NativeMenuHeaderReader
         if(ReadNearCancel(flipped,flippedAnchor,flippedCancel)?.Text!="Choose Option"||
             ReadNearCancel(flipped,new Point(500,508),flippedCancel) is not null)
             throw new Exception("Flipped native menu header requires real glyphs and the correct click anchor");
+        // At the final inventory row the real OCR footer may be at 584.
+        // The recovered header must be backed by the same native pixels,
+        // even when the menu extends to the bottom game-frame edge.
+        using var lowest=new Bitmap(1000,600);
+        using(var g=Graphics.FromImage(lowest))
+        {
+            g.Clear(Color.FromArgb(70,61,51));
+            g.FillRectangle(Brushes.Black,new Rectangle(780,467,135,133));
+        }
+        for(int py=0;py<Height;py++)for(int px=0;px<Width;px++)
+            if(HasInk(px,py))lowest.SetPixel(790+px,477+py,Color.FromArgb(93,84,71));
+        var lowestCancel=new VisualLabel("Cancel",new Rectangle(788,584,52,12));
+        if(ReadNearCancel(lowest,flippedAnchor,lowestCancel)?.Text!="Choose Option")
+            throw new Exception("Bottom-edge native menu header must be recovered from actual pixels");
+        for(int py=0;py<Height;py++)for(int px=0;px<Width;px++)
+            if(HasInk(px,py))lowest.SetPixel(790+px,477+py,Color.Black);
+        if(ReadNearCancel(lowest,flippedAnchor,lowestCancel) is not null)
+            throw new Exception("Bottom-edge Cancel text alone must not fabricate a native menu header");
         for(int py=0;py<Height;py++)for(int px=0;px<Width;px++)
             if(HasInk(px,py))flipped.SetPixel(790+px,393+py,Color.Black);
         if(ReadNearCancel(flipped,flippedAnchor,flippedCancel) is not null)

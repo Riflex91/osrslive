@@ -22,13 +22,23 @@ internal static class ContextMenuOcr
 
     // A compact, cursor-anchored second view isolates menus that flip up and
     // left at the bottom/right inventory edge. It never changes click targets.
-    internal static Rectangle TightRegion(Point anchor,Size size)
+    internal static Rectangle TightRegion(Point anchor,Size size,Rectangle? observedCancel=null)
     {
         const int width=280,height=270;
         if(size.Width<width||size.Height<height||anchor.X<0||anchor.Y<0||
             anchor.X>=size.Width||anchor.Y>=size.Height)return Rectangle.Empty;
+        int y=Math.Clamp(anchor.Y-210,0,size.Height-height);
+        // The first broad OCR pass sometimes sees Cancel at y=584 for a
+        // bottom-row menu while this default crop ends at y=568. A smaller
+        // crop must contain the ACTUAL observed footer before it can recover
+        // Examine or the pixel-verified header. Never infer a Cancel position.
+        if(observedCancel is Rectangle cancel&&!cancel.IsEmpty&&
+            new Rectangle(Point.Empty,size).Contains(cancel)&&
+            Math.Abs(cancel.Left-anchor.X)<=130&&
+            cancel.Top>=anchor.Y-200&&cancel.Top<=anchor.Y+200)
+            y=Math.Clamp(Math.Max(y,cancel.Bottom+8-height),0,size.Height-height);
         return new Rectangle(Math.Clamp(anchor.X-185,0,size.Width-width),
-            Math.Clamp(anchor.Y-210,0,size.Height-height),width,height);
+            y,width,height);
     }
 
     internal static async Task<IReadOnlyList<VisualLabel>> Read(
@@ -54,7 +64,12 @@ internal static class ContextMenuOcr
         if(diagnosticCandidates.Any(l=>l.Text.Trim().Equals("Cancel",
             StringComparison.OrdinalIgnoreCase)))
         {
-            var tight=TightRegion(anchor,image.Size);
+            var observedCancel=diagnosticCandidates.Where(l=>
+                l.Text.Trim().Equals("Cancel",StringComparison.OrdinalIgnoreCase))
+                .OrderBy(l=>Math.Abs(l.Bounds.Left-anchor.X)+
+                    Math.Abs(l.Bounds.Top-anchor.Y))
+                .Select(l=>(Rectangle?)l.Bounds).FirstOrDefault();
+            var tight=TightRegion(anchor,image.Size,observedCancel);
             if(!tight.IsEmpty)
                 for(int pass=0;pass<2;pass++)
                 {
@@ -245,6 +260,22 @@ internal static class ContextMenuOcr
                 tight.Width>=Region(point,size).Width)
                 throw new Exception("Tight menu OCR must retain the click in a smaller viewport crop");
         }
+        // Live regression: right-click at (860,508), but OCR sees the
+        // footer at y=584. The original 270px crop ended at y=568 and
+        // necessarily discarded the footer and adjacent Examine text.
+        var footer=new Rectangle(785,584,58,12);
+        var nearBottom=TightRegion(new Point(860,508),size,footer);
+        if(TightRegion(new Point(860,508),size).Contains(footer)||
+            !nearBottom.Contains(footer)||
+            !nearBottom.Contains(new Rectangle(785,476,95,14))||
+            !nearBottom.Contains(new Point(860,508))||
+            nearBottom.Bottom!=size.Height)
+            throw new Exception("Bottom-row focused OCR must include a visibly observed Cancel and its menu header");
+        if(TightRegion(new Point(860,508),size,new Rectangle(0,584,58,12))!=
+            TightRegion(new Point(860,508),size)||
+            TightRegion(new Point(860,508),size,new Rectangle(785,599,58,12))!=
+            TightRegion(new Point(860,508),size))
+            throw new Exception("Unrelated or out-of-bounds Cancel text cannot reposition a menu crop");
         if(Region(new Point(-1,20),size)!=Rectangle.Empty||
             Region(new Point(20,600),size)!=Rectangle.Empty||
             Region(new Point(20,20),new Size(300,300))!=Rectangle.Empty||
