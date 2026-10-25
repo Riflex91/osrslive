@@ -16,8 +16,10 @@ internal static class ExecutionVision
             var box=ExecutionUi.InventorySlot(i);
             var quantities=labels.Where(l=>l.Kind==VisualLabelKind.InventoryQuantity&&l.Text.StartsWith(i+"=",StringComparison.Ordinal))
                 .Select(l=>int.TryParse(l.Text[(l.Text.IndexOf('=')+1)..],out int n)?(int?)n:null).ToArray();
+            var core=new Rectangle(box.X+7,box.Y+7,18,18);
             return new ObservedSlot(i,box,Signature(image,box),
-                emptyEvidence[i]&&quantities.Length==0,quantities.Length==1?quantities[0]:null);
+                emptyEvidence[i]&&quantities.Length==0,quantities.Length==1?quantities[0]:null,
+                Signature(image,core));
         }).ToArray();
         NavigationPixels? navigation=null;
         var maps=labels.Where(l=>l.Kind==VisualLabelKind.Minimap).ToArray();
