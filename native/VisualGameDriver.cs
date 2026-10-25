@@ -32,6 +32,7 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
             throw new RoutineBlockedException(stage==VisibleGameStage.Unknown?"GAMEPLAY_HUD_NOT_VERIFIED":"GAME_SESSION_LEFT_EXECUTION_SCREEN");
         Current=next;Guard?.Invoke(next);return next;
     }
+    internal void Diagnostic(string message)=>report(message);
     public async Task InputAsync(GameInput input,CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -77,20 +78,44 @@ internal sealed class GameInteractions
         }
         throw new RoutineBlockedException("CONTEXT_MENU_NOT_READABLE");
     }
-    // OSRS Escape is an optional keybind for closing an interface, not a
-    // reliable context-menu cancellation key. Only click the *observed*,
-    // unambiguous Cancel entry in a previously verified real menu.
+    // ESC controls an interface and cannot reliably cancel the native
+    // right-click popup. Click ONLY verified Cancel and observe actual closure.
+    // The full panel hash includes hover chrome; rely on item-slot pixels.
+    internal static bool InventoryRestored(ExecutionPixels? baseline,ExecutionPixels? observed,
+        int clickedSlot)
+    {
+        if(baseline is null||observed is null||!baseline.InventoryTabActive||
+            !observed.InventoryTabActive||baseline.Slots.Count!=28||observed.Slots.Count!=28||
+            clickedSlot is <0 or >=28)return false;
+        if(baseline.Slots[clickedSlot].Signature!=observed.Slots[clickedSlot].Signature)
+            return false;
+        int same=0;
+        for(int i=0;i<28;i++)
+            if(baseline.Slots[i].Signature==observed.Slots[i].Signature)same++;
+        // Allow at most one transient cell change, never a menu overlay
+        // across multiple cells or a change to the item being inspected.
+        return same>=27;
+    }
+
     internal async Task DismissMenu(ContextMenu menu,CancellationToken ct,
-        ulong? expectedInventoryPanelSignature=null)
+        ExecutionPixels? expectedInventory=null,int clickedSlot=-1)
     {
         var cancel=menu.Exact("Cancel");
         if(cancel is null||cancel.Bounds.IsEmpty||
             !new Rectangle(Point.Empty,DockedWindowLayout.GameSize).Contains(cancel.Bounds))
             throw new RoutineBlockedException("CONTEXT_CANCEL_NOT_VERIFIED");
-        DateTimeOffset prior=Driver.Current.CapturedUtc;
+        var point=new Point(cancel.Bounds.Left+cancel.Bounds.Width/2,
+            cancel.Bounds.Top+cancel.Bounds.Height/2);
+        if(Driver is WindowVisualGameDriver logger)
+            logger.Diagnostic($"CONTEXT_CANCEL_TARGET x={point.X} y={point.Y}");
+        var prior=Driver.Current.CapturedUtc;
         await Click(cancel.Bounds,ct);
+        // Moving, without clicking, outside the inventory removes native
+        // hover highlighting, so the original slots are comparable again.
+        await Driver.InputAsync(new(GameInputKind.Hover,new Rectangle(498,398,5,5)),ct);
+        var last=Driver.Current.CapturedUtc;
         int stable=0;
-        for(int attempt=0;attempt<5;attempt++)
+        for(int attempt=0;attempt<6;attempt++)
         {
             if(attempt>0)
             {
@@ -98,20 +123,21 @@ internal sealed class GameInteractions
                 await Driver.ObserveAsync(ct);
             }
             var frame=Driver.Current;
-            if(frame.CapturedUtc<=prior)continue;
-            prior=frame.CapturedUtc;
-            // With an inventory baseline, absence of OCR text is NOT enough:
-            // the screenshot must show the original panel pixels restored.
-            bool restored=expectedInventoryPanelSignature is ulong expected?
-                frame.Pixels is {InventoryTabActive:true} pixels&&
-                pixels.InventoryPanelSignature==expected:
-                !frame.Labels.Any(l=>l.Kind==VisualLabelKind.ContextMenuLine||
-                    l.Kind==VisualLabelKind.Text&&
-                    l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
-            if(restored&&ExecutionUi.Menu(frame.Labels) is null)
-            {
-                if(++stable>=2)return;
-            }
+            if(frame.CapturedUtc<=prior||frame.CapturedUtc<last)continue;
+            bool? pixelsRestored=expectedInventory is null?null:
+                InventoryRestored(expectedInventory,frame.Pixels,clickedSlot);
+            bool menuParsed=ExecutionUi.Menu(frame.Labels) is not null;
+            bool menuTextVisible=frame.Labels.Any(l=>
+                l.Kind==VisualLabelKind.ContextMenuLine||
+                l.Kind==VisualLabelKind.Text&&
+                l.Text.Trim().Equals("Choose Option",StringComparison.OrdinalIgnoreCase));
+            if(Driver is WindowVisualGameDriver trace)
+                trace.Diagnostic($"CONTEXT_CANCEL_OBSERVATION attempt={attempt+1} "+
+                    $"tab_active={frame.Pixels?.InventoryTabActive??false} "+
+                    $"slots_restored={pixelsRestored?.ToString()??"not_applicable"} "+
+                    $"menu_parsed={menuParsed} menu_text_seen={menuTextVisible}");
+            if((pixelsRestored??!menuTextVisible)&&!menuParsed&&!menuTextVisible)
+            {if(++stable>=2)return;}
             else stable=0;
         }
         throw new RoutineBlockedException("CONTEXT_MENU_CANCEL_NOT_CONFIRMED");
@@ -198,10 +224,10 @@ internal sealed class GameInteractions
             }
             else
             {
-                await DismissMenu(menu,ct,beforeFrame.Pixels.InventoryPanelSignature);
+                await DismissMenu(menu,ct,beforeFrame.Pixels,i);
                 throw new RoutineBlockedException("AMBIGUOUS_OR_NON_INVENTORY_SLOT");
             }
-            await DismissMenu(menu,ct,beforeFrame.Pixels.InventoryPanelSignature);
+            await DismissMenu(menu,ct,beforeFrame.Pixels,i);
         }
         // Inventory movement while it was being inspected invalidates the whole
         // observation. Menu overlays are gone before comparing signatures.
