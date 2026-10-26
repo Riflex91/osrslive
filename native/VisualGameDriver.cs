@@ -15,9 +15,14 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
     private readonly Func<CancellationToken,Task<VisualFrame?>> capture;
     private readonly Func<VisualFrame,GameInput,CancellationToken,Task<bool>> dispatch;
     private readonly Action<string> report;
+    private bool inputAttempted,originReanchored;
     public VisualFrame Current {get;private set;}
     internal Action<VisualFrame>? Guard;
     internal Func<VisualFrame,GameInput,bool>? InputGuard;
+    // Opt in only for a routine that begins with passive observation. A moved
+    // game window can be reanchored BEFORE its first attempted input, never
+    // while a sequence of previously calculated targets is in flight.
+    internal bool AllowPreInputOriginReanchor {get;set;}
     internal WindowVisualGameDriver(VisualFrame first,Func<CancellationToken,Task<VisualFrame?>> capture,
         Func<VisualFrame,GameInput,CancellationToken,Task<bool>> dispatch,Action<string> report)
     {Current=first;this.capture=capture;this.dispatch=dispatch;this.report=report;}
@@ -48,6 +53,32 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
             }
             if(next.ScreenBounds!=Current.ScreenBounds)
             {
+                if(AllowPreInputOriginReanchor&&!inputAttempted&&!originReanchored&&
+                    next.ScreenBounds.Size==Current.ScreenBounds.Size&&
+                    next.ScreenBounds.Size==DockedWindowLayout.GameSize&&
+                    next.CapturedUtc>Current.CapturedUtc&&
+                    DateTimeOffset.UtcNow-next.CapturedUtc<=TimeSpan.FromSeconds(2)&&
+                    GameScreenReader.Read(next).Stage==VisibleGameStage.InGame)
+                {
+                    // Never reuse the moved frame as permission for input:
+                    // require a second independent, newer InGame capture with
+                    // the SAME HWND, viewport origin and native dimensions.
+                    await Task.Delay(150,ct);
+                    var repeated=await capture(ct);
+                    if(repeated is not null&&repeated.Window==Current.Window&&
+                        repeated.ScreenBounds==next.ScreenBounds&&
+                        repeated.CapturedUtc>next.CapturedUtc&&
+                        DateTimeOffset.UtcNow-repeated.CapturedUtc<=TimeSpan.FromSeconds(2)&&
+                        GameScreenReader.Read(repeated).Stage==VisibleGameStage.InGame)
+                    {
+                        originReanchored=true;
+                        Current=repeated;
+                        Guard?.Invoke(repeated);
+                        report("FRAME_REANCHORED reason=STABLE_PRE_INPUT_ORIGIN_SHIFT "+
+                            "independent_fresh_ingame_frames=2 same_window=true same_size=true no_input=true");
+                        return repeated;
+                    }
+                }
                 report($"FRAME_REJECTED reason=GAME_VIEWPORT_CHANGED old_size={Current.ScreenBounds.Width}x{Current.ScreenBounds.Height} "+
                     $"new_size={next.ScreenBounds.Width}x{next.ScreenBounds.Height} "+
                     $"origin_changed={next.ScreenBounds.Location!=Current.ScreenBounds.Location} no_input=true");
@@ -102,6 +133,9 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
     public async Task InputAsync(GameInput input,CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        // From this point onward any movement invalidates the whole sequence,
+        // even if the dispatch or its visual authorization subsequently fails.
+        inputAttempted=true;
         if(DateTimeOffset.UtcNow-Current.CapturedUtc>TimeSpan.FromSeconds(2))await ObserveAsync(ct);
         Guard?.Invoke(Current);
         if(InputGuard is not null&&!InputGuard(Current,input))throw new RoutineBlockedException("INPUT_TARGET_NOT_VERIFIED_AFTER_REFRESH");
