@@ -14,16 +14,28 @@ internal static class WorldMapLocalizer
         var marker=new Cv.Point(pixels.PlayerMarker.X-pixels.ViewBounds.Left,pixels.PlayerMarker.Y-pixels.ViewBounds.Top);
         Cv.Cv2.Circle(mask,marker,30,Cv.Scalar.Black,-1);
         Cv.Cv2.Rectangle(mask,new(image.Width-40,0,40,40),Cv.Scalar.Black,-1);
+        // Small circular map symbols repeat at unrelated locations. Their
+        // edges are UI decoration, not distinctive terrain landmarks.
+        foreach(var icon in Cv.Cv2.HoughCircles(image,Cv.HoughModes.Gradient,1,10,100,12,4,10))
+            Cv.Cv2.Circle(mask,new Cv.Point((int)Math.Round(icon.Center.X),(int)Math.Round(icon.Center.Y)),
+                (int)Math.Ceiling(icon.Radius)+4,Cv.Scalar.Black,-1);
         using var sift=Cv.Features2D.SIFT.Create(1400,contrastThreshold:.009);
         using var descriptors=new Cv.Mat();sift.DetectAndCompute(image,mask,out var points,descriptors);
         if(points.Length<20||descriptors.Empty())return new(null,"WORLD_MAP_FEATURES_INSUFFICIENT",points.Length);
         using var matcher=new Cv.BFMatcher(Cv.NormTypes.L2);
-        var accepted=new List<WorldMapPosition>();int bestPairs=0,bestInliers=0;
+        var accepted=new List<WorldMapPosition>();int bestPairs=0,bestInliers=0;string rejection="WORLD_MAP_NO_VERIFIED_MATCH";
         foreach(var reference in data.References.Where(r=>r.Plane==0))
         {
             if(reference.Descriptors.Rows<20)continue;
+            // Require reciprocal distinctive matches. Map icons and labels
+            // repeat across the atlas and can otherwise swamp real terrain
+            // matches with one-way nearest neighbours.
+            var reverse=matcher.KnnMatch(reference.Descriptors,descriptors,2)
+                .Where(p=>p.Length==2&&p[0].Distance<.65*p[1].Distance)
+                .ToDictionary(p=>p[0].QueryIdx,p=>p[0].TrainIdx);
             var pairs=matcher.KnnMatch(descriptors,reference.Descriptors,2)
-                .Where(p=>p.Length==2&&p[0].Distance<.65*p[1].Distance).Select(p=>p[0]).ToArray();
+                .Where(p=>p.Length==2&&p[0].Distance<.65*p[1].Distance&&
+                    reverse.TryGetValue(p[0].TrainIdx,out int query)&&query==p[0].QueryIdx).Select(p=>p[0]).ToArray();
             bestPairs=Math.Max(bestPairs,pairs.Length);if(pairs.Length<12)continue;
             var from=pairs.Select(p=>points[p.QueryIdx].Pt).ToArray();
             var to=pairs.Select(p=>reference.Points[p.TrainIdx].Pt).ToArray();
@@ -31,23 +43,25 @@ internal static class WorldMapLocalizer
             using var fit=Cv.Cv2.EstimateAffinePartial2D(input,output,inliers,Cv.RobustEstimationAlgorithms.RANSAC,2,3000,.995,20);
             if(fit is null||fit.Empty())continue;
             int count=Cv.Cv2.CountNonZero(inliers);bestInliers=Math.Max(bestInliers,count);
-            if(count<12||count<pairs.Length*.65)continue;
+            if(count<12||count<pairs.Length*.65){rejection="WORLD_MAP_CONSENSUS_NOT_VERIFIED";continue;}
             var spread=from.Where((_,i)=>inliers.At<byte>(i)!=0).ToArray();
-            if(spread.Max(p=>p.X)-spread.Min(p=>p.X)<90||spread.Max(p=>p.Y)-spread.Min(p=>p.Y)<90)continue;
+            if(spread.Max(p=>p.X)-spread.Min(p=>p.X)<90||spread.Max(p=>p.Y)-spread.Min(p=>p.Y)<90)
+            {rejection="WORLD_MAP_SPREAD_NOT_VERIFIED";continue;}
             double a=fit.At<double>(0,0),b=fit.At<double>(0,1),c=fit.At<double>(1,0),d=fit.At<double>(1,1);
             double scale=Math.Sqrt(a*a+c*c);
             // The surface world map is north-up; rotated/foreign map panels
             // cannot silently become a world-coordinate source.
-            if(scale is <.35 or >8||a<=0||d<=0||Math.Abs(b)>scale*.04||Math.Abs(c)>scale*.04)continue;
+            if(scale is <.35 or >8||a<=0||d<=0||Math.Abs(b)>scale*.04||Math.Abs(c)>scale*.04)
+            {rejection="WORLD_MAP_ORIENTATION_NOT_VERIFIED";continue;}
             using var warped=new Cv.Mat();
             Cv.Cv2.WarpAffine(reference.Image,warped,fit,image.Size(),Cv.InterpolationFlags.Linear|Cv.InterpolationFlags.WarpInverseMap);
-            if(!WorldNavigator.EdgesAgree(image,warped,mask))continue;
+            if(!WorldNavigator.EdgesAgree(image,warped,mask)){rejection="WORLD_MAP_EDGES_NOT_VERIFIED";continue;}
             double x=a*marker.X+b*marker.Y+fit.At<double>(0,2),y=c*marker.X+d*marker.Y+fit.At<double>(1,2);
             var tile=new WorldTile(WorldMapData.MinX+(int)Math.Floor(x/4),WorldMapData.MaxY-1-(int)Math.Floor(y/4));
             if(!WorldMapData.Domain(tile))continue;
             accepted.Add(new(tile,count,frame.CapturedUtc));
         }
-        if(accepted.Count!=1)return new(null,accepted.Count==0?"WORLD_MAP_NO_VERIFIED_MATCH":"WORLD_MAP_MATCH_AMBIGUOUS",points.Length,bestPairs,bestInliers);
+        if(accepted.Count!=1)return new(null,accepted.Count==0?rejection:"WORLD_MAP_MATCH_AMBIGUOUS",points.Length,bestPairs,bestInliers);
         return new(accepted[0],"WORLD_MAP_SURFACE_POSITION_VERIFIED",points.Length,bestPairs,bestInliers);
     }
 }

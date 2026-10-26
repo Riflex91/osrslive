@@ -10,8 +10,8 @@ internal sealed record WorldMapMatch(WorldMapPosition? Position,string Reason,in
 
 internal static class WorldMapVision
 {
-    internal static readonly Rectangle View=new(192,4,468,386);
-    internal static readonly Rectangle Close=new(630,8,28,25);
+    internal static readonly Rectangle View=new(192,4,508,386);
+    internal static readonly Rectangle Close=new(671,8,28,25);
     private static string Compact(string text)=>Regex.Replace(text.ToLowerInvariant(),@"\s+","").Trim('\'', '’', '‘');
     internal static bool Panel(Bitmap image,IReadOnlyList<VisualLabel> labels)
     {
@@ -26,7 +26,21 @@ internal static class WorldMapVision
     internal static bool CloseIcon(Bitmap image)
     {
         if(image.Size!=DockedWindowLayout.GameSize)return false;
-        return CloseOrangePixels(image) is >=35 and <=300;
+        var points=new List<Point>();
+        for(int y=Close.Top;y<Close.Bottom;y++)for(int x=Close.Left;x<Close.Right;x++)
+        {var c=image.GetPixel(x,y);if(c.R>180&&c.G>50&&c.G<190&&c.B<75)points.Add(new(x,y));}
+        if(points.Count is <35 or >500)return false;
+        int left=points.Min(p=>p.X),right=points.Max(p=>p.X),top=points.Min(p=>p.Y),bottom=points.Max(p=>p.Y);
+        if(right-left<15||bottom-top<15)return false;
+        int diagonalA=0,diagonalB=0,cardinal=0;
+        foreach(var p in points)
+        {
+            double x=2d*(p.X-left)/(right-left)-1,y=2d*(p.Y-top)/(bottom-top)-1;
+            if(Math.Abs(x-y)<.55)diagonalA++;
+            if(Math.Abs(x+y)<.55)diagonalB++;
+            if(Math.Abs(x)>.7&&Math.Abs(y)<.2||Math.Abs(y)>.7&&Math.Abs(x)<.2)cardinal++;
+        }
+        return diagonalA>=points.Count*.3&&diagonalB>=points.Count*.3&&cardinal<=8;
     }
     private static int CloseOrangePixels(Bitmap image)
     {
@@ -79,13 +93,32 @@ internal static class WorldMapVision
         return labels.Distinct().ToArray();
     }
     internal static IReadOnlyList<Rectangle> MarkerCandidates(Bitmap image,Rectangle area)
+        =>MarkerCandidates(image,area,out _);
+    private static IReadOnlyList<Rectangle> MarkerCandidates(Bitmap image,Rectangle area,out string diagnostic)
     {
+        diagnostic="none";
         if(!new Rectangle(Point.Empty,image.Size).Contains(area))return Array.Empty<Rectangle>();
         int width=area.Width,height=area.Height;
         var gold=new bool[width*height];var seen=new bool[gold.Length];var queue=new int[gold.Length];
         for(int y=0;y<height;y++)for(int x=0;x<width;x++)
         {var c=image.GetPixel(area.X+x,area.Y+y);gold[y*width+x]=c.R>185&&c.G>135&&c.B<100&&c.R<c.G*1.65;}
+        // Animated marker highlights and its dark outline can interrupt the
+        // yellow raster by a few pixels. Join only these narrow gaps before
+        // component analysis; broad scenery still fails the shape/fill gates.
+        var expanded=new bool[gold.Length];var joined=new bool[gold.Length];
+        const int radius=3;
+        for(int y=radius;y<height-radius;y++)for(int x=radius;x<width-radius;x++)
+            for(int dy=-radius;dy<=radius;dy++)for(int dx=-radius;dx<=radius;dx++)
+                expanded[y*width+x]|=gold[(y+dy)*width+x+dx];
+        for(int y=radius;y<height-radius;y++)for(int x=radius;x<width-radius;x++)
+        {
+            bool filled=true;
+            for(int dy=-radius;dy<=radius;dy++)for(int dx=-radius;dx<=radius;dx++)filled&=expanded[(y+dy)*width+x+dx];
+            joined[y*width+x]=filled;
+        }
+        gold=joined;
         var found=new List<Rectangle>();
+        var components=new List<(Rectangle Box,int Count)>();
         for(int i=0;i<gold.Length;i++)
         {
             if(!gold[i]||seen[i])continue;
@@ -101,10 +134,13 @@ internal static class WorldMapVision
                 }
             }
             var box=new Rectangle(area.X+minX,area.Y+minY,maxX-minX+1,maxY-minY+1);
+            if(count>=15&&box.Width is >=8 and <=60&&box.Height is >=8 and <=60)components.Add((box,count));
             if(count is >=60 and <=1200&&box.Width is >=16 and <=50&&box.Height is >=16 and <=50&&
                 box.Width/(double)box.Height is >=.55 and <=1.8&&count<box.Width*box.Height*.65&&
                 !box.IntersectsWith(Close))found.Add(box);
         }
+        diagnostic=string.Join(";",components.OrderByDescending(c=>c.Box.Width*c.Box.Height).Take(5)
+            .Select(c=>$"{c.Box.X},{c.Box.Y},{c.Box.Width},{c.Box.Height}:{c.Count}"));
         return found;
     }
     internal static WorldMapPixels? Read(Bitmap image,IReadOnlyList<VisualLabel> labels)
@@ -119,12 +155,13 @@ internal static class WorldMapVision
     internal static string Describe(Bitmap image,IReadOnlyList<VisualLabel> labels)
     {
         if(image.Size!=DockedWindowLayout.GameSize)return "native_geometry=false";
-        var stars=Panel(image,labels)?MarkerCandidates(image,View):Array.Empty<Rectangle>();
+        string components="none";
+        var stars=Panel(image,labels)?MarkerCandidates(image,View,out components):Array.Empty<Rectangle>();
         return $"panel={Panel(image,labels)} close_icon={CloseIcon(image)} close_orange_pixels={CloseOrangePixels(image)} stars={stars.Count} "+
             $"surface_labels={labels.Count(l=>Compact(l.Text)=="gielinorsurface")} search_labels={labels.Count(l=>Compact(l.Text)=="search")} "+
             $"feature_labels={labels.Count(l=>Compact(l.Text)=="gamefeatures")} "+
             $"open_labels={labels.Count(l=>Compact(l.Text)=="openfloatingpanel")} shortcut_labels={labels.Count(l=>Compact(l.Text).TrimEnd('.')=="ctrl+mtoopen")} "+
-            $"star_bounds={string.Join(";",stars.Take(3).Select(b=>$"{b.X},{b.Y},{b.Width},{b.Height}"))}";
+            $"star_bounds={string.Join(";",stars.Take(3).Select(b=>$"{b.X},{b.Y},{b.Width},{b.Height}"))} gold_components={components}";
     }
     internal static Rectangle? GlobeCandidate(VisualFrame frame)
     {

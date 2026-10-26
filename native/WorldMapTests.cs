@@ -21,7 +21,7 @@ internal static class WorldMapTests
         using var bitmap=new Bitmap(1000,600);
         using(var g=Graphics.FromImage(bitmap))using(var font=new Font("Segoe UI",10))using(var orange=new Pen(Color.Orange,5))
         {
-            g.Clear(Color.FromArgb(35,40,25));g.DrawLine(orange,635,12,653,28);g.DrawLine(orange,635,28,653,12);
+            g.Clear(Color.FromArgb(35,40,25));g.DrawLine(orange,676,12,694,28);g.DrawLine(orange,676,28,694,12);
             g.DrawString("Game features",font,Brushes.Yellow,30,30);
             g.DrawString("Search",font,Brushes.White,100,400);
             g.DrawString("Gielinor Surface",font,Brushes.White,300,400);
@@ -31,6 +31,14 @@ internal static class WorldMapTests
     }
     private static async Task RunAsync()
     {
+        using(var close=new Bitmap(1000,600))
+        {
+            using(var g=Graphics.FromImage(close))using(var pen=new Pen(Color.Orange,8))
+            {g.DrawLine(pen,676,12,694,28);g.DrawLine(pen,676,28,694,12);}
+            Require(WorldMapVision.CloseIcon(close),"thick native orange X is verified by both diagonals and empty side gaps");
+            using(var g=Graphics.FromImage(close)){g.Clear(Color.Black);g.FillRectangle(Brushes.Orange,676,12,19,17);}
+            Require(!WorldMapVision.CloseIcon(close),"solid orange scenery is not a close control");
+        }
         using(var icon=new Bitmap(1000,600))
         {
             var map=new Rectangle(804,12,144,144);
@@ -52,11 +60,13 @@ internal static class WorldMapTests
         {
             using(var g=Graphics.FromImage(bitmap))using(var orange=new Pen(Color.Orange,5))
             {
-                g.Clear(Color.FromArgb(30,60,25));g.DrawLine(orange,635,12,653,28);g.DrawLine(orange,635,28,653,12);
+                g.Clear(Color.FromArgb(30,60,25));g.DrawLine(orange,676,12,694,28);g.DrawLine(orange,676,28,694,12);
                 g.FillRectangle(Brushes.Yellow,300,100,25,25); // gold building is not a star
             }
             Require(WorldMapVision.MarkerCandidates(bitmap,WorldMapVision.View).Count==0,"solid gold scenery must not become a player");
             DrawStar(bitmap,new(420,220));
+            // A narrow highlight gap splits the raw gold mask into pieces.
+            using(var g=Graphics.FromImage(bitmap))g.DrawLine(Pens.Black,404,220,436,220);
             var pixels=WorldMapVision.Read(bitmap,PanelLabels);
             Require(pixels is not null&&Math.Abs(pixels.PlayerMarker.X-420)<=1&&Math.Abs(pixels.PlayerMarker.Y-220)<=1,
                 "one native panel and star give observed marker coordinates");
@@ -66,6 +76,14 @@ internal static class WorldMapTests
             Require(WorldMapVision.Read(new Bitmap(900,600),PanelLabels) is null,"unsupported viewport cannot authorize a map click");
         }
         using var atlas=new WorldNavigator(new WorldMapData());
+        var completed=new RoutineResult(RoutineStatus.Completed,"VERIFIED");
+        var blocked=new RoutineResult(RoutineStatus.Blocked,"WORLD_MAP_CLOSE_CONTROL_NOT_VERIFIED");
+        Require(NavigationStartupPolicy.GameplayBlock(true,blocked,null,false)=="BLOCKED_"+blocked.Reason,
+            "losing fresh skill confirmation must not bypass the retained subject's world-map block");
+        Require(NavigationStartupPolicy.GameplayBlock(true,completed,null,false)=="WAITING_FOR_MINIMAP_CALIBRATION"&&
+            NavigationStartupPolicy.GameplayBlock(true,completed,completed,true)=="BLOCKED_WORLD_MAP_STILL_OPEN"&&
+            NavigationStartupPolicy.GameplayBlock(true,completed,completed,false) is null,
+            "only completed navigation gates and a closed map allow the gameplay handoff");
         WorldMapMatch Fix(VisualFrame f)=>new(new(new(3222,3218),20,f.CapturedUtc),"WORLD_MAP_SURFACE_POSITION_VERIFIED");
         var driver=new MapDriver();var logs=new List<string>();
         var success=await new WorldMapRoutine(driver,atlas,()=>false,logs.Add,(_,_)=>Task.CompletedTask,Fix).Run(default);

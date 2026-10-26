@@ -167,9 +167,20 @@ internal static class NativeWorldDigitReader
         var header=new[]{new VisualLabel("Select a world",new Rectangle(134,0,119,16))};
         if(WorldGridOcr.HasNativeTable(blank,header)||Read(blank).Count!=0)
             throw new Exception("A blank window must never identify a world table.");
-        using var fixture=new Bitmap(1000,600);
+        using var fixture=TableFixture(new[]{301,326,350,374,398,424,448});
+        if(!WorldGridOcr.HasNativeTable(fixture,header))
+            throw new Exception("Native row/pill guard rejected aligned synthetic world table.");
+        var decoded=Read(fixture);
+        if(!decoded.Any(c=>c.Text=="399"&&c.Bounds==WorldGridOcr.NativeNumberRegion(4,1)))
+            throw new Exception("Independent digit decoder did not read synthetic fifth-column world 399.");
+        if(!WorldGridReader.Classify(header.Concat(decoded).ToArray()).Any(c=>c.Text=="399"))
+            throw new Exception("Ascending world column validation rejected verified world 399.");
+        Console.WriteLine("NATIVE WORLD DIGIT PASS: glyph masks, 19px row pitch, 24 visible rows, verified 399, fail-closed matches");
+    }
+    internal static Bitmap TableFixture(int[] firstWorld)
+    {
+        var fixture=new Bitmap(1000,600);
         using(var g=Graphics.FromImage(fixture))g.Clear(Color.Black);
-        int[] firstWorld={301,326,350,374,398,424,448};
         for(int column=0;column<7;column++)
         for(int row=0;row<24;row++)
         {
@@ -187,13 +198,6 @@ internal static class NativeWorldDigitReader
                         34+row*Pitch+4+y,Color.Black);
             }
         }
-        if(!WorldGridOcr.HasNativeTable(fixture,header))
-            throw new Exception("Native row/pill guard rejected aligned synthetic world table.");
-        var decoded=Read(fixture);
-        if(!decoded.Any(c=>c.Text=="399"&&c.Bounds==WorldGridOcr.NativeNumberRegion(4,1)))
-            throw new Exception("Independent digit decoder did not read synthetic fifth-column world 399.");
-        if(!WorldGridReader.Classify(header.Concat(decoded).ToArray()).Any(c=>c.Text=="399"))
-            throw new Exception("Ascending world column validation rejected verified world 399.");
-        Console.WriteLine("NATIVE WORLD DIGIT PASS: glyph masks, 19px row pitch, 24 visible rows, verified 399, fail-closed matches");
+        return fixture;
     }
 }

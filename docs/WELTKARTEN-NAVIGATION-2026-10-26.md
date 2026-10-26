@@ -1,5 +1,7 @@
 # Weltkarte als Lokalisierungshilfe
 
+**Fortschreibung:** In `world-map-12` wurden Spielermarker, Oberflächenposition 3155/3202 und bestätigtes Schließen live nachgewiesen. Die anschließende Minimap-Zuordnung bleibt gesperrt. Die folgenden Abschnitte dokumentieren den älteren Stand bis `world-map-08`; [aktuelle Korrekturen und Ergebnisse](WELTKARTEN-KORREKTUREN-2026-10-26.md).
+
 Stand: 26.10.2026. Die Routine zum Öffnen, Lesen und bestätigten Schließen der großen Weltkarte ist implementiert. Das automatische Öffnen wurde im offiziellen Client nachgewiesen. Eine vollständige Live-Lokalisierung mit anschließendem Wegschritt ist noch nicht nachgewiesen.
 
 ## Ablauf

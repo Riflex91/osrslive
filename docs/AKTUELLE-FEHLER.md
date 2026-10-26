@@ -1,5 +1,15 @@
 # Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.7.2
 
+## Aktuell bestätigt – `world-map-12`, 26.10.2026
+
+Die große Weltkarte wird automatisch geöffnet, der animierte Spielermarker erkannt und das Panel bestätigt geschlossen. Um 16:47:01 wurde die Oberflächenposition 3155/3202 aus zwei unabhängigen Bildern übernommen. Zoomkalibrierung und Inventarrunde (17 Items, 11 leere Plätze) liefen danach durch.
+
+**Der aktuelle P0-Blocker ist die anschließende Minimap-Zuordnung:** 262 Merkmale, nur drei passende Referenzpaare, keine gültige Transformation. `AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT` verhindert weiterhin Bewegung. Ein Weltkartenhinweis allein erlaubt keinen Wegschritt. Zeitweilige Tooltip-/Inventar-Tab-Ausfälle und ein als Sitzungswechsel interpretierter Schließübergang bleiben Beobachtungspunkte.
+
+Die falsche Kartenbreite, die X-Erkennung, die vierteilige Markersegmentierung und eine mögliche Umgehung der Navigationssperre bei fehlender frischer Skillbestätigung wurden korrigiert. Die Weltlisten-Seite 2 erhält auch bei sechs groben OCR-Zellen wieder ihre native Gesamtprüfung; diese Änderung ist durch Fixtures, noch nicht durch einen getrennten Gesamteinstieg geprüft. [Änderungen, konkrete Live-Belege und nächste Schritte](WELTKARTEN-KORREKTUREN-2026-10-26.md).
+
+## Vorheriger Prüfstand bis `world-map-08`
+
 Stand: 26.10.2026, einschließlich `world-map-08` um 16:18 Uhr. Alle Zeiten sind lokale Windows-Zeiten. Belege: [Weltkartenroutine](WELTKARTEN-NAVIGATION-2026-10-26.md), [vorherige Live-Recovery und Zoom](LIVE-RECOVERY-UND-ZOOM-2026-10-25.md).
 
 ## Bestätigter Fortschritt

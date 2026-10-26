@@ -97,6 +97,10 @@ internal sealed class GameplayCoordinator:IDisposable
             (GameScreenReader.Read(f).Character is not string name||name==subject.Character)&&await dispatch(f,input,ct),
             action=>Set("INPUT_"+action.ToUpperInvariant()));
         var game=new GameInteractions(driver,itemKnowledge,message=>log.Add(Severity.INFO,"ITEM_DATABASE","INVENTORY_READ",message));
+        driver.Guard=f=>
+        {
+            if(f.Pixels?.WorldMapPanelOpen==true)throw new RoutineBlockedException("WORLD_MAP_OBSCURES_GAMEPLAY");
+        };
         RoutineResult result;
         string? activityId=null;
         bool reconcilingJournal=false;

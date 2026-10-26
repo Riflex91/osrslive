@@ -86,7 +86,7 @@ internal static class WorldNavigationDataTests
                 }
             }
             using var blank=new Cv.Mat(150,150,Cv.MatType.CV_8UC1,Cv.Scalar.Black);
-            using(var large=new Cv.Mat(reference.Image,new Cv.Rect((int)px-170,(int)py-210,468,386)))
+            using(var large=new Cv.Mat(reference.Image,new Cv.Rect((int)px-170,(int)py-210,WorldMapVision.View.Width,WorldMapVision.View.Height)))
             {
                 var view=WorldMapVision.View;
                 var map=new WorldMapPixels(large.ToBytes(".png"),view,new(view.Left+170,view.Top+210),WorldMapVision.Close);

@@ -30,6 +30,18 @@ internal static class SkillsHoverPolicy
         (observation.RecognizedSkills!=24||observation.Skills is null);
 }
 
+internal static class NavigationStartupPolicy
+{
+    internal static string? GameplayBlock(bool hasSubject,RoutineResult? worldMap,RoutineResult? zoom,bool mapOpen)
+    {
+        if(hasSubject&&worldMap?.Status!=RoutineStatus.Completed)
+            return worldMap is null?"WAITING_FOR_WORLD_MAP_LOCALIZATION":"BLOCKED_"+worldMap.Reason;
+        if(hasSubject&&zoom?.Status!=RoutineStatus.Completed)
+            return zoom is null?"WAITING_FOR_MINIMAP_CALIBRATION":"BLOCKED_"+zoom.Reason;
+        return mapOpen?"BLOCKED_WORLD_MAP_STILL_OPEN":null;
+    }
+}
+
 
 internal static class WorldFooterPolicy
 {
@@ -419,6 +431,11 @@ internal sealed class VisualStartup:IDisposable
                 {SetState("BLOCKED_"+minimapZoomResult.Reason);return;}
 
             }
+            // A temporary loss of the Skills tab must not bypass a previous
+            // navigation failure while the gameplay subject lease is alive.
+            if(NavigationStartupPolicy.GameplayBlock(Gameplay.HasSubject,worldMapResult,minimapZoomResult,
+                observed.Pixels?.WorldMapPanelOpen==true) is string navigationBlock)
+            {SetState(navigationBlock);return;}
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
             {
                 if(Paused||ObserveOnly)throw new OperationCanceledException(token);
@@ -829,6 +846,7 @@ internal sealed class VisualStartup:IDisposable
                 return 2;
             }
             await WorldMapTests.OcrFixture(engine);
+            await WorldGridOcr.OcrFixture(engine);
             using var bitmap=new Bitmap(1000,400);
             using(var g=Graphics.FromImage(bitmap))
             using(var font=new Font("Segoe UI",24))
