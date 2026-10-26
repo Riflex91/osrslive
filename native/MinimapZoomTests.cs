@@ -119,11 +119,23 @@ internal static class MinimapZoomTests
             transientLog.Any(line=>line.Contains("sample=1")&&line.Contains("scale=unknown"))&&
             transientLog.Any(line=>line.Contains("sample=2")&&line.Contains("VERIFIED_RELATIVE_SCALE")),
             "transient invalid post-wheel map is passively reobserved without a second wheel impulse");
+        var delayedMap=new ZoomDriver(images,3,postInputFrame:(frame,sample)=>sample<=4?
+            frame with{Pixels=frame.Pixels! with{Navigation=null,MinimapEvidence="hough_raw=0 inside_roi=0 white_centres=0"}}:frame);
+        var delayedLog=new List<string>();
+        var delayed=await new MinimapZoomRoutine(delayedMap,()=>false,(_,_)=>Task.CompletedTask,delayedLog.Add)
+            .Run(CancellationToken.None);
+        Require(delayed.Status==RoutineStatus.Completed&&delayedMap.Level==0&&
+            delayedMap.WheelDown==fromMiddle.WheelDown&&
+            delayedLog.Any(line=>line.Contains("sample=4 frame_rejected=MINIMAP_MISSING")&&
+                line.Contains("minimap_evidence=hough_raw=0"))&&
+            delayedLog.Any(line=>line.Contains("sample=5 scale=")&&line.Contains("VERIFIED_RELATIVE_SCALE")),
+            "four missing map frames allow one passive recovery without a second wheel impulse");
         foreach(string fault in new[]{"MINIMAP_MISSING","GAME_SCREEN_UNVERIFIED","CAPTURE_NOT_INDEPENDENT","MINIMAP_BOUNDS_INVALID"})
         {
             VisualFrame Damage(VisualFrame frame)=>fault switch
             {
-                "MINIMAP_MISSING"=>frame with{Pixels=frame.Pixels! with{Navigation=null}},
+                "MINIMAP_MISSING"=>frame with{Pixels=frame.Pixels! with{Navigation=null,
+                    MinimapEvidence="hough_raw=0 inside_roi=0 white_centres=0"}},
                 "GAME_SCREEN_UNVERIFIED"=>frame with{Labels=Array.Empty<VisualLabel>()},
                 "CAPTURE_NOT_INDEPENDENT"=>frame with{CapturedUtc=frame.CapturedUtc.AddSeconds(-2)},
                 _=>frame with{Pixels=frame.Pixels! with{Navigation=frame.Pixels.Navigation! with{MapBounds=new(830,10,90,90)}}}
@@ -137,8 +149,8 @@ internal static class MinimapZoomTests
             var persistent=new ZoomDriver(images,3,postInputFrame:(frame,_)=>Damage(frame));
             var blocked=await new MinimapZoomRoutine(persistent,()=>false,(_,_)=>Task.CompletedTask).Run(CancellationToken.None);
             Require(blocked.Status==RoutineStatus.Blocked&&blocked.Reason=="MINIMAP_ZOOM_POST_SCROLL_"+fault&&
-                persistent.WheelDown==1&&persistent.PostInputObservations==3,
-                fault+" remains blocked after three passive samples");
+                persistent.WheelDown==1&&persistent.PostInputObservations==(fault=="MINIMAP_MISSING"?6:3),
+                fault+" remains blocked after bounded passive samples");
         }
         foreach(string fault in new[]{"WINDOW_CHANGED","SCREEN_BOUNDS_CHANGED","SESSION_LEFT_GAME"})
         {

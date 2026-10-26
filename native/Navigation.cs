@@ -29,6 +29,16 @@ internal static class HudVision
 {
     internal static byte[] Png(Bitmap image,Rectangle crop)
     {using var bitmap=image.Clone(crop,PixelFormat.Format32bppArgb);using var stream=new MemoryStream();bitmap.Save(stream,ImageFormat.Png);return stream.ToArray();}
+    private static bool WhitePlayerCentre(Bitmap image,Rectangle box)
+    {
+        int x=box.Left+box.Width/2,y=box.Top+box.Height/2,white=0;
+        for(int dy=-3;dy<=3;dy++)for(int dx=-3;dx<=3;dx++)
+        {
+            var c=image.GetPixel(x+dx,y+dy);
+            if(c.R>220&&c.G>220&&c.B>220)white++;
+        }
+        return white>=3;
+    }
     // Hough can detect decorative circles in addition to the actual
     // minimap. Resolve ambiguity only with the independently visible white
     // player-center pixels; two valid candidates are still rejected.
@@ -37,27 +47,20 @@ internal static class HudVision
     {
         if(image.Size!=DockedWindowLayout.GameSize)return null;
         var region=new Rectangle(740,0,260,220);
-        bool WhiteCentre(Rectangle box)
-        {
-            int x=box.Left+box.Width/2,y=box.Top+box.Height/2,white=0;
-            for(int dy=-3;dy<=3;dy++)for(int dx=-3;dx<=3;dx++)
-            {
-                var c=image.GetPixel(x+dx,y+dy);
-                if(c.R>220&&c.G>220&&c.B>220)white++;
-            }
-            return white>=3;
-        }
         var verified=candidates.Where(box=>box.Width==box.Height&&
             box.Width is >=124 and <=170&&region.Contains(box)&&
-            WhiteCentre(box)).ToArray();
+            WhitePlayerCentre(image,box)).ToArray();
         return verified.Length==1?verified[0]:null;
     }
-    internal static Rectangle? Minimap(Bitmap image)
+    internal static Rectangle? Minimap(Bitmap image)=>Minimap(image,out _);
+    internal static Rectangle? Minimap(Bitmap image,out string evidence)
     {
+        evidence="unsupported_game_viewport";
         if(image.Size!=DockedWindowLayout.GameSize)return null;
         using var mat=Cv.Cv2.ImDecode(Png(image,new(740,0,260,235)),Cv.ImreadModes.Grayscale);
         using var blurred=new Cv.Mat();Cv.Cv2.GaussianBlur(mat,blurred,new(5,5),1.2);
-        var candidates=Cv.Cv2.HoughCircles(blurred,Cv.HoughModes.Gradient,1,45,100,32,65,88)
+        var circles=Cv.Cv2.HoughCircles(blurred,Cv.HoughModes.Gradient,1,45,100,32,65,88);
+        var candidates=circles
             .Where(c=>c.Center.X+c.Radius<=260&&c.Center.X-c.Radius>=0&&
                 c.Center.Y-c.Radius>=0&&c.Center.Y+c.Radius<220)
             .Select(c=>
@@ -66,7 +69,14 @@ internal static class HudVision
                 return new Rectangle(740+(int)Math.Round(c.Center.X)-r,
                     (int)Math.Round(c.Center.Y)-r,r*2,r*2);
             }).ToArray();
-        return UniquePixelVerifiedMinimap(image,candidates);
+        var region=new Rectangle(740,0,260,220);
+        int whiteCentres=candidates.Count(box=>box.Width==box.Height&&
+            box.Width is >=124 and <=170&&region.Contains(box)&&
+            WhitePlayerCentre(image,box));
+        var unique=UniquePixelVerifiedMinimap(image,candidates);
+        evidence=$"hough_raw={circles.Length} inside_roi={candidates.Length} "+
+            $"white_centres={whiteCentres} verified_unique={unique is not null}";
+        return unique;
     }
     // The native red hitpoints orb is independent of minimap localization.
     // Collect actual connected red-pixel components in the upper-right HUD;

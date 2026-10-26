@@ -27,10 +27,11 @@ internal static class ExecutionVision
         int? hitpoints=hpLabels.Length==1&&int.TryParse(hpLabels[0].Text,out int value)&&
             value is >=1 and <=99?value:null;
         var maps=labels.Where(l=>l.Kind==VisualLabelKind.Minimap).ToArray();
+        string minimapEvidence="label_count="+maps.Length;
         if(maps.Length==1)
             navigation=new(HudVision.Png(image,maps[0].Bounds),maps[0].Bounds,hitpoints);
         else if(maps.Length==0&&labels.Any(l=>l.Kind==VisualLabelKind.GameHud)&&
-            HudVision.Minimap(image) is Rectangle verifiedMap)
+            HudVision.Minimap(image,out minimapEvidence) is Rectangle verifiedMap)
         {
             // A focused inventory/menu OCR frame can preserve the native
             // game HUD but omit the minimap label. Only the independently
@@ -51,7 +52,7 @@ internal static class ExecutionVision
             emptyResult?.SlotDiagnostics,hitpoints,
             $"red_icon_components={redIcons} hp_labels={hpLabels.Length}",WorldMapVision.Read(image,labels),
             WorldMapVision.Panel(image,labels),WorldMapVision.CloseIcon(image),globe,globeEvidence,
-            compass,compassEvidence);
+            compass,compassEvidence,minimapEvidence);
     }
     internal static string SlotDiagnostic(ExecutionPixels pixels,int slot)
     {
