@@ -1,8 +1,8 @@
-# OSRS Play 1.7.4 – Live-Minimap-Bewegungsdiagnose
+# OSRS Play 1.7.5 – Korrigierte Live-Minimap-Bewegungsdiagnose
 
-**Release-Stand:** 1.7.4 ergänzt einen rein passiven, sitzungsinternen Bildabgleich zwischen echten Minimap-Frames. Die App protokolliert relative Geländeverschiebungen, aber keine daraus erfundene Weltposition. Die automatische Reise bleibt ohne unabhängige Positionsbestätigung gesperrt. Die neue Versionsnummer ermöglicht auch bestehenden 1.7.3-Installationen das automatische Update. [Umsetzung und Grenzen](docs/LIVE-MINIMAP-MOTION-2026-10-26.md).
+**Release-Stand:** 1.7.5 verbessert den passiven Live-Minimap-Abgleich aus 1.7.4. Ein im ersten echten Protokoll beobachteter scheinbarer Versatz von etwa vier Pixeln nach der Zoomroutine entstand wahrscheinlich durch unterschiedlich erkannte Minimap-Ausschnitte. Die Verschiebung wird nun auf die feste Spielansicht bezogen und bei geändertem Fenster verworfen. Weiterhin entstehen daraus **keine** ungeprüften Weltkoordinaten oder Navigationsklicks. Die höhere Version ermöglicht das automatische Update bestehender 1.7.4-Installationen. [Umsetzung und Grenzen](docs/LIVE-MINIMAP-MOTION-2026-10-26.md).
 
-**Vorheriger Stand (1.7.3):** Weltkarten- und Kompassprüfung, eigene Minimap-Referenzen und maximaler Zoom. Diese Maßnahmen allein konnten die Weltlokalisierung im Live-Spiel noch nicht herstellen.
+**Vorheriger Stand (1.7.3/1.7.4):** Weltkarten- und Kompassprüfung, eigene Minimap-Referenzen, maximaler Zoom und erste Live-Bewegungsdiagnose. Diese Maßnahmen allein konnten die Weltlokalisierung im Live-Spiel noch nicht herstellen.
 
 **Minimap mit maximalem Zoom (26.10.2026):** Die Live-Kalibrierung zoomt jetzt bis zum oberen Anschlag hinein und bestätigt ihn anhand tatsächlicher Bildwirkung. Der Live-Test erreichte diesen Zustand um 17:56:37. Für die Minimap sind vier eigene, geprüfte Referenzatlanten eingebettet; die große Weltkarte verwendet weiterhin ihre separaten Referenzen. Der anschließende Live-Abgleich blieb mit 137 Merkmalen und einem passenden Paar blockiert. Maximaler Zoom allein behebt die Lokalisierung hier nicht; autonomes Training ist weiterhin nicht bestätigt. [Umsetzung, Tests und Grenzen](docs/MINIMAP-REFERENZEN-UND-MAXZOOM-2026-10-26.md).
 
