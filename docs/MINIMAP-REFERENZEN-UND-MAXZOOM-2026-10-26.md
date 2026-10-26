@@ -44,7 +44,13 @@ noch für die explizite Gegenrichtungsprüfung in Regressionen.
 - `minimap-02-maxzoom`: Um 17:56:37 wurde der obere Anschlag live bestätigt.
   Beobachtete Vergrößerungen umfassten 1,5118 / 1,3208 / 1,2452; abschließend
   zwei unveränderte Schritte mit 1,0003 und 1,0000 (je 26 Inlier). Insgesamt
-  neun Vorwärtsschritte. Der folgende Lokalisierungstest wird getrennt geprüft.
+  neun Vorwärtsschritte. Weltkartenposition 3155/3202 wurde zuvor um 17:56:19
+  aus zwei unabhängigen Bildern bestätigt (33 Inlier). Die Inventarrunde las
+  17 Items/11 leere Plätze in 79 Sekunden. Um 17:58:00 blieb der anschließende
+  Kartenmatch mit 137 Merkmalen, einem passenden Paar und null Inliern blockiert.
+  Maximaler Zoom verbessert die Lokalisierung an dieser Stelle damit nicht;
+  kein Wegschritt wurde freigegeben. Die Einstellung bleibt wie angefordert
+  maximal; als nächster Fehler bleibt der Darstellungs-/Merkmalsabgleich offen.
 
 Referenzfixtures stammen weiterhin aus den Referenzbildern selbst. Sie sind
 kein Nachweis einer tatsächlichen Reise. Vor Bewegung bleiben ein geometrisch
