@@ -104,32 +104,48 @@ internal static class ExecutionRoutinesTests
             staleReports.Count==1&&staleReports[0].StartsWith("FRAME_REOBSERVING",StringComparison.Ordinal),
             "slow OCR rejects stale captured pixels and observes a fresh frame without another click");
         int persistentlyStaleCount=0;
+        var persistentlyStaleReports=new List<string>();
         var persistentlyStale=new WindowVisualGameDriver(initialHudFrame,_=>
         {
             persistentlyStaleCount++;
             return Task.FromResult<VisualFrame?>(initialHudFrame with{
                 CapturedUtc=DateTimeOffset.UtcNow.AddSeconds(-5)});
-        },(_,input,token)=>Task.FromResult(true),_=>{});
+        },(_,input,token)=>Task.FromResult(true),persistentlyStaleReports.Add);
         bool staleBlocked=false;
         try{await persistentlyStale.ObserveAsync(CancellationToken.None);}
         catch(RoutineBlockedException ex)
         {staleBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
         Require(staleBlocked&&persistentlyStaleCount==3&&
-            ReferenceEquals(persistentlyStale.Current,initialHudFrame),
+            ReferenceEquals(persistentlyStale.Current,initialHudFrame)&&
+            persistentlyStaleReports.Any(s=>s.Contains("reason=PERSISTENT_STALE_OCR_CAPTURE")),
             "persistently stale pixel captures must block without replacing the verified frame");
         int wrongWindowCount=0;
+        var wrongWindowReports=new List<string>();
         var wrongWindow=new WindowVisualGameDriver(initialHudFrame,_=>
         {
             wrongWindowCount++;
             return Task.FromResult<VisualFrame?>(initialHudFrame with{
                 Window=new IntPtr(12),CapturedUtc=DateTimeOffset.UtcNow});
-        },(_,input,token)=>Task.FromResult(true),_=>{});
+        },(_,input,token)=>Task.FromResult(true),wrongWindowReports.Add);
         bool geometryBlocked=false;
         try{await wrongWindow.ObserveAsync(CancellationToken.None);}
         catch(RoutineBlockedException ex)
         {geometryBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
-        Require(geometryBlocked&&wrongWindowCount==1,
+        Require(geometryBlocked&&wrongWindowCount==1&&
+            wrongWindowReports.Single().Contains("reason=GAME_WINDOW_CHANGED"),
             "new window handles remain an immediate hard stop without retry");
+        var movedViewportReports=new List<string>();
+        var movedViewport=new WindowVisualGameDriver(initialHudFrame,_=>
+            Task.FromResult<VisualFrame?>(initialHudFrame with{
+                ScreenBounds=new(6,0,1000,600),CapturedUtc=DateTimeOffset.UtcNow}),
+            (_,input,token)=>Task.FromResult(true),movedViewportReports.Add);
+        bool movedViewportBlocked=false;
+        try{await movedViewport.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {movedViewportBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(movedViewportBlocked&&movedViewportReports.Single().Contains("reason=GAME_VIEWPORT_CHANGED")&&
+            movedViewportReports.Single().Contains("origin_changed=True"),
+            "changed viewport origin remains an immediate stop with a distinct privacy-safe diagnostic");
         int reusedHudCaptures=0;
         var reusedTime=DateTimeOffset.UtcNow;
         var reusedHud=new WindowVisualGameDriver(initialHudFrame,_=>

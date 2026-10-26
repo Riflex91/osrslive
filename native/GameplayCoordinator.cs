@@ -22,6 +22,9 @@ internal sealed class GameplayCoordinator:IDisposable
     private bool uncertain;
     private DateTimeOffset nextInspection;
     private DateTimeOffset nextLiveMotionLog;
+    private DateTimeOffset nextRelativeMotionLog;
+    private bool unreportedRelativeMotion;
+    private double lastRelativeEast,lastRelativeNorth;
     internal string State {get;private set;}="WAITING_FOR_SKILLS";
     internal bool HasSubject=>subject is not null&&DateTimeOffset.UtcNow<leaseUntil;
     internal GameplayCoordinator(Diagnostics log)
@@ -30,7 +33,7 @@ internal sealed class GameplayCoordinator:IDisposable
         itemKnowledge=new(Path.Combine(directory,"items.sqlite"),message=>log.Add(
             message.StartsWith("ITEM_REFERENCE_READY",StringComparison.Ordinal)?Severity.INFO:Severity.WARN,"ITEM_DATABASE","STATUS",message));
     }
-    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();navigator.ClearWorldMapHint();liveMinimap.Reset();Set("WAITING_FOR_SKILLS");}
+    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();navigator.ClearWorldMapHint();liveMinimap.Reset();ClearRelativeMotionLog();Set("WAITING_FOR_SKILLS");}
     internal void ConfirmSubject(VisibleGameObservation confirmed)
     {
         if(subject?.Character!=confirmed.Character)Reset();
@@ -50,18 +53,45 @@ internal sealed class GameplayCoordinator:IDisposable
     // unknown. Pending trade/combat journals are reconciled before this gate.
     internal static string? NewActivityPositionBlock(MapLocalization observed)=>
         observed.Location is null?"AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT":null;
-    internal void ObserveLiveMinimapMotion(VisualFrame frame)
+    internal void ObserveLiveMinimapMotion(VisualFrame frame,bool provisionalScaleConfirmed=false)
     {
-        var shift=liveMinimap.Observe(frame);
-        if(shift is null||DateTimeOffset.UtcNow<nextLiveMotionLog)return;
-        nextLiveMotionLog=DateTimeOffset.UtcNow.AddSeconds(5);
+        var shift=liveMinimap.Observe(frame,provisionalScaleConfirmed);
+        if(shift is null)
+        {
+            if(liveMinimap.ProvisionalDisplacementTiles is null)ClearRelativeMotionLog();
+            return;
+        }
+        var now=DateTimeOffset.UtcNow;
+        var displacement=liveMinimap.ProvisionalDisplacementTiles;
+        if(displacement is not null&&Math.Sqrt(
+            Math.Pow(displacement.Value.East-lastRelativeEast,2)+
+            Math.Pow(displacement.Value.North-lastRelativeNorth,2)) *
+            LiveMinimapMotionTracker.ProvisionalPixelsPerTile>=3)
+            unreportedRelativeMotion=true;
+        if(unreportedRelativeMotion&&displacement is not null&&now>=nextRelativeMotionLog)
+        {
+            nextRelativeMotionLog=now.AddSeconds(2);
+            unreportedRelativeMotion=false;
+            lastRelativeEast=displacement.Value.East;
+            lastRelativeNorth=displacement.Value.North;
+            log.Add(Severity.INFO,"NAVIGATION","LIVE_MINIMAP_RELATIVE_DISTANCE",
+                $"east_tiles_provisional={displacement.Value.East.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)} "+
+                $"north_tiles_provisional={displacement.Value.North.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)} "+
+                $"samples={liveMinimap.DisplacementSamples} pixels_per_tile_assumed={LiveMinimapMotionTracker.ProvisionalPixelsPerTile.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)} "+
+                "not_a_world_position=true no_input=true navigation_authorized=false");
+        }
+        if(displacement is null)ClearRelativeMotionLog();
+        if(now<nextLiveMotionLog)return;
+        nextLiveMotionLog=now.AddSeconds(5);
         log.Add(Severity.INFO,"NAVIGATION","LIVE_MINIMAP_MOTION",
             $"reason={shift.Reason} pairs={shift.Correspondences} inliers={shift.Inliers} "+
             $"terrain_dx_px={shift.ShiftX?.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)??"unknown"} "+
             $"terrain_dy_px={shift.ShiftY?.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)??"unknown"} "+
             "world_tile_unverified=true no_input=true");
     }
-    internal void ClearLiveMinimapMotion()=>liveMinimap.Reset();
+    private void ClearRelativeMotionLog()
+    {unreportedRelativeMotion=false;lastRelativeEast=0;lastRelativeNorth=0;nextRelativeMotionLog=default;}
+    internal void ClearLiveMinimapMotion(){liveMinimap.Reset();ClearRelativeMotionLog();}
     private void Set(string state)
     {
         if(State==state)return;State=state;
@@ -114,7 +144,12 @@ internal sealed class GameplayCoordinator:IDisposable
         budget.CancelAfter(TimeSpan.FromMinutes(3));
         var driver=new WindowVisualGameDriver(frame,capture,async (f,input,ct)=>HasSubject&&
             (GameScreenReader.Read(f).Character is not string name||name==subject.Character)&&await dispatch(f,input,ct),
-            action=>Set("INPUT_"+action.ToUpperInvariant()));
+            action=>
+            {
+                if(action.StartsWith("FRAME_",StringComparison.Ordinal))
+                    log.Add(Severity.WARN,"VISUAL_FRAME","GUARD","activity=GAMEPLAY "+action);
+                else Set("INPUT_"+action.ToUpperInvariant());
+            });
         var game=new GameInteractions(driver,itemKnowledge,message=>log.Add(Severity.INFO,"ITEM_DATABASE","INVENTORY_READ",message));
         driver.Guard=f=>
         {

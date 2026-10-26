@@ -36,8 +36,23 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
         {
             if(attempt>0)await Task.Delay(150,ct);
             var next=await capture(ct);
-            if(next is null||next.Window!=Current.Window||next.ScreenBounds!=Current.ScreenBounds)
+            if(next is null)
+            {
+                report("FRAME_REJECTED reason=CAPTURE_UNAVAILABLE no_input=true");
                 throw new RoutineBlockedException("FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED");
+            }
+            if(next.Window!=Current.Window)
+            {
+                report("FRAME_REJECTED reason=GAME_WINDOW_CHANGED no_input=true");
+                throw new RoutineBlockedException("FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED");
+            }
+            if(next.ScreenBounds!=Current.ScreenBounds)
+            {
+                report($"FRAME_REJECTED reason=GAME_VIEWPORT_CHANGED old_size={Current.ScreenBounds.Width}x{Current.ScreenBounds.Height} "+
+                    $"new_size={next.ScreenBounds.Width}x{next.ScreenBounds.Height} "+
+                    $"origin_changed={next.ScreenBounds.Location!=Current.ScreenBounds.Location} no_input=true");
+                throw new RoutineBlockedException("FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED");
+            }
             var age=DateTimeOffset.UtcNow-next.CapturedUtc;
             if(age>TimeSpan.FromSeconds(2))
             {
@@ -79,6 +94,8 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
                     $"chat_control_labels={chatControls}");
             }
         }
+        if(lastReason=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED")
+            report("FRAME_REJECTED reason=PERSISTENT_STALE_OCR_CAPTURE attempts=3 no_input=true");
         throw new RoutineBlockedException(lastReason);
     }
     internal void Diagnostic(string message)=>report(message);

@@ -4,7 +4,8 @@ namespace OSRSLiveDiagnostics;
 
 // Observes changes between two renders produced by the same game client.
 // This deliberately does NOT yield a WorldTile or authorize a navigation click:
-// pixels per world tile and the actual player floor remain uncalibrated.
+// a single independent live calibration is not enough to verify an absolute
+// position, the player's floor or a safe travel command.
 internal sealed record LiveMinimapMotion(double? ShiftX,double? ShiftY,int Inliers,string Reason,
     int Correspondences=0,double? Scale=null);
 
@@ -110,28 +111,55 @@ internal static class LiveMinimapMotionVision
 
 internal sealed class LiveMinimapMotionTracker
 {
+    // Exploratory value from two real minimap frames and a separate, aligned
+    // world-map image (26 Oct 2026). Never feed it into WorldNavigator.
+    internal const double ProvisionalPixelsPerTile=11.25;
     private NavigationPixels? previous;
     private DateTimeOffset previousUtc;
     private IntPtr previousWindow;
     private Rectangle previousScreenBounds;
+    private bool provisionalScaleReady;
+    private double terrainX,terrainY;
+    private int displacementSamples;
 
-    internal void Reset(){previous=null;previousUtc=default;previousWindow=IntPtr.Zero;previousScreenBounds=default;}
+    internal int DisplacementSamples=>displacementSamples;
+    internal (double East,double North)? ProvisionalDisplacementTiles=>
+        provisionalScaleReady&&displacementSamples>0?
+            (-terrainX/ProvisionalPixelsPerTile,terrainY/ProvisionalPixelsPerTile):null;
+
+    private void ClearDisplacement(){terrainX=0;terrainY=0;displacementSamples=0;}
+
+    internal void Reset()
+    {
+        previous=null;previousUtc=default;previousWindow=IntPtr.Zero;previousScreenBounds=default;
+        provisionalScaleReady=false;ClearDisplacement();
+    }
 
     // No persistent frames, disk writes, world coordinates or mouse input.
-    internal LiveMinimapMotion? Observe(VisualFrame frame)
+    internal LiveMinimapMotion? Observe(VisualFrame frame,bool provisionalScaleConfirmed=false)
     {
+        if(provisionalScaleReady!=provisionalScaleConfirmed)
+        {
+            // The first frame after a successful zoom/compass/map gate is a
+            // fresh baseline. Never bridge the gate transition itself.
+            Reset();provisionalScaleReady=provisionalScaleConfirmed;
+        }
         if(frame.Pixels is not {WorldMapPanelOpen:false,Navigation:NavigationPixels pixels}||
             frame.Pixels.Compass is {North:false})
         {Reset();return null;}
         if(previous is null)
         {Remember(frame,pixels);return null;}
         if(frame.Window!=previousWindow||frame.ScreenBounds!=previousScreenBounds)
-        {Remember(frame,pixels);return null;}
+        {Reset();provisionalScaleReady=provisionalScaleConfirmed;Remember(frame,pixels);return null;}
         if(frame.CapturedUtc<=previousUtc||frame.CapturedUtc-previousUtc<TimeSpan.FromMilliseconds(750))return null;
         if(frame.CapturedUtc-previousUtc>TimeSpan.FromSeconds(12))
-        {Remember(frame,pixels);return null;}
+        {Reset();provisionalScaleReady=provisionalScaleConfirmed;Remember(frame,pixels);return null;}
         var result=LiveMinimapMotionVision.Compare(previous,pixels);
         Remember(frame,pixels);
+        if(result.ShiftX is not double x||result.ShiftY is not double y)
+        {ClearDisplacement();return result;}
+        if(provisionalScaleReady&&Math.Sqrt(x*x+y*y)>=1)
+        {terrainX+=x;terrainY+=y;displacementSamples++;}
         return result;
     }
 
