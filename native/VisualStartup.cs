@@ -32,12 +32,14 @@ internal static class SkillsHoverPolicy
 
 internal static class NavigationStartupPolicy
 {
-    internal static string? GameplayBlock(bool hasSubject,RoutineResult? worldMap,RoutineResult? zoom,bool mapOpen)
+    internal static string? GameplayBlock(bool hasSubject,RoutineResult? worldMap,RoutineResult? zoom,bool mapOpen,RoutineResult? compass=null)
     {
         if(hasSubject&&worldMap?.Status!=RoutineStatus.Completed)
             return worldMap is null?"WAITING_FOR_WORLD_MAP_LOCALIZATION":"BLOCKED_"+worldMap.Reason;
         if(hasSubject&&zoom?.Status!=RoutineStatus.Completed)
             return zoom is null?"WAITING_FOR_MINIMAP_CALIBRATION":"BLOCKED_"+zoom.Reason;
+        if(hasSubject&&compass?.Status!=RoutineStatus.Completed)
+            return compass is null?"WAITING_FOR_COMPASS_CALIBRATION":"BLOCKED_"+compass.Reason;
         return mapOpen?"BLOCKED_WORLD_MAP_STILL_OPEN":null;
     }
 }
@@ -218,9 +220,10 @@ internal sealed class VisualStartup:IDisposable
     private readonly ConnectivityWatch connectivity=new();
     private RoutineResult? minimapZoomResult;
     private RoutineResult? worldMapResult;
+    private RoutineResult? compassResult;
     private bool worldMapReading;
     private string lastWorldMapDiagnostic="";
-    private void ResetNavigationCalibration(){minimapZoomResult=null;worldMapResult=null;}
+    private void ResetNavigationCalibration(){minimapZoomResult=null;worldMapResult=null;compassResult=null;}
     private string lastRecoveryState="";
     private DateTimeOffset lastVerifiedHud;
     internal string CaptureState=>backgroundCapture.State;
@@ -241,6 +244,7 @@ internal sealed class VisualStartup:IDisposable
             if(paused&&!value&&minimapZoomResult?.Status==RoutineStatus.Blocked)
                 ResetNavigationCalibration(); // Manual resume retries a blocked calibration.
             if(paused&&!value&&worldMapResult?.Status==RoutineStatus.Blocked)worldMapResult=null;
+            if(paused&&!value)compassResult=null; // Camera may have changed while paused.
             paused=value;
         }
     }
@@ -361,11 +365,29 @@ internal sealed class VisualStartup:IDisposable
                 await Dispatch(observed,new("OPEN_SKILLS_FROM_SUMMARY",icon[0].Bounds),owner,ct);
                 return;
             }
+            // A confirmed subject can retain its identity while the inventory
+            // is open. Recheck camera direction there too, without waiting for
+            // the full skill panel or bypassing an unresolved compass block.
+            if(Game.Confirmed is not null)Gameplay.ConfirmSubject(Game.Confirmed);
+            if(compassResult?.Status==RoutineStatus.Completed&&observed.Pixels?.Compass is {North:false})
+                compassResult=null;
+            if(Game.Confirmed is not null||Gameplay.HasSubject)
+            {
+                if(compassResult is null&&observed.Pixels?.WorldMapPanelOpen!=true)
+                {
+                    var compass=await CalibrateCompass(observed,target,owner,ct);
+                    if(compass.Status!=RoutineStatus.Waiting)compassResult=compass;
+                    log.Add(compass.Status==RoutineStatus.Completed?Severity.INFO:Severity.WARN,"COMPASS","RESULT",
+                        $"status={compass.Status} reason={compass.Reason}");
+                    SetState(compass.Status==RoutineStatus.Completed?"COMPASS_NORTH_CONFIRMED":
+                        compass.Status==RoutineStatus.Waiting?"PAUSED":"BLOCKED_"+compass.Reason);
+                    return;
+                }
+                if(compassResult is {Status:RoutineStatus.Blocked})
+                {SetState("BLOCKED_"+compassResult.Reason);return;}
+            }
             if(Game.Confirmed is not null)
             {
-                // Adopt the session before localisation: the first gameplay
-                // tick must not reset the freshly established regional hint.
-                Gameplay.ConfirmSubject(Game.Confirmed);
                 if(worldMapResult is null)
                 {
                     SetState("WORLD_MAP_LOCALIZATION");worldMapReading=true;
@@ -393,6 +415,7 @@ internal sealed class VisualStartup:IDisposable
                 }
                 if(worldMapResult.Status!=RoutineStatus.Completed)
                 {SetState("BLOCKED_"+worldMapResult.Reason);return;}
+                if(compassResult is null){SetState("WAITING_FOR_COMPASS_CALIBRATION");return;}
                 if(minimapZoomResult is null&&Gameplay.NativePositionVerified(observed))
                 {
                     minimapZoomResult=new(RoutineStatus.Completed,"NATIVE_MAP_TRANSFORM_VERIFIED_ZOOM_NOT_REQUIRED");
@@ -434,7 +457,7 @@ internal sealed class VisualStartup:IDisposable
             // A temporary loss of the Skills tab must not bypass a previous
             // navigation failure while the gameplay subject lease is alive.
             if(NavigationStartupPolicy.GameplayBlock(Gameplay.HasSubject,worldMapResult,minimapZoomResult,
-                observed.Pixels?.WorldMapPanelOpen==true) is string navigationBlock)
+                observed.Pixels?.WorldMapPanelOpen==true,compassResult) is string navigationBlock)
             {SetState(navigationBlock);return;}
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
             {
@@ -547,6 +570,22 @@ internal sealed class VisualStartup:IDisposable
         return button.Current.IsEnabled&&!button.Current.IsOffscreen?button.Current.BoundingRectangle:null;
     }
 
+    private async Task<RoutineResult> CalibrateCompass(VisualFrame observed,IntPtr target,IntPtr owner,CancellationToken ct)
+    {
+        SetState("COMPASS_NORTH_CALIBRATION");
+        using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(TimeSpan.FromSeconds(30));
+        var driver=new WindowVisualGameDriver(observed,async token=>
+        {
+            if(Paused||ObserveOnly)throw new OperationCanceledException(token);
+            return await Capture(target,owner,token);
+        },(f,input,token)=>Dispatch(f,new("COMPASS_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
+            action=>SetState("COMPASS_INPUT_"+action.ToUpperInvariant()));
+        try{return await new CompassCalibrationRoutine(driver,()=>Paused||ObserveOnly,
+            message=>log.Add(Severity.INFO,"COMPASS","OBSERVATION",message)).Run(budget.Token);}
+        catch(OperationCanceledException) when(!ct.IsCancellationRequested)
+        {return new(Paused||ObserveOnly?RoutineStatus.Waiting:RoutineStatus.Blocked,"COMPASS_PAUSED_OR_TIMED_OUT");}
+    }
     private async Task<VisualFrame?> Capture(IntPtr target,IntPtr owner,CancellationToken ct)
     {
         using var captured=await backgroundCapture.ReadClientAsync(target,ct);

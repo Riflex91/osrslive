@@ -43,12 +43,15 @@ internal static class ExecutionVision
         int redIcons=hitpoints is null?HudVision.RedHealthIconCandidates(image).Count:0;
         string globeEvidence="minimap_missing";
         var globe=navigation is null?null:WorldMapVision.Globe(image,navigation.MapBounds,out globeEvidence);
+        string compassEvidence="minimap_missing";
+        var compass=navigation is null?null:CompassVision.Read(image,navigation.MapBounds,out compassEvidence);
         return new(slots,Signature(image,new Rectangle(30,50,690,300)),navigation,
             inventoryActive,Signature(image,new Rectangle(746,304,220,265)),
             emptyResult?.FirstSlotDiagnostic??"inventory_inactive",
             emptyResult?.SlotDiagnostics,hitpoints,
             $"red_icon_components={redIcons} hp_labels={hpLabels.Length}",WorldMapVision.Read(image,labels),
-            WorldMapVision.Panel(image,labels),WorldMapVision.CloseIcon(image),globe,globeEvidence);
+            WorldMapVision.Panel(image,labels),WorldMapVision.CloseIcon(image),globe,globeEvidence,
+            compass,compassEvidence);
     }
     internal static string SlotDiagnostic(ExecutionPixels pixels,int slot)
     {

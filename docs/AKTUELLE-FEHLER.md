@@ -1,5 +1,7 @@
 # Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.7.2
 
+**Aktualisierung zur Kamerarichtung:** Eine explizite Nordkalibrierung ist ergänzt. `compass-04` bestätigte am 26.10. um 17:19:53 zwei unabhängige Bilder mit 0,00°; der folgende Wegversuch blieb mit 246 Merkmalen und nur vier passenden Referenzpaaren blockiert. In diesem Nordzustand genügt eine Kameradrehung zur Behebung des Matchfehlers nicht. Der Live-Klickfall aus einer tatsächlich gedrehten Ausgangslage bleibt separat zu bestätigen. [Details und Tests](KOMPASS-NORD-2026-10-26.md).
+
 ## Aktuell bestätigt – `world-map-12`, 26.10.2026
 
 Die große Weltkarte wird automatisch geöffnet, der animierte Spielermarker erkannt und das Panel bestätigt geschlossen. Um 16:47:01 wurde die Oberflächenposition 3155/3202 aus zwei unabhängigen Bildern übernommen. Zoomkalibrierung und Inventarrunde (17 Items, 11 leere Plätze) liefen danach durch.

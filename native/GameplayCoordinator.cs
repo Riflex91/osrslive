@@ -100,6 +100,7 @@ internal sealed class GameplayCoordinator:IDisposable
         driver.Guard=f=>
         {
             if(f.Pixels?.WorldMapPanelOpen==true)throw new RoutineBlockedException("WORLD_MAP_OBSCURES_GAMEPLAY");
+            if(f.Pixels?.Compass is {North:false})throw new RoutineBlockedException("COMPASS_DIRECTION_CHANGED");
         };
         RoutineResult result;
         string? activityId=null;

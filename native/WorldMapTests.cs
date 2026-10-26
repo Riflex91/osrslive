@@ -81,8 +81,9 @@ internal static class WorldMapTests
         Require(NavigationStartupPolicy.GameplayBlock(true,blocked,null,false)=="BLOCKED_"+blocked.Reason,
             "losing fresh skill confirmation must not bypass the retained subject's world-map block");
         Require(NavigationStartupPolicy.GameplayBlock(true,completed,null,false)=="WAITING_FOR_MINIMAP_CALIBRATION"&&
-            NavigationStartupPolicy.GameplayBlock(true,completed,completed,true)=="BLOCKED_WORLD_MAP_STILL_OPEN"&&
-            NavigationStartupPolicy.GameplayBlock(true,completed,completed,false) is null,
+            NavigationStartupPolicy.GameplayBlock(true,completed,completed,true,completed)=="BLOCKED_WORLD_MAP_STILL_OPEN"&&
+            NavigationStartupPolicy.GameplayBlock(true,completed,completed,false,completed) is null&&
+            NavigationStartupPolicy.GameplayBlock(true,completed,completed,false)=="WAITING_FOR_COMPASS_CALIBRATION",
             "only completed navigation gates and a closed map allow the gameplay handoff");
         WorldMapMatch Fix(VisualFrame f)=>new(new(new(3222,3218),20,f.CapturedUtc),"WORLD_MAP_SURFACE_POSITION_VERIFIED");
         var driver=new MapDriver();var logs=new List<string>();
