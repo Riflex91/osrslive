@@ -56,6 +56,15 @@ internal static class CompassVision
 
 internal sealed class CompassCalibrationRoutine
 {
+    // A previously missing compass may reappear after the HUD settles. This
+    // only clears that one diagnostic block; Run() still requires independent
+    // north observations and authorizes no click without its own tooltip.
+    internal static bool MayResumeAfterFreshPixels(RoutineResult? previous,
+        VisualFrame frame,DateTimeOffset blockedAt)=>
+        previous is {Status:RoutineStatus.Blocked,Reason:"COMPASS_PIXEL_NEEDLE_NOT_VERIFIED"}&&
+        frame.CapturedUtc>blockedAt&&
+        frame.Pixels is {Compass:not null,WorldMapPanelOpen:false}&&
+        GameScreenReader.Read(frame).Stage==VisibleGameStage.InGame;
     private readonly IVisualGameDriver driver;private readonly Func<bool> stopped;
     private readonly Action<string> report;private readonly Func<int,CancellationToken,Task> wait;
     internal CompassCalibrationRoutine(IVisualGameDriver driver,Func<bool> stopped,Action<string> report,
@@ -79,8 +88,27 @@ internal sealed class CompassCalibrationRoutine
     {
         if(stopped())return new(RoutineStatus.Waiting,"COMPASS_PAUSED");
         await driver.ObserveAsync(ct);
-        report("COMPASS_PIXEL_EVIDENCE "+driver.Current.Pixels?.CompassEvidence);
-        if(driver.Current.Pixels?.WorldMapPanelOpen==true||driver.Current.Pixels?.Compass is not CompassPixels first)
+        DateTimeOffset lastSample=default;
+        // Startup OCR and circular-HUD detection can transiently disagree just
+        // after the Skills panel opens. Reobserve passively; absent compass
+        // pixels must never turn into a guessed click location.
+        for(int attempt=0;attempt<=8;attempt++)
+        {
+            var frame=driver.Current;
+            report($"COMPASS_PIXEL_EVIDENCE sample={attempt+1} "+
+                $"compass={frame.Pixels?.CompassEvidence??"unavailable"} "+
+                $"minimap={frame.Pixels?.MinimapEvidence??"unavailable"} "+
+                $"fresh_frame={attempt==0||frame.CapturedUtc>lastSample} no_input=true");
+            if(frame.Pixels?.WorldMapPanelOpen==true)
+                return new(RoutineStatus.Blocked,"COMPASS_PIXEL_NEEDLE_NOT_VERIFIED");
+            if(frame.Pixels?.Compass is CompassPixels)break;
+            if(attempt==8)return new(RoutineStatus.Blocked,"COMPASS_PIXEL_NEEDLE_NOT_VERIFIED");
+            if(stopped())return new(RoutineStatus.Waiting,"COMPASS_PAUSED");
+            lastSample=frame.CapturedUtc;
+            await wait(550,ct);
+            await driver.ObserveAsync(ct);
+        }
+        if(driver.Current.Pixels?.Compass is not CompassPixels first)
             return new(RoutineStatus.Blocked,"COMPASS_PIXEL_NEEDLE_NOT_VERIFIED");
         report($"COMPASS_BASELINE degrees={first.Degrees:F2} north={first.North} red={first.RedPixels} blue={first.BluePixels}");
         bool clicked=false;
