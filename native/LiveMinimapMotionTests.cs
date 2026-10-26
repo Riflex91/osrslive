@@ -43,7 +43,7 @@ internal static class LiveMinimapMotionTests
         // Independent large translated windows approximate the user's real
         // manual route (+49,+42 terrain pixels). The 144px circle can retain
         // enough distinctive overlap for SIFT plus its separate edge gate.
-        using(var panorama=Landscape(177,300))
+        using(var panorama=Landscape(177,300,strokes:1200))
         using(var beforeWalk=new Cv.Mat(panorama,new Cv.Rect(100,100,144,144)))
         using(var afterWalk=new Cv.Mat(panorama,new Cv.Rect(51,58,144,144)))
         {
@@ -114,11 +114,11 @@ internal static class LiveMinimapMotionTests
         Console.WriteLine("LIVE MINIMAP MOTION PASS: reciprocal terrain tracking, crop-origin compensation, layout/zoom guards, provisional read-only distance resets and no world-position claim");
     }
 
-    private static Cv.Mat Landscape(int seed,int side=144)
+    private static Cv.Mat Landscape(int seed,int side=144,int strokes=280)
     {
         var image=new Cv.Mat(side,side,Cv.MatType.CV_8UC1,new Cv.Scalar(74));
         var rng=new Random(seed);
-        for(int i=0;i<280;i++)
+        for(int i=0;i<strokes;i++)
         {
             var point=new Cv.Point(rng.Next(12,side-12),rng.Next(12,side-12));
             var tint=new Cv.Scalar(rng.Next(20,220));
