@@ -11,6 +11,12 @@ internal sealed class WorldNavigator:IDisposable
     internal WorldNavigator(WorldMapData? data=null){Data=data;}
     private readonly Dictionary<(WorldTile,WorldTile),int> stalls=new();
     private WorldMapPosition? worldMapHint;
+    // World-map surface observations are useful for read-only independent
+    // cross-checks, but never prove the player's actual floor or an input
+    // transform. Keep the existing five-minute expiry.
+    internal WorldMapPosition? FreshWorldMapHint(DateTimeOffset observedUtc)=>
+        worldMapHint is not null&&observedUtc-worldMapHint.ObservedUtc is var age&&
+        age>=TimeSpan.Zero&&age<TimeSpan.FromMinutes(5)?worldMapHint:null;
     private readonly List<WorldMapData.ReferenceMap> localReferences=new();
     internal void ClearWorldMapHint()
     {worldMapHint=null;foreach(var reference in localReferences)reference.Dispose();localReferences.Clear();}
