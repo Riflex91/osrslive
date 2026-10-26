@@ -65,6 +65,43 @@ internal static class WorldNavigationDataTests
                     !GameplayCoordinator.TerrainDiagnosticEvidence(1,terrain,surface)
                         .Contains("candidate_unverified=true no_input=true navigation_authorized=false"))
                     throw new Exception("Read-only two-frame and independent surface-hint diagnostics must not authorize input");
+                var preview=MinimapTerrainProbe.PreviewCardinalStepsReadOnly(terrain,observedAt,
+                    terrain,observedAt.AddMilliseconds(700),surface);
+                if(preview.Status!="PROJECTION_STABLE_DIAGNOSTIC_ONLY"||
+                    preview.EastDx is not (>=12 and <=21)||Math.Abs(preview.EastDy??100)>5||
+                    preview.NorthDy is not (>=-21 and <=-12)||Math.Abs(preview.NorthDx??100)>5||
+                    preview.MaxFrameDriftPx!=0)
+                    throw new Exception("Zoom-out minimap geometry projected the wrong compass direction or tile distance: "+preview);
+                if(MinimapTerrainProbe.PreviewCardinalStepsReadOnly(terrain,observedAt,
+                    terrain,observedAt.AddMilliseconds(100),surface).Status!="PROJECTION_INDEPENDENT_FRAMES_REQUIRED"||
+                    MinimapTerrainProbe.PreviewCardinalStepsReadOnly(terrain,observedAt,
+                    terrain,observedAt.AddMilliseconds(700),null).Status!="PROJECTION_WORLD_MAP_HINT_NOT_CORROBORATED"||
+                    MinimapTerrainProbe.PreviewCardinalStepsReadOnly(terrain,observedAt,
+                    terrain with{UnverifiedCandidate=terrain.UnverifiedCandidate with{Plane=1}},
+                    observedAt.AddMilliseconds(700),surface).Status!="PROJECTION_CANDIDATES_DIVERGED"||
+                    MinimapTerrainProbe.PreviewCardinalStepsReadOnly(terrain,observedAt,
+                    terrain with{RunnerUpScore=terrain.BestScore-.04},
+                    observedAt.AddMilliseconds(700),surface).Status!="PROJECTION_PEAK_NOT_DISTINCT")
+                    throw new Exception("Projection diagnostic must reject stale, missing, divergent or ambiguous evidence");
+                // Native minimap bounds need not be 150x150. Verify that the
+                // normalized template centre does not silently become a HUD
+                // click offset when the detected minimap crops to 142px.
+                using(var smaller=new Cv.Mat())
+                {
+                    Cv.Cv2.Resize(thumbnail,smaller,new(142,142));
+                    var smallPixels=new NavigationPixels(smaller.ToBytes(".png"),new(834,14,142,142),24);
+                    var smallTerrain=MinimapTerrainProbe.Examine(smallPixels,data.MinimapReferences);
+                    var smallPreview=MinimapTerrainProbe.PreviewCardinalStepsReadOnly(smallTerrain,observedAt,
+                        smallTerrain,observedAt.AddMilliseconds(700),surface);
+                    if(smallPreview.Status!="PROJECTION_STABLE_DIAGNOSTIC_ONLY"||
+                        smallPreview.EastDx is not (>=11 and <=21)||
+                        smallPreview.NorthDy is not (>=-21 and <=-11)||
+                        MinimapTerrainProbe.PreviewCardinalStepsReadOnly(terrain,observedAt,
+                            smallTerrain,observedAt.AddMilliseconds(700),surface).Status!="PROJECTION_GEOMETRY_CHANGED")
+                        throw new Exception("Resized native HUD bounds break the read-only atlas-to-screen transform: "+smallPreview);
+                }
+                Console.WriteLine($"TERRAIN PROJECTION PASS: east_dx={preview.EastDx} north_dy={preview.NorthDy} "+
+                    "independent_hint_required=true navigation_authorized=false");
                 using(var emptyTerrain=new Cv.Mat(150,150,Cv.MatType.CV_8UC1,Cv.Scalar.Black))
                 {
                     var empty=MinimapTerrainProbe.Examine(pixels with{MinimapPng=emptyTerrain.ToBytes(".png")},data.MinimapReferences);
