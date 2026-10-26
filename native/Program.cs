@@ -14,6 +14,8 @@ internal static class Program
         if(args.Length>0 && args[0]=="--build-info")
         {Console.WriteLine(BuildIdentity.Log);return 0;}
         if(args.Length>0 && args[0]=="--self-test")return SelfTest.Run();
+        if(args.Length>0 && args[0]=="--world-map-self-test")
+        {try{WorldMapTests.Run();return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
         if(args.Length>0 && args[0]=="--ocr-self-test")return VisualStartup.OcrSelfTest().GetAwaiter().GetResult();
         if(args.Length>0 && args[0]=="--navigation-self-test")return WorldNavigationDataTests.Run().GetAwaiter().GetResult();
         if(args.Length>0 && args[0]=="--third-party-notices")
@@ -829,6 +831,7 @@ internal static class SelfTest
             CombatNavigationTests.Run();
             MinimapZoomTests.Run();
             WorldFooterRecoveryTests.Run();
+            WorldMapTests.Run();
             SurvivalRoutineTests.Run();
             GameScreenReaderTests.Run();
             SessionRecoveryTests.Run();

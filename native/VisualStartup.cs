@@ -205,6 +205,10 @@ internal sealed class VisualStartup:IDisposable
     private readonly SessionRecovery recovery=new();
     private readonly ConnectivityWatch connectivity=new();
     private RoutineResult? minimapZoomResult;
+    private RoutineResult? worldMapResult;
+    private bool worldMapReading;
+    private string lastWorldMapDiagnostic="";
+    private void ResetNavigationCalibration(){minimapZoomResult=null;worldMapResult=null;}
     private string lastRecoveryState="";
     private DateTimeOffset lastVerifiedHud;
     internal string CaptureState=>backgroundCapture.State;
@@ -223,7 +227,8 @@ internal sealed class VisualStartup:IDisposable
         set
         {
             if(paused&&!value&&minimapZoomResult?.Status==RoutineStatus.Blocked)
-                minimapZoomResult=null; // Manual resume can retry after enabling minimap zoom in the client.
+                ResetNavigationCalibration(); // Manual resume retries a blocked calibration.
+            if(paused&&!value&&worldMapResult?.Status==RoutineStatus.Blocked)worldMapResult=null;
             paused=value;
         }
     }
@@ -246,9 +251,9 @@ internal sealed class VisualStartup:IDisposable
         if((GetAsyncKeyState(0x77)&0x8000)!=0)Paused=true; // F8 emergency pause
         if(Paused){SetState("PAUSED");return;}
         if(target==IntPtr.Zero||!IsWindow(target))
-        {backgroundCapture.Release();minimapZoomResult=null;SetState("WAITING_FOR_WINDOW");return;}
+        {backgroundCapture.Release();ResetNavigationCalibration();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();minimapZoomResult=null;recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();ResetNavigationCalibration();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -295,7 +300,7 @@ internal sealed class VisualStartup:IDisposable
         DiagnoseSkillOcr(observed);
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
         else if(lastVerifiedHud!=default&&DateTimeOffset.UtcNow-lastVerifiedHud>TimeSpan.FromSeconds(3))
-        {Gameplay.Reset();minimapZoomResult=null;lastVerifiedHud=default;}
+        {Gameplay.Reset();ResetNavigationCalibration();lastVerifiedHud=default;}
         DiagnosePostPlay(observed);
         if(!ObserveOnly&&Game.Confirmed is not null)
             VisuallyConfirmedSession?.Invoke();
@@ -309,7 +314,7 @@ internal sealed class VisualStartup:IDisposable
         {
             if(recoveryDecision.ResetSubject)
             {
-                Game.Reset();Gameplay.Reset();minimapZoomResult=null;observedSelectedWorld=null;previousAction="";repeatedActions=0;
+                Game.Reset();Gameplay.Reset();ResetNavigationCalibration();observedSelectedWorld=null;previousAction="";repeatedActions=0;
                 ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();
             }
             if(lastRecoveryState!=recoveryDecision.State)
@@ -346,6 +351,41 @@ internal sealed class VisualStartup:IDisposable
             }
             if(Game.Confirmed is not null)
             {
+                // Adopt the session before localisation: the first gameplay
+                // tick must not reset the freshly established regional hint.
+                Gameplay.ConfirmSubject(Game.Confirmed);
+                if(worldMapResult is null)
+                {
+                    SetState("WORLD_MAP_LOCALIZATION");worldMapReading=true;
+                    using var mapBudget=CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    mapBudget.CancelAfter(TimeSpan.FromSeconds(90));
+                    var mapDriver=new WindowVisualGameDriver(observed,async token=>
+                    {
+                        if(Paused||ObserveOnly)throw new OperationCanceledException(token);
+                        var next=await Capture(target,owner,token);
+                        return next is null?null:ConnectivityWatch.Signal(next,
+                            await connectivity.Lost(observedSelectedWorld??preferredWorld,true,token));
+                    },(f,input,token)=>Dispatch(f,new("WORLD_MAP_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
+                        action=>SetState("WORLD_MAP_INPUT_"+action.ToUpperInvariant()));
+                    RoutineResult result;
+                    try{result=await Gameplay.LocateWithWorldMap(mapDriver,()=>Paused||ObserveOnly,mapBudget.Token);}
+                    catch(OperationCanceledException) when(!ct.IsCancellationRequested)
+                    {result=new(Paused||ObserveOnly?RoutineStatus.Waiting:RoutineStatus.Blocked,"WORLD_MAP_PAUSED_OR_TIMED_OUT");}
+                    finally{worldMapReading=false;}
+                    if(result.Status!=RoutineStatus.Waiting)worldMapResult=result;
+                    log.Add(result.Status==RoutineStatus.Completed?Severity.INFO:Severity.WARN,"WORLD_MAP","RESULT",
+                        $"status={result.Status} reason={result.Reason}");
+                    SetState(result.Status==RoutineStatus.Completed?"WORLD_MAP_POSITION_CONFIRMED":
+                        result.Status==RoutineStatus.Waiting?"PAUSED":"BLOCKED_"+result.Reason);
+                    return;
+                }
+                if(worldMapResult.Status!=RoutineStatus.Completed)
+                {SetState("BLOCKED_"+worldMapResult.Reason);return;}
+                if(minimapZoomResult is null&&Gameplay.NativePositionVerified(observed))
+                {
+                    minimapZoomResult=new(RoutineStatus.Completed,"NATIVE_MAP_TRANSFORM_VERIFIED_ZOOM_NOT_REQUIRED");
+                    log.Add(Severity.INFO,"MINIMAP_ZOOM","RESULT","status=Completed reason="+minimapZoomResult.Reason);
+                }
                 if(minimapZoomResult is null)
                 {
                     SetState("MINIMAP_ZOOM_VISUAL_CALIBRATION");
@@ -377,6 +417,7 @@ internal sealed class VisualStartup:IDisposable
                 }
                 if(minimapZoomResult.Status!=RoutineStatus.Completed)
                 {SetState("BLOCKED_"+minimapZoomResult.Reason);return;}
+
             }
             if(await Gameplay.Tick(observed,Game.Confirmed,async token=>
             {
@@ -507,7 +548,7 @@ internal sealed class VisualStartup:IDisposable
         long ocrStart=System.Diagnostics.Stopwatch.GetTimestamp();
         var labels=await Recognize(captured.Image,ocr!,
             postPlay: recovery.Recovering||previousAction is "PLAY_SELECTED_CHARACTER" or "ENTER_GAME",
-            contextAnchor:contextMenuAnchor);
+            contextAnchor:contextMenuAnchor,worldMapProbe:worldMapReading||ObserveOnly);
         ct.ThrowIfCancellationRequested();
         var ocrElapsed=System.Diagnostics.Stopwatch.GetElapsedTime(ocrStart);
         if(contextMenuAnchor is Point&&ocrElapsed>=TimeSpan.FromMilliseconds(1400))
@@ -518,6 +559,12 @@ internal sealed class VisualStartup:IDisposable
                 $"inventory_active={InventoryTabPolicy.Active(captured.Image)} "+
                 "screenshot_persisted=false");
         var pixels=ExecutionVision.Read(captured.Image,labels);
+        if(worldMapReading||ObserveOnly)
+        {
+            var diagnostic=WorldMapVision.Describe(captured.Image,labels)+$" globe={pixels?.WorldMapButton?.ToString()??"none"} "+pixels?.WorldMapButtonEvidence;
+            if(diagnostic!=lastWorldMapDiagnostic)
+            {lastWorldMapDiagnostic=diagnostic;log.Add(Severity.INFO,"WORLD_MAP","FRAME",diagnostic);}
+        }
         if(GameScreenReader.Read(new(target,bounds,captured.CapturedUtc,labels)).Stage==VisibleGameStage.Unknown&&
             PostPlayScreenReader.RecoveryDiagnostic!="not_read"&&lastRecoveryOcrDiagnostic!=PostPlayScreenReader.RecoveryDiagnostic)
         {
@@ -607,7 +654,7 @@ internal sealed class VisualStartup:IDisposable
         return ExecutionUi.Menu(focused) is not null?focused.Distinct().ToArray():null;
     }
     private static async Task<IReadOnlyList<VisualLabel>> Recognize(
-        Bitmap bitmap,OcrEngine engine,bool postPlay=false,Point? contextAnchor=null)
+        Bitmap bitmap,OcrEngine engine,bool postPlay=false,Point? contextAnchor=null,bool worldMapProbe=false)
     {
         // Missing/ambiguous menu evidence still uses the complete OCR path
         // and never authorizes a click from geometry or inventory alone.
@@ -634,6 +681,7 @@ internal sealed class VisualStartup:IDisposable
             .Select(w=>new VisualLabel(w.Text,Map(w.BoundingRect),Regex.IsMatch(w.Text,@"^\d+$")?
                 VisualLabelKind.Number:VisualLabelKind.Text)));
         labels=labels.Distinct().ToList();
+        if(worldMapProbe)labels.AddRange(await WorldMapVision.ReadLabels(bitmap,engine));
         if(postPlay)
         {
             // Full-frame OCR often misses the next native login prompt.
@@ -780,6 +828,7 @@ internal sealed class VisualStartup:IDisposable
                     string.Join(",",OcrEngine.AvailableRecognizerLanguages.Select(l=>l.LanguageTag)));
                 return 2;
             }
+            await WorldMapTests.OcrFixture(engine);
             using var bitmap=new Bitmap(1000,400);
             using(var g=Graphics.FromImage(bitmap))
             using(var font=new Font("Segoe UI",24))

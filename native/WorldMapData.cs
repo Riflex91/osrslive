@@ -20,10 +20,10 @@ internal sealed class WorldMapData:IDisposable
     internal readonly List<ReferenceMap> References=new();
     internal sealed class ReferenceMap:IDisposable
     {
-        internal readonly int Plane;internal readonly Cv.Mat Image,Descriptors=new();internal readonly Cv.KeyPoint[] Points;
-        internal ReferenceMap(int plane,Cv.Mat image)
+        internal readonly int Plane,OriginX,OriginY;internal readonly Cv.Mat Image,Descriptors=new();internal readonly Cv.KeyPoint[] Points;
+        internal ReferenceMap(int plane,Cv.Mat image,int originX=0,int originY=0)
         {
-            Plane=plane;Image=image;using var sift=Cv.Features2D.SIFT.Create(18000,contrastThreshold:.015);
+            Plane=plane;Image=image;OriginX=originX;OriginY=originY;using var sift=Cv.Features2D.SIFT.Create(18000,contrastThreshold:.015);
             sift.DetectAndCompute(image,null,out Points,Descriptors);
         }
         public void Dispose(){Image.Dispose();Descriptors.Dispose();}

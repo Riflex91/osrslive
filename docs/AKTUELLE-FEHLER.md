@@ -1,6 +1,6 @@
 # Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.7.2
 
-Stand: 25.10.2026, ausgewertete Live-Tests bis 22:13 Uhr, lokaler Testlauf `live-calibration-recovery-15` auf Basis von `main` nach PR #26. Alle Zeiten sind lokale Windows-Zeiten. Implementierung und Belege: [Live-Recovery und Zoom](LIVE-RECOVERY-UND-ZOOM-2026-10-25.md).
+Stand: 26.10.2026, einschließlich `world-map-08` um 16:18 Uhr. Alle Zeiten sind lokale Windows-Zeiten. Belege: [Weltkartenroutine](WELTKARTEN-NAVIGATION-2026-10-26.md), [vorherige Live-Recovery und Zoom](LIVE-RECOVERY-UND-ZOOM-2026-10-25.md).
 
 ## Bestätigter Fortschritt
 
@@ -15,7 +15,9 @@ Stand: 25.10.2026, ausgewertete Live-Tests bis 22:13 Uhr, lokaler Testlauf `live
 
 **Zusätzlicher Code, noch kein Live-Bewegungsnachweis:** Bei fehlendem nativen Match kann die Merkmalsextraktion einmal gleichmäßig vergrößert wiederholt werden. Die transformierten Punkte werden in ursprünglichen Koordinaten geprüft. Vorhandene gültige native Matches bleiben erhalten, mehrdeutige Matches werden nicht durch einen zweiten Versuch überstimmt. Die Referenztests bestätigen Geometrie, Routing und Klickkoordinaten; die Zuverlässigkeit am echten Client ist damit nicht bewiesen.
 
-**Nächster Lokalisierungsweg:** Die große Weltkarte wurde im offiziellen Client geöffnet und zeigt den Spielermarker sowie größere Geländeabschnitte. Automatisches Öffnen/Schließen, Bildbereichserkennung, eindeutige Spielerzuordnung und die unabhängig bestätigte Übergabe an den Routenplaner fehlen noch. Die optische Ähnlichkeit zu den Referenzkacheln ist ein Hinweis, kein numerischer Positionsbeleg.
+**Weltkartenroutine implementiert, Live-Kette noch offen:** Am 26.10. erfolgten Launcherstart, Weltwahl 399, Spieleinstieg und das Öffnen der großen Weltkarte automatisch. Der exakte rote Shortcut bestätigte den Globusklick. Die Kartenbeschriftungen wurden erkannt, die Schließkontrolle jedoch nicht; `world-map-08` blockierte mit `WORLD_MAP_POSITION_NOT_CONFIRMED`. Die abschließende Korrektur trennt passive Kartenanalyse von der geprüften Schließkontrolle und meldet gegebenenfalls `WORLD_MAP_CLOSE_CONTROL_NOT_VERIFIED`. Ihr vollständiger Live-Durchlauf steht noch aus.
+
+Markerauswertung, zwei unabhängige Positionsbelege, bestätigtes Schließen und regionale Minimap-Suche sind im Code vorhanden und durch Fixtures geprüft. Diese liefern noch keinen Live-Wegschritt. Der Oberflächenhinweis beweist kein Spielerstockwerk und gilt nur fünf Minuten; längere Reisen benötigen künftig eine erneute Lokalisierung.
 
 Die bisherigen Navigationsfixtures stammen aus der Referenzkarte selbst. Sie können einen Darstellungsunterschied zwischen echter Minimap und Referenzkarte nicht ausschließen. Kartentreffer und Bewegung dürfen deshalb weiterhin nur aus tatsächlichen Live-Belegen freigegeben werden.
 
@@ -26,6 +28,8 @@ Reise, Bank/GE, Kampf, Sammeln, Produktion und Fortschritt über längere Zeit s
 Nach verifizierter Weltposition muss zunächst ein kurzer Weg mit neuer Positionsbestätigung funktionieren; anschließend ein einzelner Sammel-/Produktionsvorgang mit echtem Inventar- oder XP-Beleg. Journale und Schutzregeln für unklare Ergebnisse bleiben erforderlich.
 
 ## Behobene Startblockaden und verbleibende Beobachtung
+
+Der erneute Gesamteinstieg gelang am 26.10. auf Welt 399. Nicht jede Weltlisten-Seite ist damit abgedeckt: In einem vorherigen Lauf lieferte Seite 2 zu wenige bestätigte Weltzellen, um zur empfohlenen Welt 553 zu blättern. Die fokussierte Play-Now-Erkennung wurde ergänzt, weil bei Wiederverbindungen die gelbe Charakterbeschriftung fehlen kann. Die Charakterzeile im Chat war zeitweise nicht zuverlässig lesbar; die Identitätsprüfung wird deshalb nicht gelockert.
 
 Die frühere harte Ablehnung schon einer fehlenden Nach-Scroll-Minimap wurde durch begrenzte passive Wiederholungen und getrennte Gründe ersetzt. Die Radius-Schwankung der Kreiserkennung wird durch identische, unskalierte Bildschirmbereiche abgefangen. Die widersprüchliche Zwölf-Matches-Vorbedingung für eine Zehn-/Elf-Inlier-Bestätigung ist entfernt. Native Weltziffern und zusätzliche Footer-OCR überwanden den beobachteten Footer-Block bei Welt 455.
 

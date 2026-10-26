@@ -40,11 +40,13 @@ internal static class PostPlayScreenReader
                 continue;
             string line=Normalize(label.Text);
             string? known=ClickHere.IsMatch(line)?ClickText:
-                Welcome.IsMatch(line)?(line.Equals("Welcome to Old School RuneScape",StringComparison.OrdinalIgnoreCase)?
+                Welcome.IsMatch(line)?(line.TrimEnd('.','!').Trim().Equals("Welcome to Old School RuneScape",StringComparison.OrdinalIgnoreCase)?
                     "Welcome to Old School RuneScape":WelcomeText):
                 Connecting.IsMatch(line)?ConnectingText:
                 SessionRecovery.Disconnected(new[]{label with{Text=line}})?line:
                 line.Equals("Try again",StringComparison.OrdinalIgnoreCase)?"Try again":null;
+            if(line.Equals("Play Now",StringComparison.OrdinalIgnoreCase)&&
+                new Rectangle(380,210,240,110).Contains(label.Bounds))known="Play Now";
             if(known is null)continue;
             output.Add(new(known,label.Bounds));
         }
@@ -56,6 +58,8 @@ internal static class PostPlayScreenReader
             output.RemoveAll(l=>l.Text==WelcomeText);
         if(output.Count(l=>l.Text=="Try again")>1)
             output.RemoveAll(l=>l.Text=="Try again");
+        if(output.Count(l=>l.Text=="Play Now")>1)
+            output.RemoveAll(l=>l.Text=="Play Now");
         return output;
     }
 
@@ -142,6 +146,10 @@ internal static class PostPlayScreenReader
             new Rectangle(350,200,300,15))},DockedWindowLayout.GameSize);
         if(recoveredWelcome.SingleOrDefault()?.Text!="Welcome to Old School RuneScape")
             throw new Exception("Focused first welcome must retain its full anchor for footer and Play verification.");
+        var reconnectPlay=MatchKnownPhrases(new[]{new VisualLabel("Play Now",new Rectangle(450,240,100,24)),
+            new VisualLabel("Play Now",new Rectangle(30,540,100,24))},DockedWindowLayout.GameSize);
+        if(reconnectPlay.Count!=1||reconnectPlay[0].Bounds.Top!=240)
+            throw new Exception("The reconnect Play prompt without character caption must be read only inside its actual button region.");
         Console.WriteLine("POST PLAY READER PASS: exact centered phrases, ambiguity/viewport/privacy guards");
     }
 }

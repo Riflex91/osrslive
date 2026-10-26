@@ -86,6 +86,27 @@ internal static class WorldNavigationDataTests
                 }
             }
             using var blank=new Cv.Mat(150,150,Cv.MatType.CV_8UC1,Cv.Scalar.Black);
+            using(var large=new Cv.Mat(reference.Image,new Cv.Rect((int)px-170,(int)py-210,468,386)))
+            {
+                var view=WorldMapVision.View;
+                var map=new WorldMapPixels(large.ToBytes(".png"),view,new(view.Left+170,view.Top+210),WorldMapVision.Close);
+                var surfaceFrame=new VisualFrame(new IntPtr(1),new(0,0,1000,600),DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),
+                    new(Array.Empty<ObservedSlot>(),0,WorldMap:map,WorldMapPanelOpen:true));
+                var fix=WorldMapLocalizer.Locate(data,surfaceFrame);
+                if(fix.Position is null||fix.Position.SurfaceTile.Distance(tile)>1)
+                    throw new Exception("Large-map localization must use the off-centre player marker instead of the map centre: "+fix);
+                navigator.SetWorldMapHint(fix.Position);
+                using var small=new Cv.Mat(reference.Image,new Cv.Rect((int)px-75,(int)py-75,150,150));
+                var minimapFrame=surfaceFrame with{Pixels=new(Array.Empty<ObservedSlot>(),0,
+                    new(small.ToBytes(".png"),new(830,10,150,150),10))};
+                var global=navigator.LocateAtSampling(minimapFrame,1).Location;
+                var local=navigator.LocateAtSampling(minimapFrame,1,local:true).Location;
+                if(global is null||local is null||local.Tile!=global.Tile||
+                    local.ClickFor(new(tile.X+4,tile.Y))!=global.ClickFor(new(tile.X+4,tile.Y)))
+                    throw new Exception("Regional references must preserve absolute world coordinates and native minimap clicks");
+                navigator.ClearWorldMapHint();
+                Console.WriteLine($"WORLD MAP REFERENCE PASS: off-centre marker, surface={fix.Position.SurfaceTile}, inliers={fix.Inliers}, regional minimap coordinates preserved");
+            }
             var unknown=new VisualFrame(new(1),new(0,0,1000,600),DateTimeOffset.UtcNow,Array.Empty<VisualLabel>(),
                 new(Array.Empty<ObservedSlot>(),0,new(blank.ToBytes(".png"),new(830,10,150,150),10)));
             if(navigator.Locate(unknown) is not null)throw new Exception("Black minimap produced a false position");
@@ -99,6 +120,10 @@ internal static class WorldNavigationDataTests
             if(navigator.Locate(ambiguous) is not null)throw new Exception("Ambiguous floors produced a false position");
             if(navigator.LocateDetailed(ambiguous).Status!="MAP_MATCH_AMBIGUOUS")
                 throw new Exception("Ambiguous floors must expose an ambiguity reason without a position");
+            navigator.SetWorldMapHint(new(tile,20,DateTimeOffset.UtcNow));
+            if(navigator.LocateAtSampling(ambiguous,1,local:true).Status!="MAP_MATCH_AMBIGUOUS")
+                throw new Exception("A surface map hint cannot choose between visually indistinguishable player floors");
+            navigator.ClearWorldMapHint();
             data.References.Remove(duplicate);duplicate.Dispose();
             Console.WriteLine("AUTOMATIC NAVIGATION DATA PASS: pinned public assets, collision routes, upper-floor stairs, rotated/zoomed reference matching, unknown-map rejection. No live game actions tested.");
             return 0;
