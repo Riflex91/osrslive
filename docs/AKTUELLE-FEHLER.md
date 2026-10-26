@@ -1,6 +1,8 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.7.3
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.7.4
 
-Release 1.7.3 übernimmt die folgenden unter 1.7.2-Testbuilds gemessenen Ergebnisse. Die neue Versionsnummer ermöglicht die automatische Aktualisierung; sie ist kein Nachweis behobener Weltlokalisierung.
+Release 1.7.4 ergänzt einen passiven Abgleich zwischen echten Minimapbildern und ermöglicht das automatische Update von 1.7.3. Eine daraus abgeleitete absolute Weltposition ist weiterhin ausdrücklich gesperrt. Zwei unabhängig bestätigte Weltkartenpositionen nach manueller Bewegung werden für die Maßstabskalibrierung benötigt. [Neue Diagnose und Grenzen](LIVE-MINIMAP-MOTION-2026-10-26.md).
+
+Die untenstehenden Live-Messungen dokumentieren die weiterhin offenen Grenzen von 1.7.3 und älteren Testbuilds; die Versionsnummer ist kein Nachweis behobener Weltlokalisierung.
 
 **Neuester Test:** Eigene Minimap-Referenzen sind ergänzt. Mit Zoom-out blieb `minimap-01` um 17:51:54 blockiert (240 Merkmale, drei passende Paare). Auf Benutzerwunsch kalibriert die App jetzt zum maximalen Zoom hinein; `minimap-02-maxzoom` bestätigte den oberen Anschlag um 17:56:37 anhand echter Vergrößerung und zwei unveränderten Schritten. Der anschließende Positionstest um 17:58:00 blieb mit 137 Merkmalen, einem passenden Paar und null Inliern blockiert. Kein Bewegungsnachweis; maximaler Zoom allein löst den Matchfehler hier nicht. [Details](MINIMAP-REFERENZEN-UND-MAXZOOM-2026-10-26.md).
 
