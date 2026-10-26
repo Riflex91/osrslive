@@ -6,7 +6,8 @@ namespace OSRSLiveDiagnostics;
 internal sealed record WorldMapPixels(byte[] MapPng,Rectangle ViewBounds,Point PlayerMarker,Rectangle CloseBounds);
 // Surface coordinates are a search hint, NOT evidence for the player's floor.
 internal sealed record WorldMapPosition(WorldTile SurfaceTile,int Inliers,DateTimeOffset ObservedUtc);
-internal sealed record WorldMapMatch(WorldMapPosition? Position,string Reason,int Features=0,int Matches=0,int Inliers=0);
+internal sealed record WorldMapMatch(WorldMapPosition? Position,string Reason,int Features=0,int Matches=0,int Inliers=0,
+    string MatchProfiles="");
 
 internal static class WorldMapVision
 {

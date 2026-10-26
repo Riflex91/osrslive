@@ -36,8 +36,17 @@ internal static class WorldMapTests
         Require(WorldMapLocalizer.ConsensusVerified(31,49)&&WorldMapLocalizer.ConsensusVerified(30,50),
             "strong live map evidence narrowly below 65 percent can proceed to independent visual checks");
         Require(!WorldMapLocalizer.ConsensusVerified(29,49)&&!WorldMapLocalizer.ConsensusVerified(31,54)&&
-            !WorldMapLocalizer.ConsensusVerified(11,12)&&!WorldMapLocalizer.ConsensusVerified(30,29),
+            !WorldMapLocalizer.ConsensusVerified(11,12)&&!WorldMapLocalizer.ConsensusVerified(30,29)&&
+            !WorldMapLocalizer.ConsensusVerified(27,42)&&!WorldMapLocalizer.ConsensusVerified(25,43),
             "weak, insufficient or impossible geometric evidence still fails closed");
+        Require(WorldMapLocalizer.DescriptorRatios.SequenceEqual(new[]{.65,.60,.55}),
+            "fallbacks may only tighten the reciprocal feature ratio, never loosen it");
+        var at=DateTimeOffset.UtcNow;
+        var anchor=new WorldMapPosition(new WorldTile(3153,3202),20,at);
+        Require(WorldMapLocalizer.UniqueVerifiedPosition(Array.Empty<WorldMapPosition>()) is null&&
+            WorldMapLocalizer.UniqueVerifiedPosition(new[]{anchor,anchor with {Inliers=25}})?.Inliers==25&&
+            WorldMapLocalizer.UniqueVerifiedPosition(new[]{anchor,anchor with {SurfaceTile=new(3154,3202)}}) is null,
+            "stricter descriptor profiles only reinforce a unique, identical tile");
         using(var close=new Bitmap(1000,600))
         {
             using(var g=Graphics.FromImage(close))using(var pen=new Pen(Color.Orange,8))
@@ -85,6 +94,10 @@ internal static class WorldMapTests
         using var atlas=new WorldNavigator(new WorldMapData());
         var completed=new RoutineResult(RoutineStatus.Completed,"VERIFIED");
         var blocked=new RoutineResult(RoutineStatus.Blocked,"WORLD_MAP_CLOSE_CONTROL_NOT_VERIFIED");
+        Require(NavigationStartupPolicy.FrozenCalibration(blocked,null,null)=="BLOCKED_"+blocked.Reason&&
+            NavigationStartupPolicy.FrozenCalibration(null,completed,null) is null&&
+            NavigationStartupPolicy.FrozenCalibration(null,null,null) is null,
+            "failed calibration prevents unnecessary identity-tab input even without a fresh skill lease");
         Require(NavigationStartupPolicy.GameplayBlock(true,blocked,null,false)=="BLOCKED_"+blocked.Reason,
             "losing fresh skill confirmation must not bypass the retained subject's world-map block");
         Require(NavigationStartupPolicy.GameplayBlock(true,completed,null,false)=="WAITING_FOR_MINIMAP_CALIBRATION"&&
