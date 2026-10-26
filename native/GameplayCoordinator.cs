@@ -53,6 +53,19 @@ internal sealed class GameplayCoordinator:IDisposable
         $"phase={phase} status={result.Status} features={result.Features} "+
         $"candidates={result.Candidates} inliers={result.BestInliers} "+
         $"best_ratio_matches={result.BestRatioMatches} no_input=true";
+    internal static string TerrainDiagnosticEvidence(int sample,MinimapTerrainEvidence evidence,
+        WorldMapPosition? surfaceHint)
+    {
+        var culture=System.Globalization.CultureInfo.InvariantCulture;
+        var distance=MinimapTerrainProbe.SurfaceHintDistance(evidence,surfaceHint);
+        return $"sample={sample} status={evidence.Status} "+
+            $"best_score={evidence.BestScore.ToString("F3",culture)} "+
+            $"runner_up={evidence.RunnerUpScore.ToString("F3",culture)} peak_count={evidence.Peaks} "+
+            $"reference_scale={evidence.BestReferenceScale.ToString("F2",culture)} "+
+            $"surface_hint_xy_delta_tiles={distance?.ToString()??"unknown"} "+
+            $"candidate_plane_unverified={evidence.UnverifiedCandidate?.Plane.ToString()??"unknown"} "+
+            "candidate_unverified=true no_input=true navigation_authorized=false";
+    }
     private MapLocalization ObservePreflightLocation(VisualFrame frame,string phase)
     {
         var result=navigator.LocateDetailed(frame);
@@ -209,18 +222,46 @@ internal sealed class GameplayCoordinator:IDisposable
                         // One diagnostic scan per subject, off the UI thread.
                         // This neither substitutes for the SIFT verifier nor
                         // authorizes game input, even on a distinctive peak.
+                        var firstFrame=driver.Current;
                         var evidence=await Task.Run(()=>MinimapTerrainProbe.Examine(
-                            driver.Current.Pixels?.Navigation,referenceData.MinimapReferences),budget.Token);
+                            firstFrame.Pixels?.Navigation,referenceData.MinimapReferences),budget.Token);
                         log.Add(Severity.INFO,"NAVIGATION","TERRAIN_PROBE",
-                            $"status={evidence.Status} best_score={evidence.BestScore:F3} "+
-                            $"runner_up={evidence.RunnerUpScore:F3} peak_count={evidence.Peaks} "+
-                            $"reference_scale={evidence.BestReferenceScale:F2} "+
-                            "candidate_unverified=true no_input=true navigation_authorized=false");
+                            TerrainDiagnosticEvidence(1,evidence,navigator.FreshWorldMapHint(firstFrame.CapturedUtc)));
+                        // Reinspect the same unchanged window after a measured
+                        // delay. Never use these candidates to unlock movement.
+                        await Task.Delay(700,budget.Token);
+                        var secondFrame=await driver.ObserveAsync(budget.Token);
+                        if(secondFrame.Window!=firstFrame.Window||
+                            secondFrame.ScreenBounds!=firstFrame.ScreenBounds||
+                            secondFrame.Pixels?.WorldMapPanelOpen==true||
+                            secondFrame.Pixels?.Compass is not {North:true}||
+                            GameScreenReader.Read(secondFrame).Stage!=VisibleGameStage.InGame)
+                            log.Add(Severity.INFO,"NAVIGATION","TERRAIN_PROBE_REPEAT",
+                                "status=SECOND_FRAME_GAME_OR_GEOMETRY_CHANGED no_input=true navigation_authorized=false");
+                        else
+                        {
+                            var second=await Task.Run(()=>MinimapTerrainProbe.Examine(
+                                secondFrame.Pixels?.Navigation,referenceData.MinimapReferences),budget.Token);
+                            log.Add(Severity.INFO,"NAVIGATION","TERRAIN_PROBE",
+                                TerrainDiagnosticEvidence(2,second,navigator.FreshWorldMapHint(secondFrame.CapturedUtc)));
+                            var repeated=MinimapTerrainProbe.CompareReadOnly(evidence,firstFrame.CapturedUtc,
+                                second,secondFrame.CapturedUtc);
+                            log.Add(Severity.INFO,"NAVIGATION","TERRAIN_PROBE_REPEAT",
+                                $"status={repeated.Status} independent_frame={repeated.IndependentFrame} "+
+                                $"candidate_shift_xy_tiles={repeated.CandidateShiftTiles?.ToString()??"unknown"} "+
+                                $"same_unverified_plane={repeated.SameUnverifiedPlane?.ToString()??"unknown"} "+
+                                "no_input=true navigation_authorized=false");
+                        }
                     }
                     catch(Cv.OpenCVException ex)
                     {
                         log.Add(Severity.WARN,"NAVIGATION","TERRAIN_PROBE",
                             $"status=IMAGE_COMPARISON_FAILED type={ex.GetType().Name} no_input=true navigation_authorized=false");
+                    }
+                    catch(RoutineBlockedException ex)
+                    {
+                        log.Add(Severity.WARN,"NAVIGATION","TERRAIN_PROBE_REPEAT",
+                            $"status=PASSIVE_FRAME_REJECTED reason={ex.Message} no_input=true navigation_authorized=false");
                     }
                 }
                 result=new(RoutineStatus.Blocked,positionBlock);

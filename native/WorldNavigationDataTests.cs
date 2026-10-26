@@ -44,6 +44,27 @@ internal static class WorldNavigationDataTests
                     terrain.UnverifiedCandidate.Distance(tile)>2||terrain.BestScore<.45||
                     MinimapTerrainProbe.Examine(null,data.MinimapReferences).UnverifiedCandidate is not null)
                     throw new Exception("Zoom-out terrain diagnostic cannot find its synthetic atlas texture without authorizing position: "+terrain);
+                var observedAt=DateTimeOffset.UtcNow;
+                var surface=new WorldMapPosition(tile,20,observedAt.AddSeconds(-5));
+                var stable=MinimapTerrainProbe.CompareReadOnly(terrain,observedAt,
+                    terrain,observedAt.AddMilliseconds(700));
+                var tooSoon=MinimapTerrainProbe.CompareReadOnly(terrain,observedAt,
+                    terrain,observedAt.AddMilliseconds(100));
+                var shifted=MinimapTerrainProbe.CompareReadOnly(terrain,observedAt,
+                    terrain with{UnverifiedCandidate=terrain.UnverifiedCandidate with{X=terrain.UnverifiedCandidate.X+6}},
+                    observedAt.AddMilliseconds(700));
+                var changedFloor=MinimapTerrainProbe.CompareReadOnly(terrain,observedAt,
+                    terrain with{UnverifiedCandidate=terrain.UnverifiedCandidate with{Plane=1}},
+                    observedAt.AddMilliseconds(700));
+                if(MinimapTerrainProbe.SurfaceHintDistance(terrain,surface) is not int hintDifference||hintDifference>2||
+                    stable.Status!="REPEATED_TERRAIN_COMPARISON_ONLY"||stable.CandidateShiftTiles!=0||
+                    stable.SameUnverifiedPlane!=true||!stable.IndependentFrame||
+                    tooSoon.Status!="SECOND_FRAME_NOT_INDEPENDENT"||
+                    shifted.CandidateShiftTiles!=6||changedFloor.SameUnverifiedPlane!=false||
+                    MinimapTerrainProbe.SurfaceHintDistance(terrain,null) is not null||
+                    !GameplayCoordinator.TerrainDiagnosticEvidence(1,terrain,surface)
+                        .Contains("candidate_unverified=true no_input=true navigation_authorized=false"))
+                    throw new Exception("Read-only two-frame and independent surface-hint diagnostics must not authorize input");
                 using(var emptyTerrain=new Cv.Mat(150,150,Cv.MatType.CV_8UC1,Cv.Scalar.Black))
                 {
                     var empty=MinimapTerrainProbe.Examine(pixels with{MinimapPng=emptyTerrain.ToBytes(".png")},data.MinimapReferences);

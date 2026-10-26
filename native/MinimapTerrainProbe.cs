@@ -8,6 +8,8 @@ namespace OSRSLiveDiagnostics;
 internal sealed record MinimapTerrainEvidence(string Status,double BestScore=0,
     double RunnerUpScore=0,int Peaks=0,WorldTile? UnverifiedCandidate=null,
     double BestReferenceScale=0);
+internal sealed record MinimapTerrainRepeatEvidence(string Status,int? CandidateShiftTiles=null,
+    bool? SameUnverifiedPlane=null,bool IndependentFrame=false);
 
 internal static class MinimapTerrainProbe
 {
@@ -15,6 +17,26 @@ internal static class MinimapTerrainProbe
     // screenshot pixel. Scan a small bounded scale family, never infer zoom
     // or a usable navigation transform from the scores.
     internal static readonly double[] ReferenceScales={1.80,1.95,2.10};
+
+    // Surface X/Y alone can be compared to a two-frame world-map observation.
+    // The map does not verify the player's floor. These results remain
+    // diagnostic only, regardless of distance or score.
+    internal static int? SurfaceHintDistance(MinimapTerrainEvidence probe,WorldMapPosition? hint)=>
+        probe.UnverifiedCandidate is WorldTile p&&hint is not null?
+            Math.Max(Math.Abs(p.X-hint.SurfaceTile.X),Math.Abs(p.Y-hint.SurfaceTile.Y)):null;
+
+    internal static MinimapTerrainRepeatEvidence CompareReadOnly(MinimapTerrainEvidence first,
+        DateTimeOffset firstCapturedUtc,MinimapTerrainEvidence second,DateTimeOffset secondCapturedUtc)
+    {
+        if(secondCapturedUtc-firstCapturedUtc<TimeSpan.FromMilliseconds(550))
+            return new("SECOND_FRAME_NOT_INDEPENDENT");
+        if(first.UnverifiedCandidate is not WorldTile a||second.UnverifiedCandidate is not WorldTile b)
+            return new("CANDIDATE_MISSING_IN_AT_LEAST_ONE_FRAME",IndependentFrame:true);
+        // Do not use WorldTile.Distance here: it returns int.MaxValue for
+        // different planes, which would hide the actual X/Y variation.
+        return new("REPEATED_TERRAIN_COMPARISON_ONLY",
+            Math.Max(Math.Abs(a.X-b.X),Math.Abs(a.Y-b.Y)),a.Plane==b.Plane,true);
+    }
 
     internal static MinimapTerrainEvidence Examine(NavigationPixels? pixels,
         IReadOnlyList<WorldMapData.ReferenceMap> references)
