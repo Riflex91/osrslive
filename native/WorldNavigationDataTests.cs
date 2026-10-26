@@ -26,6 +26,33 @@ internal static class WorldNavigationDataTests
                 throw new Exception("Corrupt native minimap asset accepted");}
             catch(RoutineBlockedException ex) when(ex.Message=="MINIMAP_REFERENCE_HASH_MISMATCH"){}
             var tile=new WorldTile(3222,3218);double px=(tile.X-WorldMapData.MinX)*4+2,py=(WorldMapData.MaxY-tile.Y)*4-2;
+            // A zoomed-out atlas crop exercises the separate masked terrain
+            // comparator. Even an exact synthetic hit is NEVER handed to the
+            // route executor; a candidate alone has no movement authority.
+            using(var affine=new Cv.Mat(2,3,Cv.MatType.CV_64FC1))
+            {
+                const double zoomOutScale=1.95;
+                affine.Set(0,0,zoomOutScale);affine.Set(0,1,0d);affine.Set(0,2,px-zoomOutScale*75);
+                affine.Set(1,0,0d);affine.Set(1,1,zoomOutScale);affine.Set(1,2,py-zoomOutScale*75);
+                using var thumbnail=new Cv.Mat();
+                Cv.Cv2.WarpAffine(reference.Image,thumbnail,affine,new(150,150),
+                    Cv.InterpolationFlags.Linear|Cv.InterpolationFlags.WarpInverseMap);
+                Cv.Cv2.Circle(thumbnail,new(75,75),4,Cv.Scalar.White,-1);
+                var pixels=new NavigationPixels(thumbnail.ToBytes(".png"),new(830,10,150,150),24);
+                var terrain=MinimapTerrainProbe.Examine(pixels,data.MinimapReferences);
+                if(terrain.Status!="TERRAIN_COMPARISON_ONLY"||terrain.UnverifiedCandidate is null||
+                    terrain.UnverifiedCandidate.Distance(tile)>2||terrain.BestScore<.45||
+                    MinimapTerrainProbe.Examine(null,data.MinimapReferences).UnverifiedCandidate is not null)
+                    throw new Exception("Zoom-out terrain diagnostic cannot find its synthetic atlas texture without authorizing position: "+terrain);
+                using(var emptyTerrain=new Cv.Mat(150,150,Cv.MatType.CV_8UC1,Cv.Scalar.Black))
+                {
+                    var empty=MinimapTerrainProbe.Examine(pixels with{MinimapPng=emptyTerrain.ToBytes(".png")},data.MinimapReferences);
+                    if(empty.Status!="MINIMAP_TERRAIN_TOO_UNIFORM"||empty.UnverifiedCandidate is not null)
+                        throw new Exception("Flat minimap must not yield a terrain candidate");
+                }
+                Console.WriteLine($"TERRAIN PROBE PASS: masked global map scan best={terrain.BestScore:F3} "+
+                    $"runner_up={terrain.RunnerUpScore:F3} movement_authorized=false");
+            }
             foreach(var variant in new[]{(Angle:0d,Scale:1d),(Angle:37d,Scale:1.2d),(Angle:-60d,Scale:.85d)})
             {
                 double angle=variant.Angle*Math.PI/180,c=Math.Cos(angle)*variant.Scale,s=Math.Sin(angle)*variant.Scale;

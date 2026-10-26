@@ -492,7 +492,8 @@ internal sealed class VisualStartup:IDisposable
                         minimapZoomResult=result;
                         log.Add(result.Status==RoutineStatus.Completed?Severity.INFO:Severity.WARN,
                             "MINIMAP_ZOOM","RESULT",$"status={result.Status} reason={result.Reason} "+
-                            $"forward_wheel_steps={result.Produced} requested_limit=MAXIMUM_ZOOM_IN mouse_global_untouched=true");
+                            $"forward_wheel_steps={result.Produced} requested_limit="+
+                            $"{(MinimapZoomRoutine.NavigationZoomIn?"MAXIMUM_ZOOM_IN":"MINIMUM_ZOOM_OUT")} mouse_global_untouched=true");
                     }
                     SetState(result.Status==RoutineStatus.Completed?"MINIMAP_ZOOM_CONFIRMED":
                         result.Status==RoutineStatus.Waiting?"PAUSED":"BLOCKED_"+result.Reason);
