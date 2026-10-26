@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
+using Cv=OpenCvSharp;
 
 namespace OSRSLiveDiagnostics;
 
@@ -24,6 +25,7 @@ internal sealed class GameplayCoordinator:IDisposable
     private DateTimeOffset nextLiveMotionLog;
     private DateTimeOffset nextRelativeMotionLog;
     private bool unreportedRelativeMotion;
+    private bool terrainProbeLogged;
     private double lastRelativeEast,lastRelativeNorth;
     internal string State {get;private set;}="WAITING_FOR_SKILLS";
     internal bool HasSubject=>subject is not null&&DateTimeOffset.UtcNow<leaseUntil;
@@ -33,7 +35,7 @@ internal sealed class GameplayCoordinator:IDisposable
         itemKnowledge=new(Path.Combine(directory,"items.sqlite"),message=>log.Add(
             message.StartsWith("ITEM_REFERENCE_READY",StringComparison.Ordinal)?Severity.INFO:Severity.WARN,"ITEM_DATABASE","STATUS",message));
     }
-    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();navigator.ClearWorldMapHint();liveMinimap.Reset();ClearRelativeMotionLog();Set("WAITING_FOR_SKILLS");}
+    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();navigator.ClearWorldMapHint();liveMinimap.Reset();terrainProbeLogged=false;ClearRelativeMotionLog();Set("WAITING_FOR_SKILLS");}
     internal void ConfirmSubject(VisibleGameObservation confirmed)
     {
         if(subject?.Character!=confirmed.Character)Reset();
@@ -199,6 +201,28 @@ internal sealed class GameplayCoordinator:IDisposable
                 // Read-only preflight: pause new work before expensive inventory
                 // scans and right-clicks. Existing pending journals above are
                 // deliberately not treated as replaceable new activities.
+                if(!terrainProbeLogged&&navigator.Data is WorldMapData referenceData)
+                {
+                    terrainProbeLogged=true;
+                    try
+                    {
+                        // One diagnostic scan per subject, off the UI thread.
+                        // This neither substitutes for the SIFT verifier nor
+                        // authorizes game input, even on a distinctive peak.
+                        var evidence=await Task.Run(()=>MinimapTerrainProbe.Examine(
+                            driver.Current.Pixels?.Navigation,referenceData.MinimapReferences),budget.Token);
+                        log.Add(Severity.INFO,"NAVIGATION","TERRAIN_PROBE",
+                            $"status={evidence.Status} best_score={evidence.BestScore:F3} "+
+                            $"runner_up={evidence.RunnerUpScore:F3} peak_count={evidence.Peaks} "+
+                            $"reference_scale={evidence.BestReferenceScale:F2} "+
+                            "candidate_unverified=true no_input=true navigation_authorized=false");
+                    }
+                    catch(Cv.OpenCVException ex)
+                    {
+                        log.Add(Severity.WARN,"NAVIGATION","TERRAIN_PROBE",
+                            $"status=IMAGE_COMPARISON_FAILED type={ex.GetType().Name} no_input=true navigation_authorized=false");
+                    }
+                }
                 result=new(RoutineStatus.Blocked,positionBlock);
             }
             else if((pendingSupply=ReadSupply(hash)) is SupplyIntent supply&&
