@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace OSRSLiveDiagnostics;
 
-internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, ConnectionSignal, CharacterPrompt, CharacterSummary, CharacterSummaryName, ContextMenuLine, ContextMenuCandidate }
+internal enum VisualLabelKind { Text, Number, WorldCell, SkillValue, WorldNavigation, InventoryQuantity, PlayButton, EnterButton, Hitpoints, Minimap, GameHud, SkillsButton, CharacterSummaryButton, ConnectionSignal, CharacterPrompt, CharacterSummary, CharacterSummaryName, ContextMenuLine, ContextMenuCandidate }
 internal sealed record VisualLabel(string Text,Rectangle Bounds,VisualLabelKind Kind=VisualLabelKind.Text);
 internal sealed record VisualFrame(IntPtr Window,Rectangle ScreenBounds,
     DateTimeOffset CapturedUtc,IReadOnlyList<VisualLabel> Labels,ExecutionPixels? Pixels=null);
@@ -193,6 +193,7 @@ internal sealed class VisualStartup:IDisposable
     private int repeatedActions;
     private bool skillsHoverCleared;
     private readonly CharacterSummaryIdentity summaryIdentity=new();
+    private readonly CharacterSummaryFallback summaryFallback=new();
     private int pageActions;
     private string previousAction="";
     private string lastWorldGridDiagnostic="";
@@ -275,7 +276,7 @@ internal sealed class VisualStartup:IDisposable
         if(target==IntPtr.Zero||!IsWindow(target))
         {backgroundCapture.Release();ResetNavigationCalibration();SetState("WAITING_FOR_WINDOW");return;}
         if(observedWindow!=target)
-        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();ResetNavigationCalibration();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
+        {observedWindow=target;observedSelectedWorld=null;Game.Reset();Gameplay.Reset();ResetNavigationCalibration();recovery.Reset();connectivity.Reset();lastRecoveryState="";lastVerifiedHud=default;previousAction="";lastAction=DateTimeOffset.MinValue;repeatedActions=0;pageActions=0;lastWorldGridDiagnostic="";lastPostPlayDiagnostic="";postEnterUnknownDiagnosed=false;lastSkillOcrDiagnostic="";contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();summaryFallback.Reset();ResetWorldChoice();ResetPlayButton();ResetEnter();}
         if(DateTimeOffset.UtcNow-lastAction<TimeSpan.FromMilliseconds(300))return;
         if(kind==OfficialWindowKind.Launcher)
         {
@@ -319,6 +320,7 @@ internal sealed class VisualStartup:IDisposable
         var visible=GameScreenReader.Read(observed);
         summaryIdentity.Observe(visible,observed.Labels);
         Game.Observe(summaryIdentity.Apply(visible),DateTimeOffset.UtcNow);
+        if(Game.LastObservation?.Stage!=VisibleGameStage.InGame)summaryFallback.Reset();
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
             Gameplay.ObserveLiveMinimapMotion(observed,
                 worldMapResult is {Status:RoutineStatus.Completed,Reason:"WORLD_MAP_SURFACE_POSITION_CONFIRMED"}&&
@@ -344,7 +346,7 @@ internal sealed class VisualStartup:IDisposable
             if(recoveryDecision.ResetSubject)
             {
                 Game.Reset();Gameplay.Reset();ResetNavigationCalibration();observedSelectedWorld=null;previousAction="";repeatedActions=0;
-                ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();
+                ResetWorldChoice();ResetPlayButton();ResetEnter();contextMenuAnchor=null;contextMenuPanelBefore=null;lastContextDiagnostic="";skillsHoverCleared=false;summaryIdentity.Reset();summaryFallback.Reset();
             }
             if(lastRecoveryState!=recoveryDecision.State)
             {lastRecoveryState=recoveryDecision.State;log.Add(Severity.INFO,"RECONNECT","STATE","state="+lastRecoveryState+" pending_transactions_preserved=true");}
@@ -376,6 +378,18 @@ internal sealed class VisualStartup:IDisposable
                 if(icon.Length!=1)
                 {SetState("SKILLS_BUTTON_NOT_VERIFIED_IN_SUMMARY");return;}
                 await Dispatch(observed,new("OPEN_SKILLS_FROM_SUMMARY",icon[0].Bounds),owner,ct);
+                return;
+            }
+            // If the native chat prompt cannot be read, use the OFFICIAL
+            // Character Summary only after two separately captured, complete
+            // and checksummed skill grids. Never guess the user's identity or
+            // click the tab from a coordinate without its own pixel evidence.
+            if(Game.Confirmed is null&&summaryIdentity.Verified(observed.CapturedUtc) is null&&
+                observed.Pixels?.WorldMapPanelOpen!=true&&Game.LastObservation is { } reading&&
+                summaryFallback.ShouldOpen(reading,observed.Labels))
+            {
+                var summary=observed.Labels.Single(l=>l.Kind==VisualLabelKind.CharacterSummaryButton);
+                await Dispatch(observed,new("OPEN_CHARACTER_SUMMARY_FOR_IDENTITY",summary.Bounds),owner,ct);
                 return;
             }
             // A confirmed subject can retain its identity while the inventory
@@ -826,7 +840,11 @@ internal sealed class VisualStartup:IDisposable
             if(NativeGameHudReader.Skills(bitmap) is VisualLabel skillsButton)
                 labels.Add(skillsButton);
             if(NativeGameHudReader.Read(bitmap,labels) is VisualLabel hud)
+            {
                 labels.Add(hud);
+                if(NativeGameHudReader.CharacterSummaryTab(bitmap) is VisualLabel summaryButton)
+                    labels.Add(summaryButton);
+            }
             if(GameScreenReader.Read(new(IntPtr.Zero,new Rectangle(Point.Empty,bitmap.Size),
                 DateTimeOffset.UtcNow,labels)).Stage==VisibleGameStage.InGame)
                 labels.AddRange(await ExecutionVision.ReadQuantities(bitmap,engine));
