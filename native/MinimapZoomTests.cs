@@ -198,7 +198,26 @@ internal static class MinimapZoomTests
             (_,_)=>Task.CompletedTask).Run(CancellationToken.None);
         Require(interrupted.Status==RoutineStatus.Waiting&&pausedDuringRecovery.WheelDown==1&&
             pausedDuringRecovery.PostInputObservations==1,"pause during missing-map recovery prevents all further input and captures");
-        Console.WriteLine("MINIMAP ZOOM PASS: stable/low-feature geometry, passive frame retries, child/game-window routes, minimum-stop confirmation and pause");
+        foreach(var scenario in new[]{(Initial:1,Root:false),(Initial:4,Root:false),(Initial:1,Root:true),(Initial:4,Root:true)})
+        {
+            var inward=new ZoomDriver(images,scenario.Initial,rootOnly:scenario.Root);
+            var result=await new MinimapZoomRoutine(inward,()=>false,(_,_)=>Task.CompletedTask,zoomIn:true).Run(CancellationToken.None);
+            Require(result.Status==RoutineStatus.Completed&&result.Reason=="MINIMAP_FULLY_ZOOMED_IN_VISUALLY_CONFIRMED"&&
+                inward.Level==images.Count-1&&inward.OtherInputs==0&&
+                (scenario.Root?inward.GameWindowUp>=3:inward.WheelUp>=3),
+                "maximum zoom is confirmed from middle or upper stop on both input routes: "+scenario);
+            if(scenario.Initial==images.Count-1)
+                Require(inward.WheelDown+inward.GameWindowDown>=1,"an already maximum map requires a reversible outward probe");
+        }
+        var ignoredInward=new ZoomDriver(images,4,ignoreWheel:true);
+        var refusedInward=await new MinimapZoomRoutine(ignoredInward,()=>false,(_,_)=>Task.CompletedTask,zoomIn:true).Run(CancellationToken.None);
+        Require(refusedInward.Status==RoutineStatus.Blocked&&refusedInward.Reason=="MINIMAP_ZOOM_BACKGROUND_WHEEL_NOT_OBSERVED"&&
+            ignoredInward.WheelUp==1&&ignoredInward.GameWindowUp==1&&ignoredInward.WheelDown==1&&ignoredInward.GameWindowDown==1,
+            "ignored inputs cannot certify maximum zoom even when the image looks stationary");
+        var pausedInward=new ZoomDriver(images,1);
+        Require((await new MinimapZoomRoutine(pausedInward,()=>true,(_,_)=>Task.CompletedTask,zoomIn:true).Run(CancellationToken.None)).Status==RoutineStatus.Waiting&&
+            pausedInward.WheelUp==0,"pause prevents zoom-in input");
+        Console.WriteLine("MINIMAP ZOOM PASS: stable/low-feature geometry, passive frame retries, both input routes, minimum/maximum stop confirmation and pause");
     }
     private sealed class ZoomDriver:IVisualGameDriver
     {

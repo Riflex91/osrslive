@@ -19,7 +19,12 @@ internal static class WorldNavigationDataTests
                 if(path is null||path.Length==0)throw new Exception("Public collision map has no expected path: "+pair);
                 Console.WriteLine($"PUBLIC PATH PASS: {pair.Item1} -> {pair.Item2}, {path.Length} steps, {path.Count(s=>s.Transport is not null)} transitions");
             }
-            var reference=data.References.Single(r=>r.Plane==0);
+            var reference=data.MinimapReferences.Single(r=>r.Plane==0);
+            if(ReferenceEquals(reference,data.References.Single(r=>r.Plane==0)))
+                throw new Exception("Minimap and world-map references must remain independent");
+            try{using var invalid=WorldMapData.DecodeMinimapReference(new byte[]{1,2,3},0);
+                throw new Exception("Corrupt native minimap asset accepted");}
+            catch(RoutineBlockedException ex) when(ex.Message=="MINIMAP_REFERENCE_HASH_MISMATCH"){}
             var tile=new WorldTile(3222,3218);double px=(tile.X-WorldMapData.MinX)*4+2,py=(WorldMapData.MaxY-tile.Y)*4-2;
             foreach(var variant in new[]{(Angle:0d,Scale:1d),(Angle:37d,Scale:1.2d),(Angle:-60d,Scale:.85d)})
             {
@@ -86,7 +91,7 @@ internal static class WorldNavigationDataTests
                 }
             }
             using var blank=new Cv.Mat(150,150,Cv.MatType.CV_8UC1,Cv.Scalar.Black);
-            using(var large=new Cv.Mat(reference.Image,new Cv.Rect((int)px-170,(int)py-210,WorldMapVision.View.Width,WorldMapVision.View.Height)))
+            using(var large=new Cv.Mat(data.References.Single(r=>r.Plane==0).Image,new Cv.Rect((int)px-170,(int)py-210,WorldMapVision.View.Width,WorldMapVision.View.Height)))
             {
                 var view=WorldMapVision.View;
                 var map=new WorldMapPixels(large.ToBytes(".png"),view,new(view.Left+170,view.Top+210),WorldMapVision.Close);
@@ -104,6 +109,24 @@ internal static class WorldNavigationDataTests
                 if(global is null||local is null||local.Tile!=global.Tile||
                     local.ClickFor(new(tile.X+4,tile.Y))!=global.ClickFor(new(tile.X+4,tile.Y)))
                     throw new Exception("Regional references must preserve absolute world coordinates and native minimap clicks");
+                using(var regionalData=new WorldMapData())
+                using(var regional=new WorldNavigator(regionalData))
+                {
+                    var area=new Cv.Rect((int)px-256,(int)py-256,512,512);
+                    foreach(var r in data.MinimapReferences)
+                    {using var roi=new Cv.Mat(r.Image,area);regionalData.MinimapReferences.Add(new(r.Plane,roi.Clone(),area.X,area.Y));}
+                    regional.SetWorldMapHint(fix.Position);
+                    var shifted=regional.LocateAtSampling(minimapFrame,1,local:true).Location;
+                    if(shifted is null||shifted.Tile!=global.Tile||shifted.ClickFor(new(tile.X+4,tile.Y))!=global.ClickFor(new(tile.X+4,tile.Y)))
+                        throw new Exception("A regional atlas with nonzero origin must preserve world and click coordinates after hint cropping");
+                    regional.SetWorldMapHint(fix.Position with{ObservedUtc=DateTimeOffset.UtcNow.AddMinutes(-6)});
+                    if(regional.LocateAtSampling(minimapFrame,1,local:true).Status!="WORLD_MAP_HINT_EXPIRED")
+                        throw new Exception("An expired world-map hint must not reuse regional descriptors");
+                    regionalData.MinimapReferences.Single(r=>r.Plane==3).Dispose();
+                    regionalData.MinimapReferences.RemoveAll(r=>r.Plane==3);
+                    if(regional.LocateDetailed(minimapFrame).Status!="MINIMAP_REFERENCES_INCOMPLETE")
+                        throw new Exception("Missing floor references cannot silently select a remaining floor");
+                }
                 navigator.ClearWorldMapHint();
                 Console.WriteLine($"WORLD MAP REFERENCE PASS: off-centre marker, surface={fix.Position.SurfaceTile}, inliers={fix.Inliers}, regional minimap coordinates preserved");
             }
@@ -114,7 +137,7 @@ internal static class WorldNavigationDataTests
                 throw new Exception("Upsampling a blank minimap cannot create a world position");
             if(navigator.LocateDetailed(unknown).Status!="MINIMAP_FEATURES_INSUFFICIENT")
                 throw new Exception("Feature-poor minimap must be diagnosed without invented coordinates");
-            var duplicate=new WorldMapData.ReferenceMap(1,reference.Image.Clone());data.References.Add(duplicate);
+            var duplicate=new WorldMapData.ReferenceMap(1,reference.Image.Clone());data.MinimapReferences.Add(duplicate);
             using var crop=new Cv.Mat(reference.Image,new Cv.Rect((int)px-75,(int)py-75,150,150));
             var ambiguous=unknown with{Pixels=new(Array.Empty<ObservedSlot>(),0,new(crop.ToBytes(".png"),new(830,10,150,150),10))};
             if(navigator.Locate(ambiguous) is not null)throw new Exception("Ambiguous floors produced a false position");
@@ -124,7 +147,7 @@ internal static class WorldNavigationDataTests
             if(navigator.LocateAtSampling(ambiguous,1,local:true).Status!="MAP_MATCH_AMBIGUOUS")
                 throw new Exception("A surface map hint cannot choose between visually indistinguishable player floors");
             navigator.ClearWorldMapHint();
-            data.References.Remove(duplicate);duplicate.Dispose();
+            data.MinimapReferences.Remove(duplicate);duplicate.Dispose();
             Console.WriteLine("AUTOMATIC NAVIGATION DATA PASS: pinned public assets, collision routes, upper-floor stairs, rotated/zoomed reference matching, unknown-map rejection. No live game actions tested.");
             return 0;
         }

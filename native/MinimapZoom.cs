@@ -118,19 +118,29 @@ internal static class MinimapZoomVision
 // background wheel messages. Probe the render child first, and if it has no
 // measurable effect, try the actual osclient.exe game-window HWND. Never
 // assume that successful PostMessage means the game consumed the input.
-// Require two final unchanged DOWN steps after a verified scale change.
+// Require two final unchanged steps toward the requested limit after a
+// verified scale change. Live navigation requests the maximum detail/zoom.
 internal sealed class MinimapZoomRoutine
 {
-    internal const int MaxDownSteps=24;
+    internal const int MaxSteps=24;
     private const double Tolerance=.018;
     private readonly IVisualGameDriver driver;
     private readonly Func<bool> stopped;
     private readonly Func<int,CancellationToken,Task> wait;
     private readonly Action<string> diagnostic;
+    private readonly bool zoomIn;
     internal MinimapZoomRoutine(IVisualGameDriver driver,Func<bool> stopped,
-        Func<int,CancellationToken,Task>? wait=null,Action<string>? diagnostic=null)
+        Func<int,CancellationToken,Task>? wait=null,Action<string>? diagnostic=null,bool zoomIn=false)
     {this.driver=driver;this.stopped=stopped;this.wait=wait??Task.Delay;
-        this.diagnostic=diagnostic??(_=>{});}
+        this.diagnostic=diagnostic??(_=>{});this.zoomIn=zoomIn;}
+    private GameInputKind Direction(bool forward,bool gameWindow)=> (zoomIn==forward,gameWindow) switch
+    {
+        (true,true)=>GameInputKind.WheelUpGameWindow,(true,false)=>GameInputKind.WheelUp,
+        (false,true)=>GameInputKind.WheelDownGameWindow,_=>GameInputKind.WheelDown
+    };
+    // Normalize the geometry only for the shared decision logic. Diagnostics
+    // continue reporting the actual measured scale and physical wheel input.
+    private double Toward(double ratio)=>zoomIn?1/ratio:ratio;
 
     internal async Task<RoutineResult> Run(CancellationToken ct)
     {
@@ -164,44 +174,48 @@ internal sealed class MinimapZoomRoutine
             return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_INDEPENDENT_BASELINE_NOT_VERIFIED");
         bool observedWheelEffect=false,gameWindowTarget=false;
         int unchanged=0,scrolls=0;
-        for(int step=0;step<MaxDownSteps;step++)
+        diagnostic("requested_limit="+(zoomIn?"MAXIMUM_ZOOM_IN":"MINIMUM_ZOOM_OUT"));
+        for(int step=0;step<MaxSteps;step++)
         {
             if(stopped())return new(RoutineStatus.Waiting,"MINIMAP_ZOOM_PAUSED");
             var before=driver.Current;
-            var down=await Scroll(before,gameWindowTarget?
-                GameInputKind.WheelDownGameWindow:GameInputKind.WheelDown,ct);
+            var down=await Scroll(before,Direction(true,gameWindowTarget),ct);
             scrolls++;
-            if(down.Scale is not double ratio)
+            if(down.Scale is not double observedRatio)
                 return new(RoutineStatus.Blocked,down.Reason,scrolls);
+            double ratio=Toward(observedRatio);
             if(ratio<1-Tolerance){observedWheelEffect=true;unchanged=0;continue;}
             if(ratio>1+Tolerance)
                 return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_WHEEL_DIRECTION_UNEXPECTED",scrolls);
             if(!observedWheelEffect)
             {
-                // An ignored render-child wheel message and a fully zoomed-out
+                // An ignored render-child wheel message and a zoom limit
                 // minimap look identical. Try the game HWND independently;
                 // never double-post one wheel gesture to two targets.
-                var gameWindowDown=await Scroll(driver.Current,GameInputKind.WheelDownGameWindow,ct);
+                var gameWindowDown=await Scroll(driver.Current,Direction(true,true),ct);
                 scrolls++;
-                if(gameWindowDown.Scale is not double windowRatio)
+                if(gameWindowDown.Scale is not double observedWindowRatio)
                     return new(RoutineStatus.Blocked,gameWindowDown.Reason,scrolls);
+                double windowRatio=Toward(observedWindowRatio);
                 if(windowRatio<1-Tolerance)
                 {observedWheelEffect=true;gameWindowTarget=true;unchanged=0;continue;}
                 if(windowRatio>1+Tolerance)
                     return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_WHEEL_DIRECTION_UNEXPECTED",scrolls);
-                // Both DOWN routes failed to show movement. A single UP on
-                // each route can distinguish the minimum zoom stop from an
+                // Both forward routes failed to show movement. One reverse
+                // probe on each route distinguishes the requested limit from an
                 // ignored background wheel, without certifying either blindly.
-                var up=await Scroll(driver.Current,GameInputKind.WheelUp,ct);
-                if(up.Scale is not double upRatio)
+                var up=await Scroll(driver.Current,Direction(false,false),ct);
+                if(up.Scale is not double observedUpRatio)
                     return new(RoutineStatus.Blocked,up.Reason,scrolls);
+                double upRatio=Toward(observedUpRatio);
                 if(upRatio>1+Tolerance)
                 {observedWheelEffect=true;unchanged=0;continue;}
                 if(upRatio<1-Tolerance)
                     return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_WHEEL_DIRECTION_UNEXPECTED",scrolls);
-                var windowUp=await Scroll(driver.Current,GameInputKind.WheelUpGameWindow,ct);
-                if(windowUp.Scale is not double windowUpRatio)
+                var windowUp=await Scroll(driver.Current,Direction(false,true),ct);
+                if(windowUp.Scale is not double observedWindowUpRatio)
                     return new(RoutineStatus.Blocked,windowUp.Reason,scrolls);
+                double windowUpRatio=Toward(observedWindowUpRatio);
                 if(windowUpRatio>1+Tolerance)
                 {observedWheelEffect=true;gameWindowTarget=true;unchanged=0;continue;}
                 return new(RoutineStatus.Blocked,windowUpRatio<1-Tolerance?
@@ -209,7 +223,8 @@ internal sealed class MinimapZoomRoutine
                     "MINIMAP_ZOOM_BACKGROUND_WHEEL_NOT_OBSERVED",scrolls);
             }
             if(++unchanged>=2)
-                return new(RoutineStatus.Completed,"MINIMAP_FULLY_ZOOMED_OUT_VISUALLY_CONFIRMED",scrolls);
+                return new(RoutineStatus.Completed,zoomIn?"MINIMAP_FULLY_ZOOMED_IN_VISUALLY_CONFIRMED":
+                    "MINIMAP_FULLY_ZOOMED_OUT_VISUALLY_CONFIRMED",scrolls);
         }
         return new(RoutineStatus.Blocked,"MINIMAP_ZOOM_LIMIT_NOT_REACHED",scrolls);
     }

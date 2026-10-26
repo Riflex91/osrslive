@@ -436,7 +436,7 @@ internal sealed class VisualStartup:IDisposable
                         action=>SetState("MINIMAP_ZOOM_INPUT_"+action.ToUpperInvariant()));
                     RoutineResult result;
                     try{result=await new MinimapZoomRoutine(zoomDriver,()=>Paused||ObserveOnly,
-                        diagnostic:message=>log.Add(Severity.INFO,"MINIMAP_ZOOM","STEP",message)).Run(zoomBudget.Token);}
+                        diagnostic:message=>log.Add(Severity.INFO,"MINIMAP_ZOOM","STEP",message),zoomIn:true).Run(zoomBudget.Token);}
                     catch(OperationCanceledException) when(!ct.IsCancellationRequested)
                     {result=new(RoutineStatus.Blocked,"MINIMAP_ZOOM_TIMED_OUT");}
                     if(result.Status!=RoutineStatus.Waiting)
@@ -444,7 +444,7 @@ internal sealed class VisualStartup:IDisposable
                         minimapZoomResult=result;
                         log.Add(result.Status==RoutineStatus.Completed?Severity.INFO:Severity.WARN,
                             "MINIMAP_ZOOM","RESULT",$"status={result.Status} reason={result.Reason} "+
-                            $"wheel_down_steps={result.Produced} mouse_global_untouched=true");
+                            $"forward_wheel_steps={result.Produced} requested_limit=MAXIMUM_ZOOM_IN mouse_global_untouched=true");
                     }
                     SetState(result.Status==RoutineStatus.Completed?"MINIMAP_ZOOM_CONFIRMED":
                         result.Status==RoutineStatus.Waiting?"PAUSED":"BLOCKED_"+result.Reason);

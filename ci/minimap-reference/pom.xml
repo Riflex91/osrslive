@@ -1,0 +1,9 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>local.osrsplay</groupId><artifactId>minimap-reference-tools</artifactId><version>1</version>
+  <repositories><repository><id>runelite</id><url>https://repo.runelite.net</url></repository></repositories>
+  <dependencies>
+    <dependency><groupId>net.runelite</groupId><artifactId>cache</artifactId><version>1.13.4</version></dependency>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><version>1.7.25</version></dependency>
+  </dependencies>
+</project>

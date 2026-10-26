@@ -19,12 +19,12 @@ internal sealed class WorldNavigator:IDisposable
         ClearWorldMapHint();worldMapHint=hint;
         if(Data is null)return;
         int x=(hint.SurfaceTile.X-WorldMapData.MinX)*4+2,y=(WorldMapData.MaxY-hint.SurfaceTile.Y)*4-2;
-        foreach(var reference in Data.References)
+        foreach(var reference in Data.MinimapReferences)
         {
-            var area=Cv.Rect.Intersect(new(x-256,y-256,512,512),new(0,0,reference.Image.Width,reference.Image.Height));
+            var area=Cv.Rect.Intersect(new(x-reference.OriginX-256,y-reference.OriginY-256,512,512),new(0,0,reference.Image.Width,reference.Image.Height));
             if(area.Width<128||area.Height<128)continue;
             using var region=new Cv.Mat(reference.Image,area);
-            localReferences.Add(new(reference.Plane,region.Clone(),area.X,area.Y));
+            localReferences.Add(new(reference.Plane,region.Clone(),reference.OriginX+area.X,reference.OriginY+area.Y));
         }
     }
     internal async Task Ready(Action<string> report,CancellationToken ct)
@@ -57,6 +57,9 @@ internal sealed class WorldNavigator:IDisposable
     {
         if(sampling is not (1 or 2))throw new ArgumentOutOfRangeException(nameof(sampling));
         if(Data is null)return new(null,"REFERENCE_MAP_NOT_READY");
+        if(Enumerable.Range(0,4).Any(p=>!Data.MinimapReferences.Any(r=>r.Plane==p)))return new(null,"MINIMAP_REFERENCES_INCOMPLETE");
+        if(local&&(worldMapHint is null||DateTimeOffset.UtcNow-worldMapHint.ObservedUtc is var age&&
+            (age<TimeSpan.Zero||age>=TimeSpan.FromMinutes(5))))return new(null,"WORLD_MAP_HINT_EXPIRED");
         if(frame.Pixels?.Navigation is not NavigationPixels pixels)return new(null,"MINIMAP_NOT_IDENTIFIED");
         if(pixels.MinimapPng.Length==0)return new(null,"MINIMAP_IMAGE_INVALID");
         using var image=Cv.Cv2.ImDecode(pixels.MinimapPng,Cv.ImreadModes.Grayscale);
@@ -74,7 +77,7 @@ internal sealed class WorldNavigator:IDisposable
         var candidates=new List<MapLocation>();
         int bestInliers=0,bestPairs=0;
         using var matcher=new Cv.BFMatcher(Cv.NormTypes.L2);
-        foreach(var reference in local?localReferences:Data.References)
+        foreach(var reference in local?localReferences:Data.MinimapReferences)
         {
             if(reference.Descriptors.Rows<8)continue;
             var pairs=matcher.KnnMatch(descriptors,reference.Descriptors,2)
