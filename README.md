@@ -1,4 +1,6 @@
-# OSRS Play 1.7.2 – schneller Einstieg und Wiederverbindung
+# OSRS Play 1.7.3 – Weltkarte, Kompass und maximaler Minimap-Zoom
+
+**Release-Stand:** 1.7.3 enthält die unten dokumentierten Einstiegskorrekturen, Weltkarten- und Kompassprüfung, eigene Minimap-Referenzen und maximalen Zoom. Die höhere Versionsnummer ermöglicht das Update bestehender 1.7.2-Installationen. Autonome Bewegung bleibt wegen der noch unbestätigten Minimap-Position gesperrt; die Live-Ergebnisse und bekannten Fehler werden mit veröffentlicht.
 
 **Minimap mit maximalem Zoom (26.10.2026):** Die Live-Kalibrierung zoomt jetzt bis zum oberen Anschlag hinein und bestätigt ihn anhand tatsächlicher Bildwirkung. Der Live-Test erreichte diesen Zustand um 17:56:37. Für die Minimap sind vier eigene, geprüfte Referenzatlanten eingebettet; die große Weltkarte verwendet weiterhin ihre separaten Referenzen. Der anschließende Live-Abgleich blieb mit 137 Merkmalen und einem passenden Paar blockiert. Maximaler Zoom allein behebt die Lokalisierung hier nicht; autonomes Training ist weiterhin nicht bestätigt. [Umsetzung, Tests und Grenzen](docs/MINIMAP-REFERENZEN-UND-MAXZOOM-2026-10-26.md).
 
