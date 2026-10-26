@@ -483,7 +483,8 @@ internal sealed class VisualStartup:IDisposable
                         action=>ReportGuardedInput("MINIMAP_ZOOM",action));
                     RoutineResult result;
                     try{result=await new MinimapZoomRoutine(zoomDriver,()=>Paused||ObserveOnly,
-                        diagnostic:message=>log.Add(Severity.INFO,"MINIMAP_ZOOM","STEP",message),zoomIn:true).Run(zoomBudget.Token);}
+                        diagnostic:message=>log.Add(Severity.INFO,"MINIMAP_ZOOM","STEP",message),
+                        zoomIn:MinimapZoomRoutine.NavigationZoomIn).Run(zoomBudget.Token);}
                     catch(OperationCanceledException) when(!ct.IsCancellationRequested)
                     {result=new(RoutineStatus.Blocked,"MINIMAP_ZOOM_TIMED_OUT");}
                     if(result.Status!=RoutineStatus.Waiting)

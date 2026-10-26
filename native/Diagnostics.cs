@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.7.12";
+    internal const string Version="1.7.13";
     private const int Capacity=10000;
     private readonly object sync=new();
     private readonly List<LogEvent> entries=new();
