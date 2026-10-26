@@ -51,7 +51,7 @@ internal static class WorldMapLocalizer
             using var fit=Cv.Cv2.EstimateAffinePartial2D(input,output,inliers,Cv.RobustEstimationAlgorithms.RANSAC,2,3000,.995,20);
             if(fit is null||fit.Empty())continue;
             int count=Cv.Cv2.CountNonZero(inliers);bestInliers=Math.Max(bestInliers,count);
-            if(!ConsensusVerified(count,pairs)){rejection="WORLD_MAP_CONSENSUS_NOT_VERIFIED";continue;}
+            if(!ConsensusVerified(count,pairs.Length)){rejection="WORLD_MAP_CONSENSUS_NOT_VERIFIED";continue;}
             var spread=from.Where((_,i)=>inliers.At<byte>(i)!=0).ToArray();
             if(spread.Max(p=>p.X)-spread.Min(p=>p.X)<90||spread.Max(p=>p.Y)-spread.Min(p=>p.Y)<90)
             {rejection="WORLD_MAP_SPREAD_NOT_VERIFIED";continue;}
