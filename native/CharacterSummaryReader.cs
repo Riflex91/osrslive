@@ -72,6 +72,36 @@ internal static class CharacterSummaryReader
         if(GameScreenReader.LocateSkills(summaryLabels.Append(
             new VisualLabel("Total level: 131",new Rectangle(840,365,110,12))).ToArray(),new Size(1000,600)) is not null)
             throw new Exception("Summary total level was confused with a Skills raster");
+        var fallback=new CharacterSummaryFallback();
+        var skills=GameScreenReader.GridSkills.Select(name=>new PublicOsrsSkill(name,
+            name=="Hitpoints"?24:1,-1,-1)).ToArray();
+        var unassigned=new VisibleGameObservation(VisibleGameStage.InGame,null,skills,
+            skills.Sum(s=>s.Level),24,now);
+        var verifiedButtons=new[]{
+            new VisualLabel("NATIVE_GAME_HUD",new Rectangle(0,575,517,25),VisualLabelKind.GameHud),
+            new VisualLabel("CHARACTER_SUMMARY_ICON",Tab,VisualLabelKind.CharacterSummaryButton)
+        };
+        if(fallback.ShouldOpen(unassigned,verifiedButtons)||fallback.ShouldOpen(unassigned,verifiedButtons))
+            throw new Exception("One skill screenshot cannot authorize opening the Summary tab");
+        if(!fallback.ShouldOpen(unassigned with {ObservedUtc=now.AddSeconds(1)},verifiedButtons))
+            throw new Exception("Two independent complete skill frames must enable identity fallback");
+        fallback.Reset();
+        if(fallback.ShouldOpen(unassigned,verifiedButtons.Take(1).ToArray())||
+            fallback.ShouldOpen(unassigned with {ObservedUtc=now.AddSeconds(1)},verifiedButtons))
+            throw new Exception("An unrecognized Summary icon must invalidate prior authorization");
+        fallback.Reset();
+        if(fallback.ShouldOpen(unassigned,verifiedButtons)||
+            fallback.ShouldOpen(unassigned with {ObservedUtc=now.AddSeconds(9)},verifiedButtons))
+            throw new Exception("Stale skill frames cannot authorize a Summary click");
+        fallback.Reset();
+        if(fallback.ShouldOpen(unassigned,verifiedButtons)||
+            fallback.ShouldOpen(unassigned with {Character="Example_29",ObservedUtc=now.AddSeconds(1)},verifiedButtons)||
+            fallback.ShouldOpen(unassigned with {ObservedUtc=now.AddSeconds(2)},verifiedButtons))
+            throw new Exception("Known identity must invalidate a pending Summary fallback");
+        fallback.Reset();
+        if(fallback.ShouldOpen(unassigned,verifiedButtons)||
+            fallback.ShouldOpen(unassigned with {TotalLevel=1,ObservedUtc=now.AddSeconds(1)},verifiedButtons))
+            throw new Exception("An inconsistent total must not authorize identity fallback");
     }
 
     internal static string? ParseName(string candidate)
@@ -107,6 +137,40 @@ internal static class CharacterSummaryReader
         }
         if(candidates.Count!=1)return new[]{marker};
         return new[]{marker,new VisualLabel(candidates.Single(),NameRegion,VisualLabelKind.CharacterSummaryName)};
+    }
+}
+
+// This fallback authorizes only opening the verified, read-only Character
+// Summary tab. It does not establish an identity, create a gameplay subject,
+// or bypass the two-frame account/skill verification in GameObservationTracker.
+internal sealed class CharacterSummaryFallback
+{
+    private string? signature;
+    private DateTimeOffset lastFrame;
+    private int frames;
+
+    internal void Reset(){signature=null;lastFrame=default;frames=0;}
+
+    internal bool ShouldOpen(VisibleGameObservation observation,IReadOnlyList<VisualLabel> labels)
+    {
+        var skills=observation.Skills;
+        if(observation.Stage!=VisibleGameStage.InGame||observation.Character is not null||
+            skills is null||skills.Count!=24||observation.RecognizedSkills!=24||
+            observation.TotalLevel is null||skills.Sum(s=>s.Level)!=observation.TotalLevel||
+            skills.Select(s=>s.Name).Distinct(StringComparer.Ordinal).Count()!=24||
+            labels.Count(l=>l.Kind==VisualLabelKind.GameHud)!=1||
+            labels.Count(l=>l.Kind==VisualLabelKind.CharacterSummaryButton)!=1||
+            labels.Any(l=>l.Kind==VisualLabelKind.CharacterSummary))
+        {Reset();return false;}
+
+        string current=string.Join(",",skills.OrderBy(s=>s.Name,StringComparer.Ordinal)
+            .Select(s=>s.Name+"="+s.Level));
+        DateTimeOffset at=observation.ObservedUtc;
+        if(current!=signature||at<=lastFrame||at-lastFrame>TimeSpan.FromSeconds(8))
+        {signature=current;frames=1;}
+        else if(at-lastFrame>=TimeSpan.FromMilliseconds(500))frames++;
+        lastFrame=at;
+        return frames>=2;
     }
 }
 

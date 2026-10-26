@@ -28,6 +28,30 @@ internal static class NativeGameHudReader
         {long xSum=0;int n=0;for(int y=SkillsButton.Top;y<SkillsButton.Bottom;y++)for(int x=SkillsButton.Left;x<SkillsButton.Right;x++)if(match(image.GetPixel(x,y))){xSum+=x;n++;}return xSum/(double)n;}
         return Centre(Red)<Centre(Green)&&Centre(Green)<Centre(Blue)?new("SKILLS_ICON",SkillsButton,VisualLabelKind.SkillsButton):null;
     }
+    // The official 1000x600 HUD draws a small pale, circular Character
+    // Summary icon immediately beside Skills. Check the actual annular pixels
+    // and its dark centre; this is never an authorization from tab geometry.
+    // The caller must additionally require the native HUD and a valid skill
+    // grid before requesting an identity-only tab switch.
+    internal static VisualLabel? CharacterSummaryTab(Bitmap image)
+    {
+        if(image.Size!=DockedWindowLayout.GameSize)return null;
+        const int centreX=806,centreY=282;
+        int bright=0,darkCentre=0;
+        var quadrants=new int[4];
+        for(int y=274;y<=290;y++)for(int x=796;x<=816;x++)
+        {
+            var c=image.GetPixel(x,y);
+            int radius=(x-centreX)*(x-centreX)+(y-centreY)*(y-centreY);
+            if(radius<=16&&Math.Min(c.R,Math.Min(c.G,c.B))<130)darkCentre++;
+            if(radius is <24 or >115||Math.Min(c.R,Math.Min(c.G,c.B))<=185)continue;
+            bright++;
+            int quadrant=(x>centreX?1:0)+(y>centreY?2:0);
+            quadrants[quadrant]++;
+        }
+        if(bright is <85 or >180||darkCentre<10||quadrants.Any(n=>n<16))return null;
+        return new("CHARACTER_SUMMARY_ICON",CharacterSummaryReader.Tab,VisualLabelKind.CharacterSummaryButton);
+    }
     internal static GameHudFooterPixels InspectFooter(Bitmap image)
     {
         if(image.Size!=DockedWindowLayout.GameSize)return default;
@@ -83,6 +107,22 @@ internal static class NativeGameHudReader
         if(!InspectFooter(image).Verified||verified?.Kind!=VisualLabelKind.GameHud||
             verified.Text!="NATIVE_GAME_HUD_NO_MINIMAP")
             throw new Exception("Native HUD: verified Skills and footer must survive a missing minimap.");
+        if(CharacterSummaryTab(image) is not null)
+            throw new Exception("Native HUD: missing Summary icon must not be inferred from other HUD anchors.");
+        // Simulate the light annular icon as an independent pixel marker.
+        for(int y=274;y<=290;y++)for(int x=796;x<=816;x++)
+        {
+            int r=(x-806)*(x-806)+(y-282)*(y-282);
+            if(r is >=45 and <=80)image.SetPixel(x,y,Color.FromArgb(249,244,231));
+        }
+        if(CharacterSummaryTab(image)?.Kind!=VisualLabelKind.CharacterSummaryButton)
+            throw new Exception("Native HUD: verified Summary raster was not found.");
+        image.SetPixel(806,282,Color.White);
+        // A broad white overlay cannot be mistaken for the annular icon.
+        using(var g=Graphics.FromImage(image))
+            g.FillRectangle(Brushes.White,796,274,21,17);
+        if(CharacterSummaryTab(image) is not null)
+            throw new Exception("Native HUD: featureless white region must not identify a Summary tab.");
         var frame=new VisualFrame(new IntPtr(1),new Rectangle(0,0,1000,600),
             DateTimeOffset.UtcNow,new[]{verified});
         if(GameScreenReader.Read(frame).Stage!=VisibleGameStage.InGame)
