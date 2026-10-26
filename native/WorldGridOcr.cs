@@ -4,6 +4,20 @@ namespace OSRSLiveDiagnostics;
 
 internal static class WorldGridOcr
 {
+    internal static async Task OcrFixture(OcrEngine engine)
+    {
+        using var image=NativeWorldDigitReader.TableFixture(new[]{326,350,374,398,424,448,473});
+        var title=new VisualLabel("Select a world",new Rectangle(134,0,119,16));
+        var partial=Enumerable.Range(0,6).Select(row=>new VisualLabel((374+row).ToString(),
+            NativeNumberRegion(2,row),VisualLabelKind.Number)).Prepend(title).ToArray();
+        var cells=await Read(image,engine,partial);
+        if(!VisualStartupPolicy.PageCoverageVerified(cells)||!cells.Any(c=>c.Text=="496"))
+            throw new Exception("Six coarse cells on page two must not suppress full native world coverage.");
+        using var blank=new Bitmap(1000,600);
+        if(HasNativeTable(blank,partial)|| (await Read(blank,engine,partial)).Count>6)
+            throw new Exception("Partial OCR without a native raster cannot fabricate page coverage.");
+        Console.WriteLine("WORLD PAGE OCR PASS: six coarse cells retain full native page-two coverage, blank raster rejected");
+    }
     // Aggregate OCR counts only. Never retain captured text or game pixels.
     internal static string NativeDiagnostic {get;private set;}="not_attempted";
     internal static async Task<IReadOnlyList<VisualLabel>> Read(Bitmap bitmap,OcrEngine engine,IReadOnlyList<VisualLabel> labels)
@@ -16,7 +30,13 @@ internal static class WorldGridOcr
         // Full-frame Windows OCR can yield 0 validated columns even when the
         // whole table is visible. Read isolated high-contrast digits only after
         // verifying the fixed native table geometry.
-        if(cells.Count<6)return await ReadNativeTable(bitmap,engine,labels);
+        // A few coarse cells can describe only one column. They must not
+        // suppress the verified native raster pass on subsequent pages.
+        // Otherwise the inferred lattice has no column pitch and navigation
+        // loses coverage despite readable native digits across the page.
+        if(HasNativeTable(bitmap,labels)||cells.Count<6)
+            return await ReadNativeTable(bitmap,engine,labels);
+        NativeDiagnostic="non_native_lattice";
         var columns=new List<List<VisualLabel>>();
         foreach(var cell in cells.OrderBy(c=>c.Bounds.Left))
         {

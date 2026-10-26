@@ -28,7 +28,21 @@ internal sealed class GameplayCoordinator:IDisposable
         itemKnowledge=new(Path.Combine(directory,"items.sqlite"),message=>log.Add(
             message.StartsWith("ITEM_REFERENCE_READY",StringComparison.Ordinal)?Severity.INFO:Severity.WARN,"ITEM_DATABASE","STATUS",message));
     }
-    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();Set("WAITING_FOR_SKILLS");}
+    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();navigator.ClearWorldMapHint();Set("WAITING_FOR_SKILLS");}
+    internal void ConfirmSubject(VisibleGameObservation confirmed)
+    {
+        if(subject?.Character!=confirmed.Character)Reset();
+        subject=confirmed;leaseUntil=confirmed.ObservedUtc.AddMinutes(4);
+    }
+    internal async Task<RoutineResult> LocateWithWorldMap(IVisualGameDriver driver,Func<bool> stopped,CancellationToken ct)
+    {
+        await navigator.Ready(Set,ct);
+        if(navigator.LocateDetailed(driver.Current).Location is not null)
+            return new(RoutineStatus.Completed,"NATIVE_POSITION_VERIFIED_WORLD_MAP_NOT_NEEDED");
+        return await new WorldMapRoutine(driver,navigator,stopped,
+            message=>log.Add(Severity.INFO,"WORLD_MAP","OBSERVATION",message)).Run(ct);
+    }
+    internal bool NativePositionVerified(VisualFrame frame)=>navigator.LocateDetailed(frame).Location is not null;
     private void Set(string state)
     {
         if(State==state)return;State=state;
@@ -51,6 +65,12 @@ internal sealed class GameplayCoordinator:IDisposable
         }
         await navigator.Ready(Set,ct);
         if(DateTimeOffset.UtcNow-frame.CapturedUtc>TimeSpan.FromSeconds(3))return;
+        if(frame.Pixels?.WorldMapPanelOpen==true)
+        {
+            var map=WorldMapLocalizer.Locate(navigator.Data!,frame);
+            log.Add(Severity.INFO,"WORLD_MAP","OBSERVATION_ONLY",$"reason={map.Reason} features={map.Features} "+
+                $"matches={map.Matches} inliers={map.Inliers} surface_x={map.Position?.SurfaceTile.X} surface_y={map.Position?.SurfaceTile.Y} no_input=true");
+        }
         var position=navigator.Locate(frame);
         log.Add(Severity.INFO,"NAVIGATION","OBSERVATION_ONLY",$"minimap_identified=true hp={pixels.Hitpoints?.ToString()??"unknown"} "+
             $"position_identified={position is not null} x={position?.Tile.X} y={position?.Tile.Y} plane={position?.Tile.Plane} inliers={position?.Inliers} labels={frame.Labels.Count} no_input=true");
@@ -60,10 +80,7 @@ internal sealed class GameplayCoordinator:IDisposable
         Func<VisualFrame,GameInput,CancellationToken,Task<bool>> dispatch,CancellationToken stopping)
     {
         if(confirmed is not null)
-        {
-            if(subject?.Character!=confirmed.Character)Reset();
-            subject=confirmed;leaseUntil=confirmed.ObservedUtc.AddMinutes(4);
-        }
+            ConfirmSubject(confirmed);
         var current=GameScreenReader.Read(frame);
         if(current.Character is not null&&subject is not null&&current.Character!=subject.Character){Reset();return false;}
         if(!HasSubject||subject?.Skills is null)return false;
@@ -80,6 +97,11 @@ internal sealed class GameplayCoordinator:IDisposable
             (GameScreenReader.Read(f).Character is not string name||name==subject.Character)&&await dispatch(f,input,ct),
             action=>Set("INPUT_"+action.ToUpperInvariant()));
         var game=new GameInteractions(driver,itemKnowledge,message=>log.Add(Severity.INFO,"ITEM_DATABASE","INVENTORY_READ",message));
+        driver.Guard=f=>
+        {
+            if(f.Pixels?.WorldMapPanelOpen==true)throw new RoutineBlockedException("WORLD_MAP_OBSCURES_GAMEPLAY");
+            if(f.Pixels?.Compass is {North:false})throw new RoutineBlockedException("COMPASS_DIRECTION_CHANGED");
+        };
         RoutineResult result;
         string? activityId=null;
         bool reconcilingJournal=false;

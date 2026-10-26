@@ -10,6 +10,23 @@ internal sealed class WorldNavigator:IDisposable
     internal WorldMapData? Data{get;private set;}
     internal WorldNavigator(WorldMapData? data=null){Data=data;}
     private readonly Dictionary<(WorldTile,WorldTile),int> stalls=new();
+    private WorldMapPosition? worldMapHint;
+    private readonly List<WorldMapData.ReferenceMap> localReferences=new();
+    internal void ClearWorldMapHint()
+    {worldMapHint=null;foreach(var reference in localReferences)reference.Dispose();localReferences.Clear();}
+    internal void SetWorldMapHint(WorldMapPosition hint)
+    {
+        ClearWorldMapHint();worldMapHint=hint;
+        if(Data is null)return;
+        int x=(hint.SurfaceTile.X-WorldMapData.MinX)*4+2,y=(WorldMapData.MaxY-hint.SurfaceTile.Y)*4-2;
+        foreach(var reference in Data.MinimapReferences)
+        {
+            var area=Cv.Rect.Intersect(new(x-reference.OriginX-256,y-reference.OriginY-256,512,512),new(0,0,reference.Image.Width,reference.Image.Height));
+            if(area.Width<128||area.Height<128)continue;
+            using var region=new Cv.Mat(reference.Image,area);
+            localReferences.Add(new(reference.Plane,region.Clone(),reference.OriginX+area.X,reference.OriginY+area.Y));
+        }
+    }
     internal async Task Ready(Action<string> report,CancellationToken ct)
     {Data??=await WorldMapData.Load(report,ct);}
     internal int Stall(WorldTile from,WorldTile to)
@@ -19,7 +36,30 @@ internal sealed class WorldNavigator:IDisposable
     // minimap image or unverified coordinates. Navigation must fail closed.
     internal MapLocalization LocateDetailed(VisualFrame frame)
     {
+        var native=LocateAtSampling(frame,1);
+        // An ambiguous valid match must not become unique by trying another
+        // sampling. Only feature/match failures get one additional analysis.
+        if(native.Location is not null||native.Status is not ("NO_VERIFIED_MAP_MATCH" or "MINIMAP_FEATURES_INSUFFICIENT"))return native;
+        var enlarged=LocateAtSampling(frame,2);
+        if(enlarged.Location is null&&(enlarged.Status is "NO_VERIFIED_MAP_MATCH" or "MINIMAP_FEATURES_INSUFFICIENT")&&
+            worldMapHint is not null&&DateTimeOffset.UtcNow-worldMapHint.ObservedUtc is var age&&age>=TimeSpan.Zero&&age<TimeSpan.FromMinutes(5))
+        {
+            var local=LocateAtSampling(frame,1,local:true);
+            if(local.Location is not null||local.Status=="MAP_MATCH_AMBIGUOUS")return local;
+            local=LocateAtSampling(frame,2,local:true);
+            if(local.Location is not null||local.Status=="MAP_MATCH_AMBIGUOUS"||local.BestRatioMatches>enlarged.BestRatioMatches)enlarged=local;
+        }
+        return enlarged with{Features=Math.Max(native.Features,enlarged.Features),
+            BestInliers=Math.Max(native.BestInliers,enlarged.BestInliers),
+            BestRatioMatches=Math.Max(native.BestRatioMatches,enlarged.BestRatioMatches)};
+    }
+    internal MapLocalization LocateAtSampling(VisualFrame frame,int sampling,bool local=false)
+    {
+        if(sampling is not (1 or 2))throw new ArgumentOutOfRangeException(nameof(sampling));
         if(Data is null)return new(null,"REFERENCE_MAP_NOT_READY");
+        if(Enumerable.Range(0,4).Any(p=>!Data.MinimapReferences.Any(r=>r.Plane==p)))return new(null,"MINIMAP_REFERENCES_INCOMPLETE");
+        if(local&&(worldMapHint is null||DateTimeOffset.UtcNow-worldMapHint.ObservedUtc is var age&&
+            (age<TimeSpan.Zero||age>=TimeSpan.FromMinutes(5))))return new(null,"WORLD_MAP_HINT_EXPIRED");
         if(frame.Pixels?.Navigation is not NavigationPixels pixels)return new(null,"MINIMAP_NOT_IDENTIFIED");
         if(pixels.MinimapPng.Length==0)return new(null,"MINIMAP_IMAGE_INVALID");
         using var image=Cv.Cv2.ImDecode(pixels.MinimapPng,Cv.ImreadModes.Grayscale);
@@ -28,20 +68,26 @@ internal sealed class WorldNavigator:IDisposable
         using var mask=new Cv.Mat(image.Size(),Cv.MatType.CV_8UC1,Cv.Scalar.Black);
         Cv.Cv2.Circle(mask,new(image.Width/2,image.Height/2),image.Width/2-10,Cv.Scalar.White,-1);
         Cv.Cv2.Circle(mask,new(image.Width/2,image.Height/2),8,Cv.Scalar.Black,-1);
+        using var featureImage=new Cv.Mat();using var featureMask=new Cv.Mat();
+        Cv.Cv2.Resize(image,featureImage,new(image.Width*sampling,image.Height*sampling),interpolation:Cv.InterpolationFlags.Linear);
+        Cv.Cv2.Resize(mask,featureMask,featureImage.Size(),interpolation:Cv.InterpolationFlags.Nearest);
         using var sift=Cv.Features2D.SIFT.Create(500,contrastThreshold:.01);
-        using var descriptors=new Cv.Mat();sift.DetectAndCompute(image,mask,out var points,descriptors);
+        using var descriptors=new Cv.Mat();sift.DetectAndCompute(featureImage,featureMask,out var points,descriptors);
         if(points.Length<8||descriptors.Empty())return new(null,"MINIMAP_FEATURES_INSUFFICIENT",points.Length);
         var candidates=new List<MapLocation>();
         int bestInliers=0,bestPairs=0;
         using var matcher=new Cv.BFMatcher(Cv.NormTypes.L2);
-        foreach(var reference in Data.References)
+        foreach(var reference in local?localReferences:Data.MinimapReferences)
         {
             if(reference.Descriptors.Rows<8)continue;
             var pairs=matcher.KnnMatch(descriptors,reference.Descriptors,2)
                 .Where(p=>p.Length==2&&p[0].Distance<.65*p[1].Distance).Select(p=>p[0]).ToArray();
             bestPairs=Math.Max(bestPairs,pairs.Length);
             if(pairs.Length<8)continue;
-            var from=pairs.Select(p=>points[p.QueryIdx].Pt).ToArray();var to=pairs.Select(p=>reference.Points[p.TrainIdx].Pt).ToArray();
+            // Fit in original screenshot pixels, preserving native spread,
+            // reprojection, click coordinates and the independent edge test.
+            var from=pairs.Select(p=>new Cv.Point2f(points[p.QueryIdx].Pt.X/sampling,points[p.QueryIdx].Pt.Y/sampling)).ToArray();
+            var to=pairs.Select(p=>reference.Points[p.TrainIdx].Pt).ToArray();
             using var input=Cv.InputArray.Create(from);using var output=Cv.InputArray.Create(to);using var inliers=new Cv.Mat();
             using var affine=Cv.Cv2.EstimateAffinePartial2D(input,output,inliers,Cv.RobustEstimationAlgorithms.RANSAC,2,3000,.995,20);
             if(affine is null||affine.Empty())continue;
@@ -52,13 +98,15 @@ internal sealed class WorldNavigator:IDisposable
             var t=new[]{affine.At<double>(0,0),affine.At<double>(0,1),affine.At<double>(0,2),affine.At<double>(1,0),affine.At<double>(1,1),affine.At<double>(1,2)};
             double scale=Math.Sqrt(t[0]*t[0]+t[3]*t[3]);if(scale is <.35 or >3)continue;
             double cx=image.Width/2d,cy=image.Height/2d,px=t[0]*cx+t[1]*cy+t[2],py=t[3]*cx+t[4]*cy+t[5];
-            var tile=new WorldTile(WorldMapData.MinX+(int)Math.Floor(px/4),WorldMapData.MaxY-1-(int)Math.Floor(py/4),reference.Plane);
+            var tile=new WorldTile(WorldMapData.MinX+(int)Math.Floor((px+reference.OriginX)/4),
+                WorldMapData.MaxY-1-(int)Math.Floor((py+reference.OriginY)/4),reference.Plane);
             if(!WorldMapData.Domain(tile))continue;
             // RANSAC consensus must also agree with visible map edges. This
             // rejects a coincidental feature cluster in repeated scenery.
             using var warped=new Cv.Mat();
             Cv.Cv2.WarpAffine(reference.Image,warped,affine,image.Size(),Cv.InterpolationFlags.Linear|Cv.InterpolationFlags.WarpInverseMap);
             if(!EdgesAgree(image,warped,mask))continue;
+            t[2]+=reference.OriginX;t[5]+=reference.OriginY;
             candidates.Add(new(tile,t,pixels.MapBounds,count,frame.CapturedUtc));
         }
         var ranked=candidates.OrderByDescending(c=>c.Inliers).ToArray();
@@ -67,7 +115,7 @@ internal sealed class WorldNavigator:IDisposable
             return new(null,"MAP_MATCH_AMBIGUOUS",points.Length,ranked.Length,bestInliers,bestPairs);
         return new(ranked[0],"VERIFIED",points.Length,ranked.Length,bestInliers,bestPairs);
     }
-    private static bool EdgesAgree(Cv.Mat actual,Cv.Mat reference,Cv.Mat mask)
+    internal static bool EdgesAgree(Cv.Mat actual,Cv.Mat reference,Cv.Mat mask)
     {
         using var a=new Cv.Mat();using var b=new Cv.Mat();using var expanded=new Cv.Mat();using var overlap=new Cv.Mat();
         Cv.Cv2.Canny(actual,a,45,110);Cv.Cv2.Canny(reference,b,45,110);Cv.Cv2.BitwiseAnd(a,mask,a);
@@ -75,7 +123,7 @@ internal sealed class WorldNavigator:IDisposable
         Cv.Cv2.BitwiseAnd(a,expanded,overlap);int edges=Cv.Cv2.CountNonZero(a);
         return edges>=70&&Cv.Cv2.CountNonZero(overlap)>=edges*.45;
     }
-    public void Dispose(){Data?.Dispose();Data=null;}
+    public void Dispose(){ClearWorldMapHint();Data?.Dispose();Data=null;}
 }
 
 internal sealed class TravelRoutine

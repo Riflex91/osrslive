@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.7.2</Version>
+    <Version>1.7.3</Version>
     <AssemblyName>OSRS-Play</AssemblyName>
     <ApplicationTitle>OSRS Play</ApplicationTitle>
     <PublishSingleFile>true</PublishSingleFile>
@@ -43,5 +43,6 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="OpenCvSharp4.Windows.Slim" Version="4.13.0.20260627" />
     <EmbeddedResource Include="Licenses/*.txt" />
+    <EmbeddedResource Include="MinimapAssets/*.png" />
   </ItemGroup>
 </Project>

@@ -11,6 +11,36 @@ internal static class SessionRecoveryTests
         var hud=new VisualLabel("NATIVE_GAME_HUD",new(0,575,517,25),VisualLabelKind.GameHud);
         var retry=new VisualLabel("Try again",new(420,300,110,25));
         var lost=new VisualLabel("Connection lost.",new(300,100,200,20));
+        var serverDisconnect=new VisualLabel("You were disconnected from the server.",new(385,230,260,15));
+        var startupRetry=new SessionRecovery();
+        var disconnectFrame=Frame(0,serverDisconnect,retry);
+        Require(GameScreenReader.Read(disconnectFrame).Stage==VisibleGameStage.Disconnected&&
+            GameScreenReader.Read(Frame(0,serverDisconnect with{Bounds=new(10,530,260,15)})).Stage==VisibleGameStage.Unknown,
+            "exact live C++ disconnect message is an overlay, never a chat instruction");
+        Require(SessionRecovery.IsDisconnectText("You were disconnected fromthe server .")&&
+            !SessionRecovery.IsDisconnectText("You were disconnected frorn the server.")&&
+            !SessionRecovery.IsDisconnectText("You were disconnected from the server. Click a link"),
+            "word-boundary OCR variation preserves exact letters and rejects changed or appended text");
+        Task<bool> Reachable(int? _,CancellationToken ct)=>Task.FromResult(true);
+        var startupGrace=await startupRetry.Evaluate(disconnectFrame,GameScreenReader.Read(disconnectFrame).Stage,
+            553,time,Reachable,default);
+        var transientUnknown=await startupRetry.Evaluate(Frame(1,retry),VisibleGameStage.Unknown,
+            553,time.AddSeconds(1),Reachable,default);
+        Require(transientUnknown?.State=="RECONNECT_WAITING_FOR_KNOWN_SCREEN"&&transientUnknown.Click is null&&
+            startupRetry.Recovering,"temporary unknown startup recovery screen retains recovery without clicking or claiming a returned game");
+        var startupCandidate=await startupRetry.Evaluate(Frame(9,serverDisconnect,retry),VisibleGameStage.Disconnected,
+            553,time.AddSeconds(9),Reachable,default);
+        var startupConfirmed=await startupRetry.Evaluate(Frame(9.5,serverDisconnect,retry),VisibleGameStage.Disconnected,
+            553,time.AddSeconds(9.5),Reachable,default);
+        Require(startupGrace?.ResetSubject==true&&startupGrace.Click is null&&startupCandidate?.Click is null&&
+            startupConfirmed?.Click==retry.Bounds,"starting on the actual disconnected screen still requires grace, connectivity and two fresh button frames");
+        var pixelPlay=Frame(20,new VisualLabel("Play Now",new(400,230,200,60),VisualLabelKind.PlayButton));
+        var pixelEnter=Frame(11,new VisualLabel("CLICK HERE TO PLAY",new(350,230,300,60),VisualLabelKind.EnterButton));
+        Require(GameScreenReader.Read(pixelPlay).Stage==VisibleGameStage.Login&&
+            GameScreenReader.Read(pixelEnter).Stage==VisibleGameStage.Welcome&&
+            (await startupRetry.Evaluate(pixelPlay,GameScreenReader.Read(pixelPlay).Stage,
+                553,time.AddSeconds(20),Reachable,default))?.ResumeLogin==true,
+            "independently pixel-verified native entry buttons resume guarded startup when full-frame text is missing");
         var policy=new SessionRecovery();int probes=0;bool reachable=false;
         Task<bool> Probe(int? world,CancellationToken ct){ct.ThrowIfCancellationRequested();probes++;return Task.FromResult(reachable);}
         Require(await policy.Evaluate(Frame(0,hud),VisibleGameStage.InGame,553,time,Probe,default) is null,"running game is untouched");

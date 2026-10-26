@@ -15,20 +15,26 @@ internal sealed class SessionRecovery
     internal bool HasEstablished=>established;
     internal void Reset(){established=false;recovering=false;began=nextProbe=reachableUntil=default;failures=0;candidate=null;}
     internal static bool Disconnected(IReadOnlyList<VisualLabel> labels)=>labels.Any(l=>l.Kind==VisualLabelKind.ConnectionSignal)||labels.Any(l=>l.Kind==VisualLabelKind.Text&&
-        l.Bounds.Top<450&&l.Bounds.Bottom<500&&Regex.IsMatch(l.Text.Trim(),
-            @"^(?:Connection lost[.!]?|Attempting to reestablish(?: the connection)?[.!]*|You have been disconnected[.!]?|Error connecting to server[.!]?|No reply from loginserver[.!]?|Please try using a different world[.!]?)$",RegexOptions.IgnoreCase));
+        l.Bounds.Top<450&&l.Bounds.Bottom<500&&IsDisconnectText(l.Text));
+    internal static bool IsDisconnectText(string text)=>Regex.IsMatch(text.Trim(),
+        @"^(?:Connection lost[.!]?|Attempting to reestablish(?: the connection)?[.!]*|You have been disconnected[.!]?|You were disconnected from the server[.!]?|Error connecting to server[.!]?|No reply from loginserver[.!]?|Please try using a different world[.!]?)$",RegexOptions.IgnoreCase)||
+        // Native OCR may merge word boundaries or isolate the final dot.
+        // Accept only the exact same letters; no spelling substitutions.
+        Regex.Replace(text,@"[\s.!]","").Equals("Youweredisconnectedfromtheserver",StringComparison.OrdinalIgnoreCase);
     internal static TimeSpan Backoff(int failure)=>TimeSpan.FromSeconds(Math.Min(30,2*Math.Pow(2,Math.Min(4,failure))));
     internal async Task<RecoveryDecision?> Evaluate(VisualFrame frame,VisibleGameStage stage,int? world,DateTimeOffset now,
         Func<int?,CancellationToken,Task<bool>> probe,CancellationToken ct)
     {
         if(stage==VisibleGameStage.InGame)
         {established=true;recovering=false;failures=0;candidate=null;return null;}
-        if(!established&&stage!=VisibleGameStage.Disconnected)return null;
+        if(!established&&!recovering&&stage!=VisibleGameStage.Disconnected)return null;
         if(stage is not (VisibleGameStage.Login or VisibleGameStage.Welcome or VisibleGameStage.Connecting or VisibleGameStage.Disconnected)&&!recovering)return null;
         bool reset=!recovering;
         if(reset){recovering=true;began=now;nextProbe=now;reachableUntil=default;candidate=null;}
         if(frame.Labels.Any(l=>l.Bounds.Top<450&&Regex.IsMatch(l.Text.Trim(),@"\b(?:password|authenticator|verification code)\b",RegexOptions.IgnoreCase)))
             return new("RECONNECT_MANUAL_AUTHENTICATION_REQUIRED",reset);
+        if(stage==VisibleGameStage.Unknown)
+            return new("RECONNECT_WAITING_FOR_KNOWN_SCREEN",reset);
         if((stage is VisibleGameStage.Disconnected or VisibleGameStage.Connecting)&&now-began<TimeSpan.FromSeconds(8))
             return new("RECONNECT_WAITING_FOR_CLIENT_RECOVERY",reset);
         if(now<nextProbe)return new("RECONNECT_BACKOFF",reset);

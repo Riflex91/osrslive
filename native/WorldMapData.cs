@@ -18,12 +18,15 @@ internal sealed class WorldMapData:IDisposable
     internal readonly Dictionary<(int X,int Y),byte[]> Regions=new();
     internal readonly List<MapTransport> Transports=new();
     internal readonly List<ReferenceMap> References=new();
+    // World-map symbols and native minimap sprites have different placement.
+    // Keep these independent: the large-map localizer still uses References.
+    internal readonly List<ReferenceMap> MinimapReferences=new();
     internal sealed class ReferenceMap:IDisposable
     {
-        internal readonly int Plane;internal readonly Cv.Mat Image,Descriptors=new();internal readonly Cv.KeyPoint[] Points;
-        internal ReferenceMap(int plane,Cv.Mat image)
+        internal readonly int Plane,OriginX,OriginY;internal readonly Cv.Mat Image,Descriptors=new();internal readonly Cv.KeyPoint[] Points;
+        internal ReferenceMap(int plane,Cv.Mat image,int originX=0,int originY=0)
         {
-            Plane=plane;Image=image;using var sift=Cv.Features2D.SIFT.Create(18000,contrastThreshold:.015);
+            Plane=plane;Image=image;OriginX=originX;OriginY=originY;using var sift=Cv.Features2D.SIFT.Create(18000,contrastThreshold:.015);
             sift.DetectAndCompute(image,null,out Points,Descriptors);
         }
         public void Dispose(){Image.Dispose();Descriptors.Dispose();}
@@ -33,6 +36,8 @@ internal sealed class WorldMapData:IDisposable
         var data=new WorldMapData();
         try
         {
+            data.LoadMinimapReferences();
+            report("NATIVE_MINIMAP_REFERENCES_READY planes=4 pixels_per_tile=4");
             using var client=new HttpClient{Timeout=TimeSpan.FromSeconds(20),MaxResponseContentBufferSize=4*1024*1024};
             client.DefaultRequestHeaders.UserAgent.ParseAdd("OSRS-Play/1.7.0 (+https://github.com/Riflex91/osrslive)");
             string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","maps");
@@ -172,5 +177,36 @@ internal sealed class WorldMapData:IDisposable
         }
         return null;
     }
-    public void Dispose(){foreach(var r in References)r.Dispose();References.Clear();}
+    internal static readonly string[] MinimapHashes={
+        "843CF9BFEDA3FC8D4B3B41552A483A9E2974012C96F734A32D623F366010C41A",
+        "36811CC033C367CDF5A744F134DEFA533750DDCC61AEDE8D80903CCDFBFD5639",
+        "480E6851E5D24FB43F782B885FE139208135447FD0D98D73503FE24904E96777",
+        "D715DED5DBAB87C52AD8AC3F532B99CE00D5E3F156F0DAF2C79AE807D181F197"};
+    internal static Cv.Mat DecodeMinimapReference(byte[] bytes,int plane)
+    {
+        if(plane is <0 or >3||Convert.ToHexString(SHA256.HashData(bytes))!=MinimapHashes[plane])
+            throw new RoutineBlockedException("MINIMAP_REFERENCE_HASH_MISMATCH");
+        var image=Cv.Cv2.ImDecode(bytes,Cv.ImreadModes.Grayscale);
+        if(image.Width!=(MaxX-MinX)*4||image.Height!=(MaxY-MinY)*4)
+        {image.Dispose();throw new RoutineBlockedException("MINIMAP_REFERENCE_BOUNDS_INVALID");}
+        return image;
+    }
+    internal void LoadMinimapReferences()
+    {
+        if(MinimapReferences.Count!=0)throw new InvalidOperationException("Minimap references already loaded");
+        try
+        {
+            var assembly=typeof(WorldMapData).Assembly;
+            for(int plane=0;plane<4;plane++)
+            {
+                string name=assembly.GetManifestResourceNames().Single(n=>n.EndsWith($".MinimapAssets.plane-{plane}.png",StringComparison.Ordinal));
+                using var stream=assembly.GetManifestResourceStream(name)!;using var buffer=new MemoryStream();stream.CopyTo(buffer);
+                var image=DecodeMinimapReference(buffer.ToArray(),plane);
+                try{MinimapReferences.Add(new(plane,image));}catch{image.Dispose();throw;}
+            }
+        }
+        catch{foreach(var r in MinimapReferences)r.Dispose();MinimapReferences.Clear();throw;}
+    }
+    public void Dispose()
+    {foreach(var r in References)r.Dispose();References.Clear();foreach(var r in MinimapReferences)r.Dispose();MinimapReferences.Clear();}
 }

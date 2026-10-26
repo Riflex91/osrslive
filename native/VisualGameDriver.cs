@@ -17,6 +17,7 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
     private readonly Action<string> report;
     public VisualFrame Current {get;private set;}
     internal Action<VisualFrame>? Guard;
+    internal Func<VisualFrame,GameInput,bool>? InputGuard;
     internal WindowVisualGameDriver(VisualFrame first,Func<CancellationToken,Task<VisualFrame?>> capture,
         Func<VisualFrame,GameInput,CancellationToken,Task<bool>> dispatch,Action<string> report)
     {Current=first;this.capture=capture;this.dispatch=dispatch;this.report=report;}
@@ -86,6 +87,7 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
         ct.ThrowIfCancellationRequested();
         if(DateTimeOffset.UtcNow-Current.CapturedUtc>TimeSpan.FromSeconds(2))await ObserveAsync(ct);
         Guard?.Invoke(Current);
+        if(InputGuard is not null&&!InputGuard(Current,input))throw new RoutineBlockedException("INPUT_TARGET_NOT_VERIFIED_AFTER_REFRESH");
         if(!await dispatch(Current,input,ct))throw new RoutineBlockedException("INPUT_NOT_QUEUED");
         report(input.Kind.ToString());
         var sent=DateTimeOffset.UtcNow;
