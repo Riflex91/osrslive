@@ -239,17 +239,23 @@ internal sealed class MinimapZoomRoutine
         MinimapScaleEvidence? tentative=null,last=null;
         string? rejectedFrame=null;
         DateTimeOffset lastCapture=before.CapturedUtc;
-        for(int sample=1;sample<=3;sample++)
+        // A zoom-transition can temporarily obscure the white player dot or
+        // circular border. Wait for up to six independent captures ONLY when
+        // the minimap vanishes; send no extra wheel impulse during recovery.
+        int sampleLimit=3;
+        for(int sample=1;sample<=sampleLimit;sample++)
         {
             if(stopped())throw new OperationCanceledException(ct);
             var after=await driver.ObserveAsync(ct);
             string? frameReason=FrameRejection(before,after,lastCapture);
             if(frameReason is not null)
             {
+                if(frameReason=="MINIMAP_MISSING")sampleLimit=6;
                 rejectedFrame=frameReason;
                 diagnostic($"input={direction} sample={sample} frame_rejected={frameReason} "+
                     $"stage={GameScreenReader.Read(after).Stage} native_hud={after.Labels.Any(l=>l.Kind==VisualLabelKind.GameHud)} "+
                     $"navigation_available={after.Pixels?.Navigation is not null} "+
+                    $"minimap_evidence={after.Pixels?.MinimapEvidence??"unavailable"} "+
                     $"same_window={after.Window==before.Window} same_bounds={after.ScreenBounds==before.ScreenBounds} "+
                     $"capture_delta_ms={(after.CapturedUtc-before.CapturedUtc).TotalMilliseconds:F0} "+
                     $"frame_age_ms={(DateTimeOffset.UtcNow-after.CapturedUtc).TotalMilliseconds:F0} passive_only=true");
@@ -259,7 +265,7 @@ internal sealed class MinimapZoomRoutine
                     return new(null,0,"MINIMAP_ZOOM_POST_SCROLL_"+frameReason);
                 tentative=null;
                 if(after.CapturedUtc>lastCapture)lastCapture=after.CapturedUtc;
-                if(sample<3)await wait(200,ct);
+                if(sample<sampleLimit)await wait(sample>=3?600:200,ct);
                 continue;
             }
             rejectedFrame=null;
@@ -279,7 +285,7 @@ internal sealed class MinimapZoomRoutine
                 tentative=evidence;
             }
             else tentative=null;
-            if(sample<3)await wait(200,ct);
+            if(sample<sampleLimit)await wait(sample>=3?600:200,ct);
         }
         return rejectedFrame is not null?
             new(null,0,"MINIMAP_ZOOM_POST_SCROLL_"+rejectedFrame):tentative is not null?

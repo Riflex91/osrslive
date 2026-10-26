@@ -7,6 +7,9 @@ internal static class CombatNavigationTests
         static void Require(bool b,string message){if(!b)throw new Exception("Combat/navigation: "+message);}
         using(var minimapPixels=new Bitmap(1000,600))
         {
+            Require(HudVision.Minimap(minimapPixels,out string blankEvidence) is null&&
+                blankEvidence.Contains("hough_raw=0")&&blankEvidence.Contains("verified_unique=False"),
+                "blank minimap probe reports missing pixels without inventing navigation");
             var actual=new Rectangle(775,25,150,150);
             var decorative=new Rectangle(845,30,140,140);
             using(var g=Graphics.FromImage(minimapPixels))
