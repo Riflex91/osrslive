@@ -33,6 +33,28 @@ internal static class CompassTests
         var already=await new CompassCalibrationRoutine(north,()=>false,_=>{},(_,_)=>Task.CompletedTask).Run(default);
         Require(already.Reason=="COMPASS_ALREADY_NORTH_CONFIRMED"&&north.Clicks==0&&north.Hovers==0,
             "already-north scenes need only passive confirmation");
+        var settling=new CompassDriver(0,missingObservations:3);var settlingLogs=new List<string>();
+        var settled=await new CompassCalibrationRoutine(settling,()=>false,settlingLogs.Add,
+            (_,_)=>Task.CompletedTask).Run(default);
+        Require(settled.Reason=="COMPASS_ALREADY_NORTH_CONFIRMED"&&settling.Clicks==0&&settling.Hovers==0&&
+            settlingLogs.Count(s=>s.Contains("minimap=hough_raw=0"))>=3&&
+            settlingLogs.Count(s=>s.Contains("COMPASS_SAMPLE"))==2,
+            "three missing startup minimap frames can recover passively before independent compass confirmation");
+        var absent=new CompassDriver(0,missingObservations:int.MaxValue);var absentLogs=new List<string>();
+        var never=await new CompassCalibrationRoutine(absent,()=>false,absentLogs.Add,
+            (_,_)=>Task.CompletedTask).Run(default);
+        Require(never.Status==RoutineStatus.Blocked&&never.Reason=="COMPASS_PIXEL_NEEDLE_NOT_VERIFIED"&&
+            absent.Clicks==0&&absent.Hovers==0&&absentLogs.Count(s=>s.Contains("COMPASS_PIXEL_EVIDENCE"))==9,
+            "persistently absent minimap must still block after nine bounded passive samples without an input");
+        var loss=new RoutineResult(RoutineStatus.Blocked,"COMPASS_PIXEL_NEEDLE_NOT_VERIFIED");
+        var later=north.Current with{CapturedUtc=DateTimeOffset.UtcNow.AddSeconds(2)};
+        Require(CompassCalibrationRoutine.MayResumeAfterFreshPixels(loss,later,DateTimeOffset.UtcNow)&&
+            !CompassCalibrationRoutine.MayResumeAfterFreshPixels(loss,later,DateTimeOffset.UtcNow.AddSeconds(3))&&
+            !CompassCalibrationRoutine.MayResumeAfterFreshPixels(loss,
+                later with{Pixels=later.Pixels! with{Compass=null}},DateTimeOffset.UtcNow)&&
+            !CompassCalibrationRoutine.MayResumeAfterFreshPixels(
+                new(RoutineStatus.Blocked,"COMPASS_LOOK_NORTH_CONTROL_NOT_VERIFIED"),later,DateTimeOffset.UtcNow),
+            "only a fresh native needle may reopen the missing-pixel block, never a different input guard failure");
         var noTooltip=new CompassDriver(90,tooltip:false);
         var missing=await new CompassCalibrationRoutine(noTooltip,()=>false,_=>{},(_,_)=>Task.CompletedTask).Run(default);
         Require(missing.Reason=="COMPASS_LOOK_NORTH_CONTROL_NOT_VERIFIED"&&noTooltip.Clicks==0,
@@ -67,20 +89,24 @@ internal static class CompassTests
     private sealed class CompassDriver:IVisualGameDriver
     {
         private double angle;private bool hover;private readonly bool tooltip,effective,stale;
+        private readonly int missingObservations;private int reads;
         internal int Clicks,Hovers;
         public VisualFrame Current{get;private set;}
-        internal CompassDriver(double angle,bool tooltip=true,bool effective=true,bool stale=false)
-        {this.angle=angle;this.tooltip=tooltip;this.effective=effective;this.stale=stale;Current=Frame(DateTimeOffset.UtcNow);}
+        internal CompassDriver(double angle,bool tooltip=true,bool effective=true,bool stale=false,int missingObservations=0)
+        {this.angle=angle;this.tooltip=tooltip;this.effective=effective;this.stale=stale;this.missingObservations=missingObservations;Current=Frame(DateTimeOffset.UtcNow);}
         private VisualFrame Frame(DateTimeOffset time)
         {
             var labels=new List<VisualLabel>{new("NATIVE_GAME_HUD",new(0,575,517,25),VisualLabelKind.GameHud)};
             if(hover&&tooltip)labels.Add(new("Look North",new(4,4,80,12)));
-            return new(new IntPtr(5),new(0,0,1000,600),time,labels,
-                new(Array.Empty<ObservedSlot>(),0,new(Array.Empty<byte>(),new(803,5,150,150),24),
-                    Compass:new(new(795,21,7,7),angle,41,16)));
+            var pixels=new ExecutionPixels(Array.Empty<ObservedSlot>(),0,
+                new(Array.Empty<byte>(),new(803,5,150,150),24),Compass:new(new(795,21,7,7),angle,41,16));
+            if(reads>0&&reads<=missingObservations)pixels=pixels with{
+                Navigation=null,Compass=null,CompassEvidence="minimap_missing",
+                MinimapEvidence="hough_raw=0 inside_roi=0 white_centres=0"};
+            return new(new IntPtr(5),new(0,0,1000,600),time,labels,pixels);
         }
         public Task<VisualFrame> ObserveAsync(CancellationToken ct)
-        {ct.ThrowIfCancellationRequested();Current=Frame(stale?Current.CapturedUtc:Current.CapturedUtc.AddMilliseconds(200));return Task.FromResult(Current);}
+        {ct.ThrowIfCancellationRequested();reads++;Current=Frame(stale?Current.CapturedUtc:Current.CapturedUtc.AddMilliseconds(200));return Task.FromResult(Current);}
         public Task InputAsync(GameInput input,CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();

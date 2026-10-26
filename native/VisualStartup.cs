@@ -232,9 +232,10 @@ internal sealed class VisualStartup:IDisposable
     private RoutineResult? minimapZoomResult;
     private RoutineResult? worldMapResult;
     private RoutineResult? compassResult;
+    private DateTimeOffset compassBlockedAt;
     private bool worldMapReading;
     private string lastWorldMapDiagnostic="";
-    private void ResetNavigationCalibration(){minimapZoomResult=null;worldMapResult=null;compassResult=null;}
+    private void ResetNavigationCalibration(){minimapZoomResult=null;worldMapResult=null;compassResult=null;compassBlockedAt=default;}
     private void ReportGuardedInput(string activity,string message)
     {
         if(message.StartsWith("FRAME_",StringComparison.Ordinal))
@@ -379,6 +380,14 @@ internal sealed class VisualStartup:IDisposable
         }
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
         {
+            if(Game.Confirmed is not null&&CompassCalibrationRoutine.MayResumeAfterFreshPixels(
+                compassResult,observed,compassBlockedAt))
+            {
+                compassResult=null;compassBlockedAt=default;
+                log.Add(Severity.INFO,"COMPASS","PASSIVE_RECOVERY",
+                    "fresh_native_needle_visible=true previous_block=COMPASS_PIXEL_NEEDLE_NOT_VERIFIED "+
+                    "no_input=true new_independent_calibration_required=true");
+            }
             // No periodic Character Summary clicks while a previous safe map
             // or zoom calibration is terminally blocked. F8 pause/resume or
             // a new official game window clears the appropriate block.
@@ -423,6 +432,8 @@ internal sealed class VisualStartup:IDisposable
                 {
                     var compass=await CalibrateCompass(observed,target,owner,ct);
                     if(compass.Status!=RoutineStatus.Waiting)compassResult=compass;
+                    if(compass is {Status:RoutineStatus.Blocked,Reason:"COMPASS_PIXEL_NEEDLE_NOT_VERIFIED"})
+                        compassBlockedAt=DateTimeOffset.UtcNow;
                     log.Add(compass.Status==RoutineStatus.Completed?Severity.INFO:Severity.WARN,"COMPASS","RESULT",
                         $"status={compass.Status} reason={compass.Reason}");
                     SetState(compass.Status==RoutineStatus.Completed?"COMPASS_NORTH_CONFIRMED":
