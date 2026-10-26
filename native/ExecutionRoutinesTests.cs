@@ -146,6 +146,67 @@ internal static class ExecutionRoutinesTests
         Require(movedViewportBlocked&&movedViewportReports.Single().Contains("reason=GAME_VIEWPORT_CHANGED")&&
             movedViewportReports.Single().Contains("origin_changed=True"),
             "changed viewport origin remains an immediate stop with a distinct privacy-safe diagnostic");
+        int preInputMoveCaptures=0,preInputMoveDispatches=0;
+        var preInputMoveReports=new List<string>();
+        var preInputMove=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            preInputMoveCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                ScreenBounds=new(12,8,1000,600),CapturedUtc=DateTimeOffset.UtcNow});
+        },(_,input,token)=>{
+            preInputMoveDispatches++;return Task.FromResult(true);
+        },preInputMoveReports.Add){AllowPreInputOriginReanchor=true};
+        var anchored=await preInputMove.ObserveAsync(CancellationToken.None);
+        Require(preInputMoveCaptures==2&&preInputMoveDispatches==0&&
+            anchored.ScreenBounds==new Rectangle(12,8,1000,600)&&
+            anchored.CapturedUtc>initialHudFrame.CapturedUtc&&
+            preInputMoveReports.Single().Contains("independent_fresh_ingame_frames=2"),
+            "before any attempted input a stable move may reanchor from two independent InGame frames without clicks");
+        int unstableMoveCaptures=0;
+        var unstableMove=new WindowVisualGameDriver(initialHudFrame,_=>
+        {
+            unstableMoveCaptures++;
+            return Task.FromResult<VisualFrame?>(initialHudFrame with{
+                ScreenBounds=new(unstableMoveCaptures==1?12:13,8,1000,600),
+                CapturedUtc=DateTimeOffset.UtcNow});
+        },(_,input,token)=>Task.FromResult(true),_=>{}){AllowPreInputOriginReanchor=true};
+        bool unstableMoveBlocked=false;
+        try{await unstableMove.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {unstableMoveBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(unstableMoveBlocked&&unstableMoveCaptures==2&&
+            ReferenceEquals(unstableMove.Current,initialHudFrame),
+            "moving-again viewport cannot be reanchored from inconsistent origins");
+        var repeatedTimestamp=DateTimeOffset.UtcNow;
+        var duplicateMove=new WindowVisualGameDriver(initialHudFrame,_=>
+            Task.FromResult<VisualFrame?>(initialHudFrame with{
+                ScreenBounds=new(12,8,1000,600),CapturedUtc=repeatedTimestamp}),
+            (_,input,token)=>Task.FromResult(true),_=>{}){AllowPreInputOriginReanchor=true};
+        bool duplicateMoveBlocked=false;
+        try{await duplicateMove.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {duplicateMoveBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(duplicateMoveBlocked&&ReferenceEquals(duplicateMove.Current,initialHudFrame),
+            "two screenshots with identical timestamps do not establish a stable new origin");
+        int movedAfterInputCaptures=0,movedAfterInputDispatches=0;
+        var movedAfterInputReports=new List<string>();
+        var beforeInputMove=initialHudFrame with{CapturedUtc=DateTimeOffset.UtcNow};
+        var movedAfterInput=new WindowVisualGameDriver(beforeInputMove,_=>
+        {
+            movedAfterInputCaptures++;
+            return Task.FromResult<VisualFrame?>(beforeInputMove with{
+                ScreenBounds=new(12,8,1000,600),CapturedUtc=DateTimeOffset.UtcNow});
+        },(_,input,token)=>{
+            movedAfterInputDispatches++;return Task.FromResult(true);
+        },movedAfterInputReports.Add){AllowPreInputOriginReanchor=true};
+        bool postInputMoveBlocked=false;
+        try{await movedAfterInput.InputAsync(new(GameInputKind.Hover,new(900,140,8,8)),CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {postInputMoveBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(postInputMoveBlocked&&movedAfterInputCaptures==1&&movedAfterInputDispatches==1&&
+            ReferenceEquals(movedAfterInput.Current,beforeInputMove)&&
+            movedAfterInputReports.Any(s=>s.Contains("reason=GAME_VIEWPORT_CHANGED")),
+            "after the first attempted input a moved window always blocks without reanchoring");
         int reusedHudCaptures=0;
         var reusedTime=DateTimeOffset.UtcNow;
         var reusedHud=new WindowVisualGameDriver(initialHudFrame,_=>

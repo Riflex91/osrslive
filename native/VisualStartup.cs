@@ -446,7 +446,8 @@ internal sealed class VisualStartup:IDisposable
                         return next is null?null:ConnectivityWatch.Signal(next,
                             await connectivity.Lost(observedSelectedWorld??preferredWorld,true,token));
                     },(f,input,token)=>Dispatch(f,new("WORLD_MAP_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
-                        action=>ReportGuardedInput("WORLD_MAP",action));
+                        action=>ReportGuardedInput("WORLD_MAP",action))
+                    {AllowPreInputOriginReanchor=true};
                     RoutineResult result;
                     try{result=await Gameplay.LocateWithWorldMap(mapDriver,()=>Paused||ObserveOnly,mapBudget.Token);}
                     catch(OperationCanceledException) when(!ct.IsCancellationRequested)
