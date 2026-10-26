@@ -32,6 +32,16 @@ internal static class SkillsHoverPolicy
 
 internal static class NavigationStartupPolicy
 {
+    // A terminal navigation/calibration failure freezes even read-only tab
+    // refreshes. Otherwise the 30-second visual identity lease can trigger
+    // extra Summary clicks while no gameplay action is legally possible.
+    internal static string? FrozenCalibration(RoutineResult? worldMap,RoutineResult? zoom,RoutineResult? compass)
+    {
+        if(worldMap?.Status==RoutineStatus.Blocked)return "BLOCKED_"+worldMap.Reason;
+        if(zoom?.Status==RoutineStatus.Blocked)return "BLOCKED_"+zoom.Reason;
+        if(compass?.Status==RoutineStatus.Blocked)return "BLOCKED_"+compass.Reason;
+        return null;
+    }
     internal static string? GameplayBlock(bool hasSubject,RoutineResult? worldMap,RoutineResult? zoom,bool mapOpen,RoutineResult? compass=null)
     {
         if(hasSubject&&worldMap?.Status!=RoutineStatus.Completed)
@@ -369,6 +379,11 @@ internal sealed class VisualStartup:IDisposable
         }
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
         {
+            // No periodic Character Summary clicks while a previous safe map
+            // or zoom calibration is terminally blocked. F8 pause/resume or
+            // a new official game window clears the appropriate block.
+            if(NavigationStartupPolicy.FrozenCalibration(worldMapResult,minimapZoomResult,compassResult) is string calibrationBlock)
+            {SetState(calibrationBlock);return;}
             // The official Character Summary displays the real account name
             // while the Skills tab displays the full 24-value raster. Require
             // two fresh summary frames, then switch to the separately verified

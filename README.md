@@ -1,4 +1,8 @@
-# OSRS Play 1.7.9 – visuell abgesicherte Charakterbestätigung
+# OSRS Play 1.7.10 – robustere Weltkartenmerkmale, keine unnötigen Sperr-Klicks
+
+**Release-Stand:** Der 1.7.9-Live-Test bestätigt die neue sichere Charakterübersicht: Name, 24/24 Fertigkeiten und Nordausrichtung wurden ohne Prozessspeicherzugriff bestätigt. Der Kartenabgleich wurde mit 27/42 beziehungsweise 25/43 RANSAC-Inliern jedoch weiterhin zu Recht gesperrt. 1.7.10 versucht neben dem unveränderten reziproken SIFT-Matcher mit 0,65-Verhältnis auch **strengere** Descriptor-Auswahlen von 0,60 und 0,55 aus demselben Screenshot. Die bisherigen Mindestkonsenswerte, Kartenkanten-, Orientierung-, Verteilungs-, Eindeutigkeits- und unabhängigen Zwei-Bild-Prüfungen bleiben bestehen; widersprüchliche Positionskandidaten aller Auswahlen sperren die Navigation. Zusätzliche Profile werden mit Paar-/Inlier-Zahlen protokolliert. Ein endgültiger Kartenblock stoppt künftig auch unnötige periodische Charakterübersichts-Klicks bis zum bewusst ausgelösten F8-Neuversuch oder einem frischen Spielfenster. Ob die strengere Auswahl genügend Kartenmerkmale gewinnt, muss ein weiterer Live-Test zeigen.
+
+**Vorheriger Stand (1.7.9):**
 
 **Release-Stand:** Im Live-Log von 1.7.8 am 26.10. um 20:58–20:59 wurden Spiel und F2P-Welt 380 erkannt sowie 24/24 Fertigkeiten mit Gesamtlevel und Prüfsumme 131 gelesen; dennoch verharrte der Start in `IN_GAME_CHARACTER_PROMPT_NOT_READABLE`. 1.7.9 ergänzt einen vorsichtigen Ausweichweg: Erst wenn zwei zeitlich unabhängige, vollständig geprüfte Skills-Ansichten und das visuell erkannte Symbol der Charakterübersicht vorliegen, darf ausschließlich dieser Reiter geöffnet werden. Zwei unabhängige Namenserkennungen in der offiziellen Charakterübersicht müssen anschließend mit den Skills zusammengeführt werden; andernfalls bleibt der Spielauftrag gesperrt. Kein Kontoname wird geschätzt, keine Speicheranalyse verwendet, keine Navigation dadurch ungeprüft freigeschaltet.
 
