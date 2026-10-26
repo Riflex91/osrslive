@@ -1,6 +1,6 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.7.5
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.7.6
 
-Release 1.7.5 korrigiert die Auswertung der relativen Minimap-Verschiebung aus 1.7.4 um wechselnde Ausschnittursprünge. Ein scheinbarer Versatz unmittelbar nach der Zoomroutine war kein unabhängiger Nachweis der Spielerbewegung. Eine aus den Bildern abgeleitete absolute Weltposition ist weiterhin ausdrücklich gesperrt. Zwei unabhängig bestätigte Weltkartenpositionen nach manueller Bewegung werden für die Maßstabskalibrierung benötigt. [Diagnose und Grenzen](LIVE-MINIMAP-MOTION-2026-10-26.md).
+Release 1.7.6 stoppt die beobachtete Folge wiederholter Inventarkontextmenüs, wenn bereits vor Beginn der nächsten Aktivität keine verifizierte Weltposition vorliegt. Bestehende Journale mit möglichen ausstehenden Aktionen bleiben vor dieser Sperre priorisiert. 1.7.5 hatte die passive Verschiebungsmessung um wechselnde Ausschnittursprünge korrigiert; der Live-Test ergab danach nahe null Pixel scheinbare Bewegung. Eine absolute Weltposition ist weiterhin gesperrt. Zwei unabhängig bestätigte Weltkartenpositionen nach manueller Bewegung werden für die Maßstabskalibrierung benötigt. [Diagnose und Grenzen](LIVE-MINIMAP-MOTION-2026-10-26.md).
 
 Die untenstehenden Live-Messungen dokumentieren die weiterhin offenen Grenzen von 1.7.3 und älteren Testbuilds; die Versionsnummer ist kein Nachweis behobener Weltlokalisierung.
 

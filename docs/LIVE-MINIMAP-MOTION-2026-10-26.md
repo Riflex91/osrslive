@@ -39,6 +39,15 @@ Weltlokalisierung nicht unabhängig gelingt.
 
 ## Nächster, noch nicht freigegebener Schritt
 
+**Eingabe-Schutz ab 1.7.6:** Der passive 1.7.5-Live-Test bestätigte nach der
+Zoomkalibrierung unverändert nur ein einziges Atlas-Match. Trotzdem wurden
+mehrmals Inventarmenüs geöffnet, weil die Aufgabenplanung den Navigationsblock
+erst nach dem Inventarscan feststellte. Neue Aktivitäten prüfen die verfügbare
+Weltposition deshalb jetzt vor dem ersten Inventarmenü und lassen bei fehlender
+Position alle Eingaben aus. Sie wiederholen nur diese passive Prüfung mit
+60 Sekunden Abstand; ausstehende Trade-/Combat-Journale werden davor gesondert
+abgewickelt. Dies ist keine Freigabe der automatischen Navigation.
+
 1. Nach bestätigter Weltkartenposition einen Minimap-Referenzframe erfassen.
 2. Den Charakter manuell einige Kacheln bewegen; Zoom und Kompass gleich
    lassen. Die neuen Frames nachweisbar wieder mit der echten Minimap
