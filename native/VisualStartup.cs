@@ -320,7 +320,11 @@ internal sealed class VisualStartup:IDisposable
         var visible=GameScreenReader.Read(observed);
         summaryIdentity.Observe(visible,observed.Labels);
         Game.Observe(summaryIdentity.Apply(visible),DateTimeOffset.UtcNow);
-        if(Game.LastObservation?.Stage!=VisibleGameStage.InGame)summaryFallback.Reset();
+        if(Game.LastObservation?.Stage!=VisibleGameStage.InGame||
+            observed.Labels.Any(l=>l.Kind==VisualLabelKind.CharacterSummary)||
+            observed.Pixels?.WorldMapPanelOpen==true||
+            summaryIdentity.Verified(observed.CapturedUtc) is not null||Game.Confirmed is not null)
+            summaryFallback.Reset();
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
             Gameplay.ObserveLiveMinimapMotion(observed,
                 worldMapResult is {Status:RoutineStatus.Completed,Reason:"WORLD_MAP_SURFACE_POSITION_CONFIRMED"}&&
