@@ -1,4 +1,5 @@
 using Windows.Media.Ocr;
+using Cv=OpenCvSharp;
 
 namespace OSRSLiveDiagnostics;
 
@@ -41,6 +42,28 @@ internal static class WorldMapTests
             "weak, insufficient or impossible geometric evidence still fails closed");
         Require(WorldMapLocalizer.DescriptorRatios.SequenceEqual(new[]{.65,.60,.55}),
             "fallbacks may only tighten the reciprocal feature ratio, never loosen it");
+        using(var mapA=new Cv.Mat(160,160,Cv.MatType.CV_8UC1,Cv.Scalar.Black))
+        using(var mapB=new Cv.Mat(160,160,Cv.MatType.CV_8UC1,Cv.Scalar.Black))
+        using(var terrainMask=new Cv.Mat(160,160,Cv.MatType.CV_8UC1,Cv.Scalar.White))
+        {
+            var rng=new Random(41322);
+            for(int n=0;n<900;n++)
+            {
+                Cv.Cv2.Circle(mapA,new(rng.Next(160),rng.Next(160)),rng.Next(1,5),
+                    new Cv.Scalar(rng.Next(20,240)),-1);
+                Cv.Cv2.Circle(mapB,new(rng.Next(160),rng.Next(160)),rng.Next(1,5),
+                    new Cv.Scalar(rng.Next(20,240)),-1);
+            }
+            Cv.Cv2.Circle(terrainMask,new(80,80),25,Cv.Scalar.Black,-1);
+            var same=WorldMapLocalizer.MaskedTerrainCorrelation(mapA,mapA,terrainMask);
+            var different=WorldMapLocalizer.MaskedTerrainCorrelation(mapA,mapB,terrainMask);
+            using var uniform=new Cv.Mat(160,160,Cv.MatType.CV_8UC1,Cv.Scalar.Black);
+            Require(same is double identical&&identical>.999&&
+                different is double dissimilar&&Math.Abs(dissimilar)<.3&&
+                WorldMapLocalizer.MaskedTerrainCorrelation(mapA,uniform,terrainMask) is null&&
+                !WorldMapLocalizer.ConsensusVerified(17,28),
+                "diagnostic terrain correlation distinguishes same/different/blank without relaxing marginal map consensus");
+        }
         var at=DateTimeOffset.UtcNow;
         var anchor=new WorldMapPosition(new WorldTile(3153,3202),20,at);
         Require(WorldMapLocalizer.UniqueVerifiedPosition(Array.Empty<WorldMapPosition>()) is null&&

@@ -1,4 +1,5 @@
 using Cv=OpenCvSharp;
+using System.Globalization;
 
 namespace OSRSLiveDiagnostics;
 
@@ -20,6 +21,45 @@ internal static class WorldMapLocalizer
     {
         if(positions.Count==0||positions.Select(p=>p.SurfaceTile).Distinct().Count()!=1)return null;
         return positions.OrderByDescending(p=>p.Inliers).First();
+    }
+
+    // Complementary pixel check for a rejected SIFT fit. Unlike the 65%
+    // consensus, the score is not validated across live scenes and must NEVER
+    // publish a player tile or authorize input. It is diagnostic only.
+    internal static double? MaskedTerrainCorrelation(Cv.Mat observed,Cv.Mat alignedReference,Cv.Mat mask)
+    {
+        if(observed.Empty()||alignedReference.Empty()||mask.Empty()||
+            observed.Width!=alignedReference.Width||observed.Height!=alignedReference.Height||
+            observed.Width!=mask.Width||observed.Height!=mask.Height)return null;
+        Cv.Cv2.MeanStdDev(observed,out _,out var actualStd,mask);
+        Cv.Cv2.MeanStdDev(alignedReference,out _,out var referenceStd,mask);
+        if(actualStd.Val0<5||referenceStd.Val0<5)return null;
+        using var score=new Cv.Mat();
+        Cv.Cv2.MatchTemplate(observed,alignedReference,score,Cv.TemplateMatchModes.CCoeffNormed,mask);
+        double value=score.At<float>(0,0);
+        return double.IsFinite(value)&&value>=-1&&value<=1?value:null;
+    }
+
+    private static string NearMissImageEvidence(Cv.Mat observed,Cv.Mat mask,Cv.Mat atlas,
+        Cv.Point2f[] from,Cv.Mat inliers,Cv.Mat fit)
+    {
+        int count=Cv.Cv2.CountNonZero(inliers);
+        if(count<12)return "inliers_insufficient";
+        var points=from.Where((_,i)=>inliers.At<byte>(i)!=0).ToArray();
+        double dx=points.Max(p=>p.X)-points.Min(p=>p.X);
+        double dy=points.Max(p=>p.Y)-points.Min(p=>p.Y);
+        if(dx<90||dy<90)return $"spread_insufficient_{dx:F0}x{dy:F0}";
+        double a=fit.At<double>(0,0),b=fit.At<double>(0,1),c=fit.At<double>(1,0),d=fit.At<double>(1,1);
+        double scale=Math.Sqrt(a*a+c*c);
+        if(!double.IsFinite(scale)||scale is <.35 or >8||a<=0||d<=0||
+            Math.Abs(b)>scale*.04||Math.Abs(c)>scale*.04)return "orientation_unverified";
+        using var warped=new Cv.Mat();
+        Cv.Cv2.WarpAffine(atlas,warped,fit,observed.Size(),
+            Cv.InterpolationFlags.Linear|Cv.InterpolationFlags.WarpInverseMap);
+        var correlation=MaskedTerrainCorrelation(observed,warped,mask);
+        bool edges=WorldNavigator.EdgesAgree(observed,warped,mask);
+        return $"span={dx:F0}x{dy:F0},scale={scale.ToString("F2",CultureInfo.InvariantCulture)},"+
+            $"pixel_corr={correlation?.ToString("F3",CultureInfo.InvariantCulture)??"unknown"},edges={edges.ToString().ToLowerInvariant()}";
     }
 
     internal static WorldMapMatch Locate(WorldMapData data,VisualFrame frame)
@@ -71,7 +111,18 @@ internal static class WorldMapLocalizer
                 {profiles.Add($"r{ratio*100:0}:{pairs.Length}/0");continue;}
                 int count=Cv.Cv2.CountNonZero(inliers);bestInliers=Math.Max(bestInliers,count);
                 profiles.Add($"r{ratio*100:0}:{pairs.Length}/{count}");
-                if(!ConsensusVerified(count,pairs.Length)){rejection="WORLD_MAP_CONSENSUS_NOT_VERIFIED";continue;}
+                if(!ConsensusVerified(count,pairs.Length))
+                {
+                    rejection="WORLD_MAP_CONSENSUS_NOT_VERIFIED";
+                    if(count>=12)
+                    {
+                        string evidence;
+                        try{evidence=NearMissImageEvidence(image,mask,reference.Image,from,inliers,fit);}
+                        catch(Cv.OpenCVException){evidence="pixel_probe_unavailable";}
+                        profiles.Add($"r{ratio*100:0}_near_miss={evidence}");
+                    }
+                    continue;
+                }
                 var spread=from.Where((_,i)=>inliers.At<byte>(i)!=0).ToArray();
                 if(spread.Max(p=>p.X)-spread.Min(p=>p.X)<90||spread.Max(p=>p.Y)-spread.Min(p=>p.Y)<90)
                 {rejection="WORLD_MAP_SPREAD_NOT_VERIFIED";continue;}
