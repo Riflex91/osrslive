@@ -22,6 +22,15 @@ und dem genauen `reason`. Er speichert keine Bildschirmfotos dauerhaft und
 erzeugt **keinerlei Eingabe** ins Spiel. Bei Reset oder geöffneter Weltkarte
 wird der vorherige Bildausschnitt vergessen.
 
+**Nach Auswertung des ersten Live-Logs:** Beim Wechsel der per Hough erkannten
+Minimap von 150 auf 144 Pixel verschiebt sich die Mitte des Bildausschnitts.
+Der ursprünglich lokal gemessene Versatz von rund vier Pixeln direkt nach
+der Zoomroutine war deshalb kein Nachweis für tatsächliche Bewegung. Die
+Messung wird nun am Bildzentrum ausgewertet und in Koordinaten der
+unveränderten Spielansicht zurückgerechnet. Ein Wechsel des Spielfensters
+oder der Bildschirmgeometrie verwirft die alte Referenz vollständig. Die
+neuen Offline-Tests decken gerade diesen scheinbaren Versatz ab.
+
 Die gemessene Verschiebung ist ausschließlich relativ und in Bildschirmpixeln.
 Insbesondere gilt **nicht**: `terrain_dx_px` sei eine Weltkoordinate, eine
 Spielerposition oder ein Navigationsbeleg. Der bestehende Wegplaner akzeptiert

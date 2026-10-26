@@ -25,6 +25,21 @@ internal static class LiveMinimapMotionTests
         Require(stationary.Reason=="VERIFIED_VISUAL_SHIFT_ONLY"&&
             Math.Abs(stationary.ShiftX!.Value)<.6&&Math.Abs(stationary.ShiftY!.Value)<.6,
             "same position yields near-zero terrain displacement");
+        // Hough finds the very same stationary HUD scene at slightly
+        // different sizes/offsets (150px -> 144px). A crop-local affine can
+        // correctly fit +5px while the *actual* viewport motion is zero.
+        using(var scene=Landscape(91,176))
+        using(var cropA=new Cv.Mat(scene,new Cv.Rect(4,4,150,150)))
+        using(var cropB=new Cv.Mat(scene,new Cv.Rect(7,2,144,144)))
+        {
+            var a=Render(cropA,new(830,10,150,150));
+            var b=Render(cropB,new(833,8,144,144));
+            var stable=LiveMinimapMotionVision.Compare(a,b);
+            Require(stable.Reason=="VERIFIED_VISUAL_SHIFT_ONLY"&&
+                stable.ShiftX is double sx&&Math.Abs(sx)<1.2&&
+                stable.ShiftY is double sy&&Math.Abs(sy)<1.2,
+                "changed map circle crop must not produce fabricated player movement: "+stable);
+        }
         using var unrelated=Landscape(2026);
         Require(LiveMinimapMotionVision.Compare(first,Render(unrelated)).ShiftX is null,
             "unrelated scenery must not yield a movement receipt");
@@ -53,16 +68,19 @@ internal static class LiveMinimapMotionTests
         tracker.Reset();
         Require(tracker.Observe(Frame(second,now.AddSeconds(4))) is null,
             "session reset must discard previous image bytes");
-        Console.WriteLine("LIVE MINIMAP MOTION PASS: reciprocal terrain tracking, layout/zoom guards, unrelated-map rejection and no world-position claim");
+        Require(tracker.Observe(new VisualFrame(new IntPtr(1),new(40,0,1000,600),now.AddSeconds(5),
+            Array.Empty<VisualLabel>(),new(Array.Empty<ObservedSlot>(),0,second))) is null,
+            "moved game viewport must reset the motion baseline instead of reporting a shift");
+        Console.WriteLine("LIVE MINIMAP MOTION PASS: reciprocal terrain tracking, crop-origin compensation, layout/zoom guards, unrelated-map rejection and no world-position claim");
     }
 
-    private static Cv.Mat Landscape(int seed)
+    private static Cv.Mat Landscape(int seed,int side=144)
     {
-        var image=new Cv.Mat(144,144,Cv.MatType.CV_8UC1,new Cv.Scalar(74));
+        var image=new Cv.Mat(side,side,Cv.MatType.CV_8UC1,new Cv.Scalar(74));
         var rng=new Random(seed);
         for(int i=0;i<280;i++)
         {
-            var point=new Cv.Point(rng.Next(12,132),rng.Next(12,132));
+            var point=new Cv.Point(rng.Next(12,side-12),rng.Next(12,side-12));
             var tint=new Cv.Scalar(rng.Next(20,220));
             if(i%3==0)
                 Cv.Cv2.Line(image,point,new Cv.Point(point.X+rng.Next(-5,6),point.Y+rng.Next(-5,6)),tint,1);

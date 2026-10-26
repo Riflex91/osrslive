@@ -28,8 +28,10 @@ internal static class LiveMinimapMotionVision
         // Use equal-size *central* crops without scaling. A Hough circle may
         // vary by 1-2 pixels across frames; resizing would invent motion.
         int side=Math.Min(rawA.Width,rawB.Width);
-        using var a=new Cv.Mat(rawA,new Cv.Rect((rawA.Width-side)/2,(rawA.Height-side)/2,side,side));
-        using var b=new Cv.Mat(rawB,new Cv.Rect((rawB.Width-side)/2,(rawB.Height-side)/2,side,side));
+        int cropAx=(rawA.Width-side)/2,cropAy=(rawA.Height-side)/2;
+        int cropBx=(rawB.Width-side)/2,cropBy=(rawB.Height-side)/2;
+        using var a=new Cv.Mat(rawA,new Cv.Rect(cropAx,cropAy,side,side));
+        using var b=new Cv.Mat(rawB,new Cv.Rect(cropBx,cropBy,side,side));
         using var mask=new Cv.Mat(a.Size(),Cv.MatType.CV_8UC1,Cv.Scalar.Black);
         Cv.Cv2.Circle(mask,new(side/2,side/2),side/2-16,Cv.Scalar.White,-1);
         Cv.Cv2.Circle(mask,new(side/2,side/2),14,Cv.Scalar.Black,-1);
@@ -67,7 +69,19 @@ internal static class LiveMinimapMotionVision
         double degrees=Math.Atan2(a10,a00)*180/Math.PI;
         if(scale is <.965 or >1.035||Math.Abs(degrees)>3)
             return new(null,null,count,"LIVE_MINIMAP_ZOOM_OR_ORIENTATION_CHANGED",pairs.Length,scale);
-        double tx=fit.At<double>(0,2),ty=fit.At<double>(1,2);
+        // Convert the fitted *crop-local* translation back to the common game
+        // viewport. Hough may report e.g. a 150px circle and then a 144px
+        // circle around the SAME stationary terrain. Without this correction
+        // its changed crop origin fabricates approximately four pixels of
+        // player movement even though the RANSAC inliers are genuine.
+        // Evaluate displacement at the minimap centre, NOT by treating the
+        // affine intercept as motion: even a tiny RANSAC rotation makes the
+        // intercept depend on the arbitrary origin of the cropped patch.
+        double center=side/2d;
+        double tx=fit.At<double>(0,0)*center+fit.At<double>(0,1)*center+
+            fit.At<double>(0,2)-center+second.MapBounds.Left+cropBx-first.MapBounds.Left-cropAx;
+        double ty=fit.At<double>(1,0)*center+fit.At<double>(1,1)*center+
+            fit.At<double>(1,2)-center+second.MapBounds.Top+cropBy-first.MapBounds.Top-cropAy;
         if(Math.Abs(tx)>side/2d-18||Math.Abs(ty)>side/2d-18)
             return new(null,null,count,"LIVE_MINIMAP_DISPLACEMENT_TOO_LARGE",pairs.Length,scale);
 
@@ -98,8 +112,10 @@ internal sealed class LiveMinimapMotionTracker
 {
     private NavigationPixels? previous;
     private DateTimeOffset previousUtc;
+    private IntPtr previousWindow;
+    private Rectangle previousScreenBounds;
 
-    internal void Reset(){previous=null;previousUtc=default;}
+    internal void Reset(){previous=null;previousUtc=default;previousWindow=IntPtr.Zero;previousScreenBounds=default;}
 
     // No persistent frames, disk writes, world coordinates or mouse input.
     internal LiveMinimapMotion? Observe(VisualFrame frame)
@@ -108,12 +124,17 @@ internal sealed class LiveMinimapMotionTracker
             frame.Pixels.Compass is {North:false})
         {Reset();return null;}
         if(previous is null)
-        {previous=pixels;previousUtc=frame.CapturedUtc;return null;}
+        {Remember(frame,pixels);return null;}
+        if(frame.Window!=previousWindow||frame.ScreenBounds!=previousScreenBounds)
+        {Remember(frame,pixels);return null;}
         if(frame.CapturedUtc<=previousUtc||frame.CapturedUtc-previousUtc<TimeSpan.FromMilliseconds(750))return null;
         if(frame.CapturedUtc-previousUtc>TimeSpan.FromSeconds(12))
-        {previous=pixels;previousUtc=frame.CapturedUtc;return null;}
+        {Remember(frame,pixels);return null;}
         var result=LiveMinimapMotionVision.Compare(previous,pixels);
-        previous=pixels;previousUtc=frame.CapturedUtc;
+        Remember(frame,pixels);
         return result;
     }
+
+    private void Remember(VisualFrame frame,NavigationPixels pixels)
+    {previous=pixels;previousUtc=frame.CapturedUtc;previousWindow=frame.Window;previousScreenBounds=frame.ScreenBounds;}
 }
