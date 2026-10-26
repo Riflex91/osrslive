@@ -251,6 +251,17 @@ internal sealed class GameplayCoordinator:IDisposable
                                 $"candidate_shift_xy_tiles={repeated.CandidateShiftTiles?.ToString()??"unknown"} "+
                                 $"same_unverified_plane={repeated.SameUnverifiedPlane?.ToString()??"unknown"} "+
                                 "no_input=true navigation_authorized=false");
+                            var projection=MinimapTerrainProbe.PreviewCardinalStepsReadOnly(
+                                evidence,firstFrame.CapturedUtc,second,secondFrame.CapturedUtc,
+                                navigator.FreshWorldMapHint(secondFrame.CapturedUtc));
+                            log.Add(Severity.INFO,"NAVIGATION","TERRAIN_PROJECTION_PREFLIGHT",
+                                $"status={projection.Status} cardinal_probe_tiles=8 "+
+                                $"east_dx_px={projection.EastDx?.ToString()??"unknown"} "+
+                                $"east_dy_px={projection.EastDy?.ToString()??"unknown"} "+
+                                $"north_dx_px={projection.NorthDx?.ToString()??"unknown"} "+
+                                $"north_dy_px={projection.NorthDy?.ToString()??"unknown"} "+
+                                $"max_frame_drift_px={projection.MaxFrameDriftPx?.ToString()??"unknown"} "+
+                                "projection_unverified=true no_input=true navigation_authorized=false");
                         }
                     }
                     catch(Cv.OpenCVException ex)

@@ -7,15 +7,19 @@ namespace OSRSLiveDiagnostics;
 // authorization to click or to turn an atlas peak into a world position.
 internal sealed record MinimapTerrainEvidence(string Status,double BestScore=0,
     double RunnerUpScore=0,int Peaks=0,WorldTile? UnverifiedCandidate=null,
-    double BestReferenceScale=0);
+    double BestReferenceScale=0,MinimapTerrainProjection? UnverifiedProjection=null);
 internal sealed record MinimapTerrainRepeatEvidence(string Status,int? CandidateShiftTiles=null,
     bool? SameUnverifiedPlane=null,bool IndependentFrame=false);
+// Deliberately separate from the verified SIFT MapLocation. This object is
+// available only to a read-only diagnostic; it is never returned by Navigator.
+internal sealed record MinimapTerrainProjection(double[] AtlasFromNativePixels,Rectangle MinimapBounds);
+internal sealed record MinimapTerrainProjectionPreview(string Status,int? EastDx=null,
+    int? EastDy=null,int? NorthDx=null,int? NorthDy=null,int? MaxFrameDriftPx=null);
 
 internal static class MinimapTerrainProbe
 {
     // The maximum zoom-out minimap showed about 2 atlas pixels per native
-    // screenshot pixel. Scan a small bounded scale family, never infer zoom
-    // or a usable navigation transform from the scores.
+    // screenshot pixel. Scan a bounded family; all projections are hypothetical.
     internal static readonly double[] ReferenceScales={1.80,1.95,2.10};
 
     // Surface X/Y alone can be compared to a two-frame world-map observation.
@@ -38,6 +42,63 @@ internal static class MinimapTerrainProbe
             Math.Max(Math.Abs(a.X-b.X),Math.Abs(a.Y-b.Y)),a.Plane==b.Plane,true);
     }
 
+    // Preflight a reversible geometric model without granting input authority.
+    // The independent large world map is the anchor; a terrain peak by itself
+    // cannot establish the player's floor, centre, scale or movement receipt.
+    internal static MinimapTerrainProjectionPreview PreviewCardinalStepsReadOnly(
+        MinimapTerrainEvidence first,DateTimeOffset firstUtc,
+        MinimapTerrainEvidence second,DateTimeOffset secondUtc,WorldMapPosition? surfaceHint)
+    {
+        var repeat=CompareReadOnly(first,firstUtc,second,secondUtc);
+        if(!repeat.IndependentFrame||repeat.CandidateShiftTiles is null)
+            return new("PROJECTION_INDEPENDENT_FRAMES_REQUIRED");
+        if(repeat.SameUnverifiedPlane!=true||repeat.CandidateShiftTiles>2)
+            return new("PROJECTION_CANDIDATES_DIVERGED");
+        if(surfaceHint is null||SurfaceHintDistance(first,surfaceHint) is not int distance1||
+            SurfaceHintDistance(second,surfaceHint) is not int distance2||distance1>2||distance2>2)
+            return new("PROJECTION_WORLD_MAP_HINT_NOT_CORROBORATED");
+        if(first.UnverifiedCandidate is not {Plane:0} a||second.UnverifiedCandidate is not {Plane:0} b||
+            first.UnverifiedProjection is not { } p||second.UnverifiedProjection is not { } q)
+            return new("PROJECTION_SURFACE_OR_TRANSFORM_MISSING");
+        if(first.Status!="TERRAIN_COMPARISON_ONLY"||second.Status!="TERRAIN_COMPARISON_ONLY"||
+            first.BestScore<.40||second.BestScore<.40||
+            first.BestScore-first.RunnerUpScore<.15||second.BestScore-second.RunnerUpScore<.15)
+            return new("PROJECTION_PEAK_NOT_DISTINCT");
+        if(Math.Abs(first.BestReferenceScale-second.BestReferenceScale)>.001||
+            p.MinimapBounds!=q.MinimapBounds||p.AtlasFromNativePixels.Length!=6||
+            q.AtlasFromNativePixels.Length!=6)
+            return new("PROJECTION_GEOMETRY_CHANGED");
+
+        var anchor=surfaceHint.SurfaceTile;
+        var steps=new[]{anchor with{X=anchor.X+8},anchor with{X=anchor.X-8},
+            anchor with{Y=anchor.Y+8},anchor with{Y=anchor.Y-8}};
+        // MapLocation's inverse projection is shared with the existing route
+        // code, but zero inliers and a local variable never reach that code.
+        var firstMap=new MapLocation(a,p.AtlasFromNativePixels,p.MinimapBounds,0,firstUtc);
+        var secondMap=new MapLocation(b,q.AtlasFromNativePixels,q.MinimapBounds,0,secondUtc);
+        var firstClicks=steps.Select(firstMap.ClickFor).ToArray();
+        var secondClicks=steps.Select(secondMap.ClickFor).ToArray();
+        if(firstClicks.Any(c=>c is null)||secondClicks.Any(c=>c is null))
+            return new("PROJECTION_OUTSIDE_SAFE_MINIMAP_RADIUS");
+        var center=new Point(p.MinimapBounds.Left+p.MinimapBounds.Width/2,
+            p.MinimapBounds.Top+p.MinimapBounds.Height/2);
+        int eastDx=secondClicks[0]!.Value.X-center.X,eastDy=secondClicks[0]!.Value.Y-center.Y;
+        int northDx=secondClicks[2]!.Value.X-center.X,northDy=secondClicks[2]!.Value.Y-center.Y;
+        int maxDrift=Enumerable.Range(0,steps.Length).Max(i=>Math.Max(
+            Math.Abs(firstClicks[i]!.Value.X-secondClicks[i]!.Value.X),
+            Math.Abs(firstClicks[i]!.Value.Y-secondClicks[i]!.Value.Y)));
+        // Both signs and the approximate cardinal axes must agree with the
+        // separately pixel-verified north-facing compass.
+        bool cardinal=eastDx is >=8 and <=30&&Math.Abs(eastDy)<=7&&
+            northDy is >=-30 and <=-8&&Math.Abs(northDx)<=7&&
+            secondClicks[1]!.Value.X<center.X-8&&
+            secondClicks[3]!.Value.Y>center.Y+8;
+        string status=!cardinal?"PROJECTION_AXES_NOT_NORTH_ALIGNED":
+            maxDrift>3?"PROJECTION_FRAME_DRIFT_DIAGNOSTIC_ONLY":
+            "PROJECTION_STABLE_DIAGNOSTIC_ONLY";
+        return new(status,eastDx,eastDy,northDx,northDy,maxDrift);
+    }
+
     internal static MinimapTerrainEvidence Examine(NavigationPixels? pixels,
         IReadOnlyList<WorldMapData.ReferenceMap> references)
     {
@@ -56,7 +117,7 @@ internal static class MinimapTerrainProbe
         Cv.Cv2.MeanStdDev(mini,out _,out var variation,mask);
         if(variation.Val0<7)return new("MINIMAP_TERRAIN_TOO_UNIFORM");
 
-        var peaks=new List<(double Score,WorldTile Tile,double Scale)>();
+        var peaks=new List<(double Score,WorldTile Tile,double Scale,MinimapTerrainProjection Projection)>();
         foreach(var reference in references)
         foreach(double scale in ReferenceScales)
         {
@@ -87,7 +148,21 @@ internal static class MinimapTerrainProbe
                 double atlasY=(at.Y+75.5)*reference.Image.Height/resized.Height-.5+reference.OriginY;
                 var tile=new WorldTile(WorldMapData.MinX+(int)Math.Floor(atlasX/4),
                     WorldMapData.MaxY-1-(int)Math.Floor(atlasY/4),reference.Plane);
-                if(referenceVariation.Val0>=7&&WorldMapData.Domain(tile))peaks.Add((best,tile,scale));
+                if(referenceVariation.Val0>=7&&WorldMapData.Domain(tile))
+                {
+                    // OpenCV resize uses pixel-centre coordinates. Convert
+                    // from the *native* HUD crop (which can be 124..170px),
+                    // not from the normalized 150px comparison thumbnail.
+                    double factorX=reference.Image.Width/(double)resized.Width;
+                    double factorY=reference.Image.Height/(double)resized.Height;
+                    double nativeToMini=150d/native.Width;
+                    var transform=new[]{factorX*nativeToMini,0d,
+                        reference.OriginX+(at.X+nativeToMini*.5)*factorX-.5,
+                        0d,factorY*nativeToMini,
+                        reference.OriginY+(at.Y+nativeToMini*.5)*factorY-.5};
+                    peaks.Add((best,tile,scale,
+                        new MinimapTerrainProjection(transform,pixels.MapBounds)));
+                }
                 Cv.Cv2.Circle(scores,at,24,new Cv.Scalar(-1),-1);
             }
         }
@@ -99,6 +174,6 @@ internal static class MinimapTerrainProbe
         // Even a visually distinctive leader remains *unverified* here.
         // SIFT's independent path and its existing movement gates are untouched.
         return new("TERRAIN_COMPARISON_ONLY",leader.Score,second,ranked.Length,
-            leader.Tile,leader.Scale);
+            leader.Tile,leader.Scale,leader.Projection);
     }
 }
