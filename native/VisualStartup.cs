@@ -313,6 +313,8 @@ internal sealed class VisualStartup:IDisposable
         var visible=GameScreenReader.Read(observed);
         summaryIdentity.Observe(visible,observed.Labels);
         Game.Observe(summaryIdentity.Apply(visible),DateTimeOffset.UtcNow);
+        if(Game.LastObservation?.Stage==VisibleGameStage.InGame)Gameplay.ObserveLiveMinimapMotion(observed);
+        else Gameplay.ClearLiveMinimapMotion();
         DiagnoseSkillOcr(observed);
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
         else if(lastVerifiedHud!=default&&DateTimeOffset.UtcNow-lastVerifiedHud>TimeSpan.FromSeconds(3))
