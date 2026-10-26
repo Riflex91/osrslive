@@ -15,7 +15,7 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
     private readonly Func<CancellationToken,Task<VisualFrame?>> capture;
     private readonly Func<VisualFrame,GameInput,CancellationToken,Task<bool>> dispatch;
     private readonly Action<string> report;
-    private bool inputAttempted;
+    private bool inputAttempted,originReanchored;
     public VisualFrame Current {get;private set;}
     internal Action<VisualFrame>? Guard;
     internal Func<VisualFrame,GameInput,bool>? InputGuard;
@@ -53,7 +53,7 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
             }
             if(next.ScreenBounds!=Current.ScreenBounds)
             {
-                if(AllowPreInputOriginReanchor&&!inputAttempted&&
+                if(AllowPreInputOriginReanchor&&!inputAttempted&&!originReanchored&&
                     next.ScreenBounds.Size==Current.ScreenBounds.Size&&
                     next.ScreenBounds.Size==DockedWindowLayout.GameSize&&
                     next.CapturedUtc>Current.CapturedUtc&&
@@ -71,6 +71,7 @@ internal sealed class WindowVisualGameDriver:IVisualGameDriver
                         DateTimeOffset.UtcNow-repeated.CapturedUtc<=TimeSpan.FromSeconds(2)&&
                         GameScreenReader.Read(repeated).Stage==VisibleGameStage.InGame)
                     {
+                        originReanchored=true;
                         Current=repeated;
                         Guard?.Invoke(repeated);
                         report("FRAME_REANCHORED reason=STABLE_PRE_INPUT_ORIGIN_SHIFT "+

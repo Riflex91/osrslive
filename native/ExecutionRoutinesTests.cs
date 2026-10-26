@@ -152,7 +152,7 @@ internal static class ExecutionRoutinesTests
         {
             preInputMoveCaptures++;
             return Task.FromResult<VisualFrame?>(initialHudFrame with{
-                ScreenBounds=new(12,8,1000,600),CapturedUtc=DateTimeOffset.UtcNow});
+                ScreenBounds=new(preInputMoveCaptures<=2?12:13,8,1000,600),CapturedUtc=DateTimeOffset.UtcNow});
         },(_,input,token)=>{
             preInputMoveDispatches++;return Task.FromResult(true);
         },preInputMoveReports.Add){AllowPreInputOriginReanchor=true};
@@ -162,6 +162,13 @@ internal static class ExecutionRoutinesTests
             anchored.CapturedUtc>initialHudFrame.CapturedUtc&&
             preInputMoveReports.Single().Contains("independent_fresh_ingame_frames=2"),
             "before any attempted input a stable move may reanchor from two independent InGame frames without clicks");
+        bool secondPreInputMoveBlocked=false;
+        try{await preInputMove.ObserveAsync(CancellationToken.None);}
+        catch(RoutineBlockedException ex)
+        {secondPreInputMoveBlocked=ex.Message=="FRAME_WINDOW_GEOMETRY_OR_FRESHNESS_CHANGED";}
+        Require(secondPreInputMoveBlocked&&preInputMoveCaptures==3&&preInputMoveDispatches==0&&
+            ReferenceEquals(preInputMove.Current,anchored),
+            "a second origin shift still blocks, even before any attempted input");
         int unstableMoveCaptures=0;
         var unstableMove=new WindowVisualGameDriver(initialHudFrame,_=>
         {
