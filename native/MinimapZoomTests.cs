@@ -9,6 +9,8 @@ internal static class MinimapZoomTests
     {
         static void Require(bool condition,string message)
         {if(!condition)throw new Exception("Minimap zoom: "+message);}
+        Require(!MinimapZoomRoutine.NavigationZoomIn,
+            "live navigation evaluates the broader maximum zoom-out view while both directions remain testable");
         var corners=Enumerable.Range(0,10).Select(i=>new Cv.Point2f(20+i%5*20,30+i/5*70)).ToArray();
         var scaled=corners.Select(p=>new Cv.Point2f(p.X*.85f+12,p.Y*.85f+9)).ToArray();
         var ten=MinimapZoomVision.MeasureScale(corners,scaled);

@@ -47,7 +47,18 @@ internal sealed class GameplayCoordinator:IDisposable
         return await new WorldMapRoutine(driver,navigator,stopped,
             message=>log.Add(Severity.INFO,"WORLD_MAP","OBSERVATION",message)).Run(ct);
     }
-    internal bool NativePositionVerified(VisualFrame frame)=>navigator.LocateDetailed(frame).Location is not null;
+    internal static string LocalizationEvidence(string phase,MapLocalization result)=>
+        $"phase={phase} status={result.Status} features={result.Features} "+
+        $"candidates={result.Candidates} inliers={result.BestInliers} "+
+        $"best_ratio_matches={result.BestRatioMatches} no_input=true";
+    private MapLocalization ObservePreflightLocation(VisualFrame frame,string phase)
+    {
+        var result=navigator.LocateDetailed(frame);
+        log.Add(Severity.INFO,"NAVIGATION","LOCALIZATION_PREFLIGHT",LocalizationEvidence(phase,result));
+        return result;
+    }
+    internal bool NativePositionVerified(VisualFrame frame)=>
+        ObservePreflightLocation(frame,"before_zoom").Location is not null;
     // A new activity that first needs travel must not open 17 inventory item
     // context menus merely to discover, again, that its starting tile is
     // unknown. Pending trade/combat journals are reconciled before this gate.
@@ -183,7 +194,7 @@ internal sealed class GameplayCoordinator:IDisposable
                 result=await new CombatRoutine(game,combatJournal,atlas,maxHp,Set).Resume(budget.Token);
             }
             else if(uncertain){Set("UNCERTAIN_RESULT_REQUIRES_REVIEW");return true;}
-            else if(NewActivityPositionBlock(atlas.LocateDetailed(driver.Current)) is string positionBlock)
+            else if(NewActivityPositionBlock(ObservePreflightLocation(driver.Current,"after_zoom")) is string positionBlock)
             {
                 // Read-only preflight: pause new work before expensive inventory
                 // scans and right-clicks. Existing pending journals above are

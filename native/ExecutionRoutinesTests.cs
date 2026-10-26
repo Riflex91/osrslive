@@ -38,6 +38,12 @@ internal static class ExecutionRoutinesTests
         Require(GameplayCoordinator.NewActivityPositionBlock(new(null,"NO_VERIFIED_MAP_MATCH"))==
             "AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT",
             "unknown world position blocks NEW activity before inventory context-menu input");
+        var preflight=GameplayCoordinator.LocalizationEvidence("before_zoom",
+            new(null,"NO_VERIFIED_MAP_MATCH",137,0,0,1));
+        Require(preflight.Contains("phase=before_zoom status=NO_VERIFIED_MAP_MATCH")&&
+            preflight.Contains("features=137 candidates=0 inliers=0 best_ratio_matches=1")&&
+            preflight.EndsWith("no_input=true",StringComparison.Ordinal),
+            "passive zoom comparison reports match counts without inventing a world tile or input");
         var position=new MapLocation(new(3153,3202),new[]{1d,0d,900d,0d,1d,1200d},
             new(804,12,144,144),20,now);
         Require(GameplayCoordinator.NewActivityPositionBlock(new(position,"VERIFIED")) is null,

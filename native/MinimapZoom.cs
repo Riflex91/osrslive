@@ -119,10 +119,14 @@ internal static class MinimapZoomVision
 // measurable effect, try the actual osclient.exe game-window HWND. Never
 // assume that successful PostMessage means the game consumed the input.
 // Require two final unchanged steps toward the requested limit after a
-// verified scale change. Live navigation requests the maximum detail/zoom.
+// verified scale change. Live navigation tests maximum zoom OUT: the broader
+// terrain context and closer scale to the 4-pixels-per-tile reference atlas
+// may improve independent world-position matches. This is a test preference,
+// NOT a claim that either zoom endpoint has verified localisation in live play.
 internal sealed class MinimapZoomRoutine
 {
     internal const int MaxSteps=24;
+    internal const bool NavigationZoomIn=false;
     private const double Tolerance=.018;
     private readonly IVisualGameDriver driver;
     private readonly Func<bool> stopped;
