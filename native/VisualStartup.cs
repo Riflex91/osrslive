@@ -224,6 +224,12 @@ internal sealed class VisualStartup:IDisposable
     private bool worldMapReading;
     private string lastWorldMapDiagnostic="";
     private void ResetNavigationCalibration(){minimapZoomResult=null;worldMapResult=null;compassResult=null;}
+    private void ReportGuardedInput(string activity,string message)
+    {
+        if(message.StartsWith("FRAME_",StringComparison.Ordinal))
+            log.Add(Severity.WARN,"VISUAL_FRAME","GUARD",$"activity={activity} {message}");
+        else SetState(activity+"_INPUT_"+message.ToUpperInvariant());
+    }
     private string lastRecoveryState="";
     private DateTimeOffset lastVerifiedHud;
     internal string CaptureState=>backgroundCapture.State;
@@ -313,7 +319,12 @@ internal sealed class VisualStartup:IDisposable
         var visible=GameScreenReader.Read(observed);
         summaryIdentity.Observe(visible,observed.Labels);
         Game.Observe(summaryIdentity.Apply(visible),DateTimeOffset.UtcNow);
-        if(Game.LastObservation?.Stage==VisibleGameStage.InGame)Gameplay.ObserveLiveMinimapMotion(observed);
+        if(Game.LastObservation?.Stage==VisibleGameStage.InGame)
+            Gameplay.ObserveLiveMinimapMotion(observed,
+                worldMapResult is {Status:RoutineStatus.Completed,Reason:"WORLD_MAP_SURFACE_POSITION_CONFIRMED"}&&
+                compassResult?.Status==RoutineStatus.Completed&&
+                minimapZoomResult is {Status:RoutineStatus.Completed,Reason:"MINIMAP_FULLY_ZOOMED_IN_VISUALLY_CONFIRMED"}&&
+                !Paused&&!ObserveOnly);
         else Gameplay.ClearLiveMinimapMotion();
         DiagnoseSkillOcr(observed);
         if(Game.LastObservation?.Stage==VisibleGameStage.InGame)lastVerifiedHud=observed.CapturedUtc;
@@ -402,7 +413,7 @@ internal sealed class VisualStartup:IDisposable
                         return next is null?null:ConnectivityWatch.Signal(next,
                             await connectivity.Lost(observedSelectedWorld??preferredWorld,true,token));
                     },(f,input,token)=>Dispatch(f,new("WORLD_MAP_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
-                        action=>SetState("WORLD_MAP_INPUT_"+action.ToUpperInvariant()));
+                        action=>ReportGuardedInput("WORLD_MAP",action));
                     RoutineResult result;
                     try{result=await Gameplay.LocateWithWorldMap(mapDriver,()=>Paused||ObserveOnly,mapBudget.Token);}
                     catch(OperationCanceledException) when(!ct.IsCancellationRequested)
@@ -435,7 +446,7 @@ internal sealed class VisualStartup:IDisposable
                         var next=await Capture(target,owner,token);
                         return next is null?null:ConnectivityWatch.Signal(next,lost);
                     },(f,input,token)=>Dispatch(f,new("MINIMAP_ZOOM_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
-                        action=>SetState("MINIMAP_ZOOM_INPUT_"+action.ToUpperInvariant()));
+                        action=>ReportGuardedInput("MINIMAP_ZOOM",action));
                     RoutineResult result;
                     try{result=await new MinimapZoomRoutine(zoomDriver,()=>Paused||ObserveOnly,
                         diagnostic:message=>log.Add(Severity.INFO,"MINIMAP_ZOOM","STEP",message),zoomIn:true).Run(zoomBudget.Token);}
@@ -582,7 +593,7 @@ internal sealed class VisualStartup:IDisposable
             if(Paused||ObserveOnly)throw new OperationCanceledException(token);
             return await Capture(target,owner,token);
         },(f,input,token)=>Dispatch(f,new("COMPASS_"+input.Kind,input.Bounds,RuntimeInput:input),owner,token),
-            action=>SetState("COMPASS_INPUT_"+action.ToUpperInvariant()));
+            action=>ReportGuardedInput("COMPASS",action));
         try{return await new CompassCalibrationRoutine(driver,()=>Paused||ObserveOnly,
             message=>log.Add(Severity.INFO,"COMPASS","OBSERVATION",message)).Run(budget.Token);}
         catch(OperationCanceledException) when(!ct.IsCancellationRequested)

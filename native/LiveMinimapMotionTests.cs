@@ -40,6 +40,19 @@ internal static class LiveMinimapMotionTests
                 stable.ShiftY is double sy&&Math.Abs(sy)<1.2,
                 "changed map circle crop must not produce fabricated player movement: "+stable);
         }
+        // Independent large translated windows approximate the user's real
+        // manual route (+49,+42 terrain pixels). The 144px circle can retain
+        // enough distinctive overlap for SIFT plus its separate edge gate.
+        using(var panorama=Landscape(177,300,strokes:1200))
+        using(var beforeWalk=new Cv.Mat(panorama,new Cv.Rect(100,100,144,144)))
+        using(var afterWalk=new Cv.Mat(panorama,new Cv.Rect(51,58,144,144)))
+        {
+            var walked=LiveMinimapMotionVision.Compare(Render(beforeWalk),Render(afterWalk));
+            Require(walked.Reason=="VERIFIED_VISUAL_SHIFT_ONLY"&&
+                walked.ShiftX is double wx&&Math.Abs(wx-49)<2&&
+                walked.ShiftY is double wy&&Math.Abs(wy-42)<2,
+                "large but overlapping manual movement retains its observed direction: "+walked);
+        }
         using var unrelated=Landscape(2026);
         Require(LiveMinimapMotionVision.Compare(first,Render(unrelated)).ShiftX is null,
             "unrelated scenery must not yield a movement receipt");
@@ -71,14 +84,41 @@ internal static class LiveMinimapMotionTests
         Require(tracker.Observe(new VisualFrame(new IntPtr(1),new(40,0,1000,600),now.AddSeconds(5),
             Array.Empty<VisualLabel>(),new(Array.Empty<ObservedSlot>(),0,second))) is null,
             "moved game viewport must reset the motion baseline instead of reporting a shift");
-        Console.WriteLine("LIVE MINIMAP MOTION PASS: reciprocal terrain tracking, crop-origin compensation, layout/zoom guards, unrelated-map rejection and no world-position claim");
+        // The 11.25 px/tile value comes from one real manually walked route.
+        // It may annotate *relative* distance only after full world-map,
+        // compass and zoom confirmation. It must never yield WorldTile.
+        tracker.Reset();
+        Require(tracker.Observe(Frame(first,now.AddSeconds(10)),provisionalScaleConfirmed:true) is null&&
+            tracker.ProvisionalDisplacementTiles is null,
+            "a known screenshot only establishes a baseline, not movement");
+        Require(tracker.Observe(Frame(second,now.AddSeconds(11)),provisionalScaleConfirmed:true)?.ShiftX is double&&
+            tracker.ProvisionalDisplacementTiles is {} estimate&&
+            Math.Abs(estimate.East-7d/LiveMinimapMotionTracker.ProvisionalPixelsPerTile)<.15&&
+            Math.Abs(estimate.North-9d/LiveMinimapMotionTracker.ProvisionalPixelsPerTile)<.15&&
+            tracker.DisplacementSamples==1,
+            "observed terrain displacement becomes explicitly provisional north/east distance");
+        Require(tracker.Observe(Frame(second,now.AddSeconds(12)),provisionalScaleConfirmed:false) is null&&
+            tracker.ProvisionalDisplacementTiles is null,
+            "lost zoom/compass/world-map permission revokes even the provisional distance");
+        tracker.Reset();
+        tracker.Observe(Frame(first,now.AddSeconds(20)),provisionalScaleConfirmed:true);
+        tracker.Observe(Frame(second,now.AddSeconds(21)),provisionalScaleConfirmed:true);
+        Require(tracker.ProvisionalDisplacementTiles is not null&&
+            tracker.Observe(Frame(second,now.AddSeconds(22),panel:true),provisionalScaleConfirmed:true) is null&&
+            tracker.ProvisionalDisplacementTiles is null,
+            "opening a world map revokes the relative movement chain");
+        tracker.Observe(Frame(first,now.AddSeconds(30)),provisionalScaleConfirmed:true);
+        Require(tracker.Observe(Frame(second,now.AddSeconds(44)),provisionalScaleConfirmed:true) is null&&
+            tracker.ProvisionalDisplacementTiles is null,
+            "a capture gap longer than twelve seconds cannot silently bridge movement");
+        Console.WriteLine("LIVE MINIMAP MOTION PASS: reciprocal terrain tracking, crop-origin compensation, layout/zoom guards, provisional read-only distance resets and no world-position claim");
     }
 
-    private static Cv.Mat Landscape(int seed,int side=144)
+    private static Cv.Mat Landscape(int seed,int side=144,int strokes=280)
     {
         var image=new Cv.Mat(side,side,Cv.MatType.CV_8UC1,new Cv.Scalar(74));
         var rng=new Random(seed);
-        for(int i=0;i<280;i++)
+        for(int i=0;i<strokes;i++)
         {
             var point=new Cv.Point(rng.Next(12,side-12),rng.Next(12,side-12));
             var tint=new Cv.Scalar(rng.Next(20,220));
