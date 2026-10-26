@@ -1,6 +1,8 @@
-# OSRS Play 1.7.5 – Korrigierte Live-Minimap-Bewegungsdiagnose
+# OSRS Play 1.7.6 – Navigationsblock ohne wiederholte Inventareingaben
 
-**Release-Stand:** 1.7.5 verbessert den passiven Live-Minimap-Abgleich aus 1.7.4. Ein im ersten echten Protokoll beobachteter scheinbarer Versatz von etwa vier Pixeln nach der Zoomroutine entstand wahrscheinlich durch unterschiedlich erkannte Minimap-Ausschnitte. Die Verschiebung wird nun auf die feste Spielansicht bezogen und bei geändertem Fenster verworfen. Weiterhin entstehen daraus **keine** ungeprüften Weltkoordinaten oder Navigationsklicks. Die höhere Version ermöglicht das automatische Update bestehender 1.7.4-Installationen. [Umsetzung und Grenzen](docs/LIVE-MINIMAP-MOTION-2026-10-26.md).
+**Release-Stand:** 1.7.6 ergänzt eine passive Navigationsprüfung **vor** einer neuen Inventar-/Trainingsroutine. Der 1.7.5-Live-Test zeigte bei unverändert ungeklärter Position alle rund 30 Sekunden erneute Inventarmenü-Klicks; neue Aktivitäten werden nun ohne diese Eingaben blockiert und nach 60 Sekunden wieder passiv geprüft. Bereits offene Transaktionsjournale werden weiterhin separat vor diesem Gate bearbeitet. Ohne verifizierte Weltposition bleibt jede neue automatische Reise gesperrt. Die höhere Versionsnummer ermöglicht das Update von 1.7.5. [Hintergrund](docs/LIVE-MINIMAP-MOTION-2026-10-26.md).
+
+**Vorheriger Stand (1.7.5):** Der passive Minimap-Bewegungsabgleich korrigiert unterschiedliche Ausschnittgrenzen. Im anschließenden Live-Log betrug die scheinbare Bewegung nach der Zoomroutine nur noch etwa 0,03 Pixel statt zuvor rund vier Pixel.
 
 **Vorheriger Stand (1.7.3/1.7.4):** Weltkarten- und Kompassprüfung, eigene Minimap-Referenzen, maximaler Zoom und erste Live-Bewegungsdiagnose. Diese Maßnahmen allein konnten die Weltlokalisierung im Live-Spiel noch nicht herstellen.
 

@@ -35,6 +35,13 @@ internal static class ExecutionRoutinesTests
         var skills=new[]{new PublicOsrsSkill("Woodcutting",1,0,0)};
         Require(!GameplayCoordinator.Supplied(cut,Stock(now,("rune axe",1)),skills),"owned high-tier tool cannot bypass skill");
         Require(GameplayCoordinator.Supplied(cut,Stock(now,("bronze axe",1)),skills),"starter tool permits baseline training");
+        Require(GameplayCoordinator.NewActivityPositionBlock(new(null,"NO_VERIFIED_MAP_MATCH"))==
+            "AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT",
+            "unknown world position blocks NEW activity before inventory context-menu input");
+        var position=new MapLocation(new(3153,3202),new[]{1d,0d,900d,0d,1d,1200d},
+            new(804,12,144,144),20,now);
+        Require(GameplayCoordinator.NewActivityPositionBlock(new(position,"VERIFIED")) is null,
+            "verified map location permits normal downstream independent travel checks");
         VisualLabel L(string text,int x,int y,int width=180)=>new(text,new(x,y,width,14));
         var menu=new[]{L("Choose Option",30,30),L("Use Logs",30,50),L("Drop Logs",30,66),L("Examine Logs",30,82),L("Cancel",30,98),
             L("Deposit-All Logs",400,50)};

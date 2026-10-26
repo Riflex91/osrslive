@@ -45,6 +45,11 @@ internal sealed class GameplayCoordinator:IDisposable
             message=>log.Add(Severity.INFO,"WORLD_MAP","OBSERVATION",message)).Run(ct);
     }
     internal bool NativePositionVerified(VisualFrame frame)=>navigator.LocateDetailed(frame).Location is not null;
+    // A new activity that first needs travel must not open 17 inventory item
+    // context menus merely to discover, again, that its starting tile is
+    // unknown. Pending trade/combat journals are reconciled before this gate.
+    internal static string? NewActivityPositionBlock(MapLocalization observed)=>
+        observed.Location is null?"AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT":null;
     internal void ObserveLiveMinimapMotion(VisualFrame frame)
     {
         var shift=liveMinimap.Observe(frame);
@@ -143,6 +148,13 @@ internal sealed class GameplayCoordinator:IDisposable
                 result=await new CombatRoutine(game,combatJournal,atlas,maxHp,Set).Resume(budget.Token);
             }
             else if(uncertain){Set("UNCERTAIN_RESULT_REQUIRES_REVIEW");return true;}
+            else if(NewActivityPositionBlock(atlas.LocateDetailed(driver.Current)) is string positionBlock)
+            {
+                // Read-only preflight: pause new work before expensive inventory
+                // scans and right-clicks. Existing pending journals above are
+                // deliberately not treated as replaceable new activities.
+                result=new(RoutineStatus.Blocked,positionBlock);
+            }
             else if((pendingSupply=ReadSupply(hash)) is SupplyIntent supply&&
                 activities.Available(supply.ActivityId??"SUPPLY_"+supply.Order.Id,DateTimeOffset.UtcNow))
             {
@@ -211,7 +223,8 @@ internal sealed class GameplayCoordinator:IDisposable
             uncertain=result.Status==RoutineStatus.UnknownOutcome;
             if(reconcilingJournal)activities.ReconcileJournal(result);
             if(activityId is not null)RecordActivity(activityId,result);
-            retrySeconds=result.Status==RoutineStatus.Progress?1:result.Status==RoutineStatus.Completed?2:10;
+            retrySeconds=result.Reason=="AUTOMATIC_WORLD_POSITION_NOT_CONFIDENT"?60:
+                result.Status==RoutineStatus.Progress?1:result.Status==RoutineStatus.Completed?2:10;
             Set(result.Status.ToString().ToUpperInvariant()+"_"+result.Reason);
             if(result.Status==RoutineStatus.Blocked&&result.Reason=="HEALING_REQUIRES_READABLE_LIVING_HEALTH")
                 log.Add(Severity.WARN,"GAMEPLAY","HEALTH_EVIDENCE",
