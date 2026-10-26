@@ -13,6 +13,7 @@ internal sealed class GameplayCoordinator:IDisposable
     private readonly Diagnostics log;
     private readonly WikiPriceService prices=new();
     private readonly WorldNavigator navigator=new();
+    private readonly LiveMinimapMotionTracker liveMinimap=new();
     private readonly ActivityScheduler activities=new();
     private readonly string directory;
     private readonly ItemKnowledgeStore itemKnowledge;
@@ -20,6 +21,7 @@ internal sealed class GameplayCoordinator:IDisposable
     private DateTimeOffset leaseUntil,nextAttempt;
     private bool uncertain;
     private DateTimeOffset nextInspection;
+    private DateTimeOffset nextLiveMotionLog;
     internal string State {get;private set;}="WAITING_FOR_SKILLS";
     internal bool HasSubject=>subject is not null&&DateTimeOffset.UtcNow<leaseUntil;
     internal GameplayCoordinator(Diagnostics log)
@@ -28,7 +30,7 @@ internal sealed class GameplayCoordinator:IDisposable
         itemKnowledge=new(Path.Combine(directory,"items.sqlite"),message=>log.Add(
             message.StartsWith("ITEM_REFERENCE_READY",StringComparison.Ordinal)?Severity.INFO:Severity.WARN,"ITEM_DATABASE","STATUS",message));
     }
-    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();navigator.ClearWorldMapHint();Set("WAITING_FOR_SKILLS");}
+    internal void Reset(){subject=null;uncertain=false;leaseUntil=default;nextAttempt=default;activities.Reset();itemKnowledge.ResetSession();navigator.ClearWorldMapHint();liveMinimap.Reset();Set("WAITING_FOR_SKILLS");}
     internal void ConfirmSubject(VisibleGameObservation confirmed)
     {
         if(subject?.Character!=confirmed.Character)Reset();
@@ -43,6 +45,18 @@ internal sealed class GameplayCoordinator:IDisposable
             message=>log.Add(Severity.INFO,"WORLD_MAP","OBSERVATION",message)).Run(ct);
     }
     internal bool NativePositionVerified(VisualFrame frame)=>navigator.LocateDetailed(frame).Location is not null;
+    internal void ObserveLiveMinimapMotion(VisualFrame frame)
+    {
+        var shift=liveMinimap.Observe(frame);
+        if(shift is null||DateTimeOffset.UtcNow<nextLiveMotionLog)return;
+        nextLiveMotionLog=DateTimeOffset.UtcNow.AddSeconds(5);
+        log.Add(Severity.INFO,"NAVIGATION","LIVE_MINIMAP_MOTION",
+            $"reason={shift.Reason} pairs={shift.Correspondences} inliers={shift.Inliers} "+
+            $"terrain_dx_px={shift.ShiftX?.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)??"unknown"} "+
+            $"terrain_dy_px={shift.ShiftY?.ToString("F2",System.Globalization.CultureInfo.InvariantCulture)??"unknown"} "+
+            "world_tile_unverified=true no_input=true");
+    }
+    internal void ClearLiveMinimapMotion()=>liveMinimap.Reset();
     private void Set(string state)
     {
         if(State==state)return;State=state;

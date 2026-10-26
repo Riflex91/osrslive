@@ -832,6 +832,7 @@ internal static class SelfTest
             ExecutionRoutinesTests.Run();
             CombatNavigationTests.Run();
             MinimapZoomTests.Run();
+            LiveMinimapMotionTests.Run();
             WorldFooterRecoveryTests.Run();
             WorldMapTests.Run();
             CompassTests.Run();
