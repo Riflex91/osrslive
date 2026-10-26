@@ -31,6 +31,13 @@ internal static class WorldMapTests
     }
     private static async Task RunAsync()
     {
+        Require(WorldMapLocalizer.ConsensusVerified(22,32)&&WorldMapLocalizer.ConsensusVerified(26,37),
+            "previous live world-map consensus cases retain their acceptance");
+        Require(WorldMapLocalizer.ConsensusVerified(31,49)&&WorldMapLocalizer.ConsensusVerified(30,50),
+            "strong live map evidence narrowly below 65 percent can proceed to independent visual checks");
+        Require(!WorldMapLocalizer.ConsensusVerified(29,49)&&!WorldMapLocalizer.ConsensusVerified(31,54)&&
+            !WorldMapLocalizer.ConsensusVerified(11,12)&&!WorldMapLocalizer.ConsensusVerified(30,29),
+            "weak, insufficient or impossible geometric evidence still fails closed");
         using(var close=new Bitmap(1000,600))
         {
             using(var g=Graphics.FromImage(close))using(var pen=new Pen(Color.Orange,8))
