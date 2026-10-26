@@ -4,6 +4,14 @@ namespace OSRSLiveDiagnostics;
 
 internal static class WorldMapLocalizer
 {
+    // A large, geometrically consistent cluster can contain a few additional
+    // unmatched UI labels. Only high-count matches may use the narrow 60–65%
+    // margin; spread, orientation, image-edge agreement, uniqueness and two
+    // independent map observations still have to pass separately.
+    internal static bool ConsensusVerified(int inliers,int pairs)=>
+        pairs>=12&&inliers>=12&&inliers<=pairs&&
+        (inliers>=pairs*.65||(inliers>=30&&inliers>=pairs*.60));
+
     internal static WorldMapMatch Locate(WorldMapData data,VisualFrame frame)
     {
         if(frame.Pixels?.WorldMap is not WorldMapPixels pixels)return new(null,"WORLD_MAP_OR_MARKER_NOT_VERIFIED");
@@ -43,7 +51,7 @@ internal static class WorldMapLocalizer
             using var fit=Cv.Cv2.EstimateAffinePartial2D(input,output,inliers,Cv.RobustEstimationAlgorithms.RANSAC,2,3000,.995,20);
             if(fit is null||fit.Empty())continue;
             int count=Cv.Cv2.CountNonZero(inliers);bestInliers=Math.Max(bestInliers,count);
-            if(count<12||count<pairs.Length*.65){rejection="WORLD_MAP_CONSENSUS_NOT_VERIFIED";continue;}
+            if(!ConsensusVerified(count,pairs)){rejection="WORLD_MAP_CONSENSUS_NOT_VERIFIED";continue;}
             var spread=from.Where((_,i)=>inliers.At<byte>(i)!=0).ToArray();
             if(spread.Max(p=>p.X)-spread.Min(p=>p.X)<90||spread.Max(p=>p.Y)-spread.Min(p=>p.Y)<90)
             {rejection="WORLD_MAP_SPREAD_NOT_VERIFIED";continue;}
