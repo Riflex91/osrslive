@@ -84,6 +84,7 @@ internal static class RuneLitePixelGridReader
 
         int visited=0,firstCommaShapes=0,matchingCommas=0,emptySeparators=0;
         int commaCandidates=0,idCandidates=0,matched=0;
+        int unknownTileDigits=0,uniqueRepeatedDigitLayouts=0,unknownSingletonRejects=0;
         var accepted=new HashSet<RuneLiteGridEvidence>();
         for(int oy=0;oy<=height-(2*RowPitch+Height);oy++)
         for(int ox=0;ox<=width-(16*Pitch+Pitch);ox++)
@@ -122,11 +123,29 @@ internal static class RuneLitePixelGridReader
             if(!idsValid)continue;
             idCandidates++;
 
-            var numbers=new char[TileDigits.Length];
+            string expectedTile=expected.X.ToString("D4")+expected.Y.ToString("D4");
+            // IDs do not always contain every tile digit. Permit an otherwise
+            // unseen X/Y glyph ONLY when it appears twice on the same tile row
+            // with matching independent pixel shapes and is visibly distinct
+            // from all ID-trained glyphs. A singleton cannot be identified
+            // from two OCR guesses alone and must remain blocked.
+            var unknown=new Dictionary<char,(Glyph Raster,int Repetitions)>();
             bool digitsValid=true;
-            for(int i=0;i<TileDigits.Length;i++)
+            for(int i=0;i<8;i++)
             {
                 var sample=Cell(ox,oy,0,TileDigits[i]);
+                char expectedDigit=expectedTile[i];
+                if(!reference.ContainsKey(expectedDigit))
+                {
+                    if(sample.Ink is <5 or >44){digitsValid=false;break;}
+                    if(unknown.TryGetValue(expectedDigit,out var previous))
+                    {
+                        if(previous.Raster.Distance(sample)>2){digitsValid=false;break;}
+                        unknown[expectedDigit]=(previous.Raster,previous.Repetitions+1);
+                    }
+                    else unknown[expectedDigit]=(sample,1);
+                    continue;
+                }
                 int best=int.MaxValue,second=int.MaxValue;char digit='?';
                 foreach(var template in templates)
                 {
@@ -134,13 +153,39 @@ internal static class RuneLitePixelGridReader
                     if(difference<best){second=best;best=difference;digit=template.Key;}
                     else if(difference<second)second=difference;
                 }
-                if(best>2||second-best<5){digitsValid=false;break;}
-                numbers[i]=digit;
+                if(best>2||second-best<5||digit!=expectedDigit){digitsValid=false;break;}
             }
             if(!digitsValid)continue;
-            int x=int.Parse(new string(numbers,0,4)),y=int.Parse(new string(numbers,4,4));
-            int plane=numbers[8]-'0';
-            if(x!=expected.X||y!=expected.Y||plane is <0 or >3)continue;
+            if(unknown.Count>0)
+            {
+                unknownTileDigits+=unknown.Count;
+                if(unknown.Values.Any(v=>v.Repetitions<2))
+                {unknownSingletonRejects++;continue;}
+                var unique=unknown.ToArray();
+                for(int i=0;i<unique.Length&&digitsValid;i++)
+                {
+                    foreach(var known in templates)
+                        if(unique[i].Value.Raster.Distance(known.Value)<5)digitsValid=false;
+                    for(int j=i+1;j<unique.Length;j++)
+                        if(unique[i].Value.Raster.Distance(unique[j].Value.Raster)<5)digitsValid=false;
+                }
+                if(!digitsValid)continue;
+                uniqueRepeatedDigitLayouts++;
+            }
+            // The floor is never inferred from the OCR's 'o'/'Ø'. It still
+            // requires an actual same-frame digit template from an ID line.
+            var floorSample=Cell(ox,oy,0,16);
+            int floorBest=int.MaxValue,floorSecond=int.MaxValue;char floorDigit='?';
+            foreach(var template in templates)
+            {
+                int difference=floorSample.Distance(template.Value);
+                if(difference<floorBest)
+                {floorSecond=floorBest;floorBest=difference;floorDigit=template.Key;}
+                else if(difference<floorSecond)floorSecond=difference;
+            }
+            int plane=floorDigit-'0';
+            if(floorBest>2||floorSecond-floorBest<5||plane is <0 or >3)continue;
+            int x=expected.X,y=expected.Y;
             var evidence=RuneLiteGridReader.Parse(new[]{
                 $"Tile {x}, {y}, {plane}",$"Chunk ID {expected.Chunk}",$"Region ID {expected.Region}"});
             if(evidence is null)continue;
@@ -151,7 +196,9 @@ internal static class RuneLitePixelGridReader
             $"ocr_agreements={observations.Count(o=>o==expected)} anchors_tested={visited} "+
             $"first_comma_shapes={firstCommaShapes} matching_comma_pairs={matchingCommas} "+
             $"empty_separator_pairs={emptySeparators} comma_layouts={commaCandidates} "+
-            $"digit_templates={idCandidates} full_matches={matched} distinct_positions={accepted.Count} "+
+            $"digit_templates={idCandidates} unknown_tile_digits={unknownTileDigits} "+
+            $"unknown_singleton_rejects={unknownSingletonRejects} repeated_unknown_layouts={uniqueRepeatedDigitLayouts} "+
+            $"full_matches={matched} distinct_positions={accepted.Count} "+
             $"elapsed_ms={elapsed.ElapsedMilliseconds} "+
             $"result={(accepted.Count==1?"PIXEL_GRID_VERIFIED":"NOT_RELEASED")}";
         return accepted.Count==1?accepted.Single():null;

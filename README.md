@@ -1,4 +1,20 @@
-# OSRS Play 1.8.6 – RuneLite statt Atlas-Positionssuche
+# OSRS Play 1.8.7 – RuneLite statt Atlas-Positionssuche
+
+**Neu in 1.8.7 – Bewegungsziffern und unabhängiger Updatekanal:**
+Das erste 1.8.6-Bewegungslog zeigte gute RuneLite-Frames mit X=3144/Y=3211,
+aber kein gültiges Pixelraster: Die neuen IDs `805265`/`12594` enthalten
+keine Ziffer `3`, obwohl sie in der Tile-Zeile zweimal auftritt. Der Leser
+prüft jetzt solche fehlenden X/Y-Ziffern nur, wenn zwei Vorkommen derselben
+Ziffer **im selben Bild pixelgleich** und von sämtlichen ID-Vorlagen
+eindeutig verschieden sind. Einmalig sichtbare unbekannte Ziffern,
+unklare Kommas, OCR-Widersprüche und eine nicht belegte Ebene bleiben
+strikt gesperrt. Das Log zählt entsprechende Prüfungen und Ablehnungen.
+Zusätzlich vergleicht der Updater das Raw-Manifest mit dem **offiziellen
+GitHub-Release-API-Endpunkt** einschließlich veröffentlichter Asset-SHA-256.
+Ist das Release neuer, wird ausschließlich dessen geprüfter Versions-/
+Hashdatensatz verwendet; bei widersprüchlichen Hashes wird abgebrochen.
+Fällt die API aus, bleibt das vorhandene, geprüfte Manifest als Fallback.
+**Ein Live-Nachweis dieser neuen Version fehlt noch; keine Game-Automatik.**
 
 **Neu in 1.8.6 – zuverlässigerer Update-Manifestabruf:** Das erste
 1.8.5-Live-Protokoll bestätigt die Pixelposition über zwei unabhängige
