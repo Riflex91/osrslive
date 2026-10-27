@@ -25,8 +25,10 @@ internal static class RuneLitePixelGridReader
     internal readonly record struct Observation(string Chunk,string Region,int X,int Y);
     internal readonly record struct FieldQuorum(Observation Data,int XYVotes,int ChunkVotes,
         int RegionVotes,int OutlierFields);
+    // SingleXY denotes ONE agreed numeric coordinate, which can have several
+    // independent OCR votes in the stricter single-Chunk fallback.
     internal readonly record struct IdQuorum(string Chunk,string Region,int ChunkVotes,
-        int RegionVotes,int TileLabelVotes,(int X,int Y)? SingleXY);
+        int RegionVotes,int TileLabelVotes,(int X,int Y)? SingleXY,int XYVotes);
     internal sealed record GlyphSnapshot(IReadOnlyDictionary<char,Glyph> Digits);
 
     // Strictly ephemeral, local to one RuneLitePositionSource/one HWND and
@@ -158,16 +160,16 @@ internal static class RuneLitePixelGridReader
         return result;
     }
 
-    // Last-resort path when at most ONE OCR treatment returns complete
-    // numeric X/Y (e.g. three "315Ø" readings and one "3150"). A single
-    // numeric OCR reading is not independent evidence: it must first agree
-    // with BOTH corroborated IDs and subsequently with the unique pixel tile.
-    // Two independent reads of BOTH labelled IDs plus the Tile label merely
-    // constrain 64 possible cells. As a separately logged last resort, one
-    // Chunk read is also allowed when a distinct OCR pass gives exactly one
-    // checksummed XY pair and THREE matching Region reads; all real pixel
-    // glyphs and the separate second-frame gate remain compulsory. Every
-    // X/Y glyph needs an independently labelled pixel; no character repair.
+    // Ordinary last-resort path when at most ONE OCR treatment returns
+    // complete numeric X/Y (e.g. three "315Ø" and one "3150"). A lone
+    // numeric reading must agree with BOTH corroborated IDs and the unique
+    // pixel tile. Two independent reads of BOTH labelled IDs plus the Tile
+    // label merely constrain 64 possible cells. As a separately logged path, one
+    // Chunk read is also allowed when another OCR pass supplies a complete
+    // checksummed XY pair and THREE matching Region reads. Several XY passes
+    // may agree on that ONE position; any competing XY value vetoes it. All
+    // real pixel glyphs and the separate second-frame gate remain compulsory.
+    // Every X/Y glyph needs an independently labelled pixel; no repair.
     internal static IdQuorum? ReadIdQuorum(IReadOnlyList<string[]> passes,out string diagnostic)
     {
         var chunks=new List<string>();var regions=new List<string>();
@@ -199,11 +201,20 @@ internal static class RuneLitePixelGridReader
         }
         var cg=chunks.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
         var rg=regions.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
-        bool assistedSingleChunk=chunks.Count==1&&xyReadings.Count==1&&
-            rg.Length==1&&rg[0].Count()>=3&&chunkPasses[0]!=xyPasses[0];
-        if(xyReadings.Count>1||tileLabels<2||(cg.Length!=1&&!assistedSingleChunk)||rg.Length!=1)
+        var distinctXY=xyReadings.Distinct().ToArray();
+        int independentXYPasses=chunks.Count==1?
+            xyPasses.Count(index=>index!=chunkPasses[0]):0;
+        bool assistedSingleChunk=chunks.Count==1&&xyReadings.Count>=1&&
+            distinctXY.Length==1&&independentXYPasses>=1&&
+            rg.Length==1&&rg[0].Count()>=3;
+        // The ordinary two-ID fallback is still limited to at most one full
+        // XY read. Multiple XY reads are accepted ONLY in the exceptional
+        // single-Chunk branch and only if every numeric value agrees.
+        if((xyReadings.Count>1&&!assistedSingleChunk)||tileLabels<2||
+           (cg.Length!=1&&!assistedSingleChunk)||rg.Length!=1)
         {
             diagnostic=$"stage=ID_ONLY_QUORUM result=NOT_READY xy_readings={xyReadings.Count} "+
+                $"xy_distinct_values={distinctXY.Length} cross_pass_xy_votes={independentXYPasses} "+
                 $"tile_label_votes={tileLabels} chunk_readings={chunks.Count} region_readings={regions.Count} "+
                 $"chunk_quorums={cg.Length} region_quorums={rg.Length} "+
                 $"single_chunk_assisted=false";
@@ -220,21 +231,23 @@ internal static class RuneLitePixelGridReader
                 $"single_chunk_assisted={assistedSingleChunk.ToString().ToLowerInvariant()}";
             return null;
         }
-        (int X,int Y)? singleXY=xyReadings.Count==1?xyReadings[0]:null;
+        (int X,int Y)? singleXY=distinctXY.Length==1?distinctXY[0]:null;
         if(singleXY is (int x,int y)&&
            (x<baseX||x>=baseX+8||y<baseY||y>=baseY+8))
         {
             diagnostic=$"stage=ID_ONLY_QUORUM result=SINGLE_XY_CHECKSUM_REJECTED "+
-                $"xy_readings=1 chunk_votes={chunkVotes} region_votes={rg[0].Count()} "+
+                $"xy_readings={xyReadings.Count} chunk_votes={chunkVotes} region_votes={rg[0].Count()} "+
                 $"tile_label_votes={tileLabels} "+
                 $"single_chunk_assisted={assistedSingleChunk.ToString().ToLowerInvariant()}";
             return null;
         }
         diagnostic=$"stage=ID_ONLY_QUORUM result={(assistedSingleChunk?"SINGLE_CHUNK_CROSSCHECK_VERIFIED":"IDS_VERIFIED")} chunk_votes={chunkVotes} "+
             $"region_votes={rg[0].Count()} tile_label_votes={tileLabels} xy_readings={xyReadings.Count} "+
+            $"xy_distinct_values={distinctXY.Length} cross_pass_xy_votes={independentXYPasses} "+
             $"single_chunk_assisted={assistedSingleChunk.ToString().ToLowerInvariant()} "+
             "candidate_tiles=64 pixel_label_required_for_every_xy_digit=true";
-        return new(chunkValue,rg[0].Key,chunkVotes,rg[0].Count(),tileLabels,singleXY);
+        return new(chunkValue,rg[0].Key,chunkVotes,rg[0].Count(),tileLabels,singleXY,
+            xyReadings.Count);
     }
 
     internal static RuneLiteGridEvidence? Read(Bitmap bitmap,IReadOnlyList<Observation> observations,
@@ -450,6 +463,7 @@ internal static class RuneLitePixelGridReader
             $"ocr_agreements={ocrAgreements} "+
             $"evidence_source={(idQuorum is not null?"ID_ONLY_PIXEL_ENUMERATION":fieldQuorum is null?"FULL_OBSERVATIONS":"FIELD_QUORUM")} "+
             $"tile_candidates={tileCandidates.Length} "+
+            $"id_xy_votes={idQuorum?.XYVotes??0} "+
             $"field_xy_votes={fieldQuorum?.XYVotes??0} field_chunk_votes={fieldQuorum?.ChunkVotes??0} "+
             $"field_region_votes={fieldQuorum?.RegionVotes??0} anchors_tested={visited} "+
             $"first_comma_shapes={firstCommaShapes} matching_comma_pairs={matchingCommas} "+
