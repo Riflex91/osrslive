@@ -128,6 +128,55 @@ internal static class RuneLitePixelGridReaderTests
                     !diagnostic.Contains("unknown_singleton_rejects=0 "),
                 "a once-only unknown digit must remain blocked despite agreeing OCR passes");
         }
+        // Real 1.8.8 movement: on 3144/3212, the ID 805265 visibly
+        // contains '6'; at 3139/3216 the IDs 803218 and 12594 do NOT.
+        // Two separate confirmed images may train a session-local reference
+        // for this otherwise single-occurrence coordinate digit.
+        var historical=new RuneLitePixelGridReader.ConfirmedGlyphHistory();
+        var initial=RuneLitePixelGridReader.ReadObservation(new[]{
+            "Tile3144» 3212» o","Chunk ID 805265","Region ID 12594"});
+        var target=RuneLitePixelGridReader.ReadObservation(new[]{
+            "Tile3139» 3216» o","Chunk ID 803218","Region ID 12594"});
+        Require(initial is not null&&target is not null,"moving OCR fixtures must be parseable");
+        using(var targetBitmap=Fixture(tileX:3139,tileY:3216))
+        {
+            var candidates=new[]{target!.Value,target.Value};
+            Require(RuneLitePixelGridReader.Read(targetBitmap,candidates,out _) is null,
+                "a new singleton must fail without independently confirmed earlier glyphs");
+            var confirmer=new RuneLiteOverlayConfirmation();
+            DateTimeOffset start=new(2026,10,27,20,0,0,TimeSpan.Zero);
+            using(var trainingBitmap=Fixture(tileX:3144,tileY:3212))
+            for(int i=0;i<3;i++)
+            {
+                IReadOnlyList<RuneLitePixelGridReader.GlyphSnapshot>? pending=null;
+                var training=RuneLitePixelGridReader.Read(trainingBitmap,
+                    new[]{initial!.Value,initial.Value},out _,onVerified:s=>pending=s);
+                Require(training is not null&&pending is not null,
+                    "per-frame glyph training must pass the ordinary independent pixel checks");
+                var at=start+TimeSpan.FromSeconds(i);
+                var status=confirmer.Observe(new IntPtr(73),trainingBitmap.Size,at,at+TimeSpan.FromMilliseconds(100),training);
+                if(status.Tile is not null)historical.Confirm(pending!,at);
+                if(i<2)Require(RuneLitePixelGridReader.Read(targetBitmap,candidates,out _,
+                        history:historical) is null,
+                    "an unconfirmed or single confirmed frame cannot train a singleton");
+            }
+            var recovered=RuneLitePixelGridReader.Read(targetBitmap,candidates,
+                out string historyDiagnostic,history:historical);
+            Require(recovered?.Tile==new WorldTile(3139,3216,0)&&
+                    historyDiagnostic.Contains("historical_glyph_matches=")&&
+                    !historyDiagnostic.Contains("historical_glyph_matches=0 "),
+                "two separately confirmed training frames may verify the moved singleton in pixels");
+            // Damage exactly the once-only 6 on the Tile line: historical
+            // evidence may never override an actual contradictory glyph.
+            for(int dy=0;dy<11;dy++)for(int dx=0;dx<7;dx++)
+                targetBitmap.SetPixel(7+13*7+dx,13+dy,Color.FromArgb(21,26,32));
+            Require(RuneLitePixelGridReader.Read(targetBitmap,candidates,out _,
+                    history:historical) is null,
+                "cached templates cannot excuse an absent current-frame singleton glyph");
+            historical.Clear();
+            Require(historical.Frames==0&&historical.Snapshots==0,
+                "a client/window/session reset must discard every cached glyph");
+        }
         // Actual 1.8.7 log: one nearest pass reads Region 12594 but lacks
         // the plane character; the other has all Tile digits yet misreads
         // Region as 12534. Two bicubic passes independently corroborate the
@@ -180,6 +229,6 @@ internal static class RuneLitePixelGridReaderTests
             Require(RuneLitePixelGridReader.Read(bitmap,new[]{observation!.Value,observation.Value},out _) is null,
                 "an unreadable floor glyph must never be inferred from the current map region");
         }
-        Console.WriteLine("RUNELITE PIXEL GRID PASS: per-frame digit templates, visible commas, two matching OCR IDs, X/Y agreement, checksum, actual floor and fail-closed mutations");
+        Console.WriteLine("RUNELITE PIXEL GRID PASS: per-frame and confirmed-session ID templates, visible commas, two OCR ID/X/Y quorums, checksum, actual floor and fail-closed mutations");
     }
 }

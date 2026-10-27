@@ -1,4 +1,43 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.8
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.9
+
+## Erstmals stabil bestätigte Bewegung und fehlende Einzelziffer (1.8.9)
+
+Das reale 1.8.8-Live-Protokoll vom 27.10.2026, 21:12 (Europe/Berlin)
+zeigt `FIELD_QUORUM result=CHECKSUM_VERIFIED` mit vier Stimmen für X/Y,
+zwei für Chunk und drei für Region; ein abweichendes OCR-Feld wurde
+verworfen. Die unabhängige Pixelprüfung ergab mehrfach
+`PIXEL_GRID_VERIFIED`; ab Probe 2 bis 11 wurde die Position
+**3144/3212/Ebene 0** wiederholt als `OVERLAY_CONFIRMED` anerkannt.
+Bei Bewegung über 3142/3213 war noch eine Pixelprobe erfolgreich;
+bei **3139/3216** scheiterten Probe 32–34 an einem einzelnen nicht
+trainierten Pixelzeichen. Die Region `12594` und Chunk `803218`
+enthalten keine Ziffer `6`, obwohl Y=3216 diese genau einmal enthält.
+Das Ergebnis war korrekt `unknown_singleton_rejects=4`; eine
+unbewiesene Einzelziffer bleibt gesperrt. Die GitHub-Release-API
+erkannte trotz vom Raw-CDN noch als 1.8.7 ausgeliefertem Manifest
+bereits die lokal aktuelle Version 1.8.8. `clipboard=COPIED` und
+roter GUI-Hinweis blieben funktionsfähig.
+
+1.8.9 fügt daher ausschließlich eine **sitzungsinterne Sammlung
+bereits in Chunk-/Region-IDs nachgewiesener Rasterziffern** hinzu.
+Ein Eintrag wird erst nach vollständiger Pixelverifikation UND
+der bisherigen Zweibildbestätigung übernommen. Eine historisch
+bekannte, jetzt nur einmal sichtbare Ziffer darf erst nach
+**mindestens zwei verschiedenen bestätigten Aufnahmetimestamps**
+verwendet werden. Mindestens fünf mit der gegenwärtigen ID
+gemeinsame Ziffern müssen im Pixelraster passen; Konflikte gegen
+gegenwärtige oder historische andere Ziffern blockieren. Die
+Zwischenspeicherung lebt nur im Prozess, höchstens fünf Minuten,
+maximal 96 Vorlagensätze und wird bei anderem Fenster, anderer
+Framegröße, Capture-/Prozessfehler oder explizitem Reset gelöscht.
+Screenshots, Koordinaten oder Kontoinformationen werden nicht
+persistiert. Neue `RUNELITE_PIXEL`-Diagnosen protokollieren
+`historical_glyph_matches`, `historical_contradictions`,
+`trusted_history_frames` sowie `stage=GLYPH_HISTORY` nach
+erfolgreicher Bestätigung. Die synthetische Regression deckt
+den Bewegungswechsel 3144/3212 → 3139/3216 sowie Einzelbild-
+und beschädigte-Glyphe-Sperren ab. **Echter 1.8.9-Live-Test offen;
+kein Eingabe- oder Navigationscode freigeschaltet.**
 
 ## Komplementäre OCR-Feldfehler bei lebender Positionsverschiebung (1.8.8)
 

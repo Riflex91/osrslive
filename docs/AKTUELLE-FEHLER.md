@@ -1,4 +1,20 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.8
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.9
+
+**1.8.9 – schon unabhängig bestätigte ID-Ziffern auch nach Bewegung nutzen:**
+Das echte 1.8.8-Live-Log bestätigt das Feldquorum und die Position
+3144/3212/0 über viele Proben. Beim Wechsel auf 3139/3216/0 fehlt
+eine ID-Vorlage der einmalig sichtbaren Y-Ziffer `6`, sodass die
+Pixelprüfung erwartungsgemäß gesperrt blieb. Ein neuer, maximal fünf
+Minuten lebender, an das konkrete RuneLite-Fenster und dessen Größe
+gebundener Vorlagenspeicher übernimmt Pixelziffern nur aus getrennten
+**vollständig bestätigten** Bildern. Erst nach zwei bestätigten
+Aufnahmetimestamps und mindestens fünf exakt vergleichbaren aktuellen
+ID-Ziffern dürfen diese Vorlagen eine heute einzelne Ziffer belegen.
+Unbestätigte Frames, abweichende Fonts/IDs, andere Ziffernglyphen,
+OCR-Widersprüche und fehlende Pixel bleiben blockiert. Die Release-API
+erkennt trotz zeitweilig veraltetem CDN-Manifest die aktuelle Version;
+Fehlerlog-Zwischenablage und roter Hinweis wurden erneut live belegt.
+1.8.9 wurde noch nicht live getestet; Gameplay-Automatik fehlt weiterhin.
 
 **1.8.8 – pro Feld übereinstimmende OCR statt nur vollständige Zeilen:**
 Das echte 1.8.7-Log bestätigt die Release-API und Raw-Manifest bei Start

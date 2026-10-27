@@ -61,7 +61,9 @@ internal static class RuneLiteGridReader
     }
 
     internal static async Task<RuneLiteGridEvidence?> Read(Bitmap bitmap,OcrEngine engine,
-        Action<string[]>? diagnostic=null,Action<string>? pixelDiagnostic=null)
+        Action<string[]>? diagnostic=null,Action<string>? pixelDiagnostic=null,
+        RuneLitePixelGridReader.ConfirmedGlyphHistory? history=null,
+        Action<IReadOnlyList<RuneLitePixelGridReader.GlyphSnapshot>>? onVerified=null)
     {
         // Fresh profiles place Grid Info at the canvas top-left. Read only the
         // small overlay region, excluding chat and account panes. No image saved.
@@ -100,12 +102,19 @@ internal static class RuneLiteGridReader
         }
         var fieldQuorum=RuneLitePixelGridReader.ReadFieldQuorum(ocrFields,out string fieldDiagnostic);
         pixelDiagnostic?.Invoke(fieldDiagnostic);
-        var raster=RuneLitePixelGridReader.Read(crop,observations,out string rasterDiagnostic,fieldQuorum);
+        // Retain templates only if the raster evidence survives all OCR
+        // contradictions, then let the caller enforce the separate frame gate.
+        IReadOnlyList<RuneLitePixelGridReader.GlyphSnapshot>? proposed=null;
+        var raster=RuneLitePixelGridReader.Read(crop,observations,out string rasterDiagnostic,
+            fieldQuorum,history,snapshots=>proposed=snapshots);
         pixelDiagnostic?.Invoke(rasterDiagnostic);
         // A valid pixel reading cannot override a different valid OCR reading.
         // The existing two-independent-fresh-frames gate remains unchanged.
         evidenceCandidates.Add(raster);
-        return ConsistentEvidence(evidenceCandidates);
+        var consistent=ConsistentEvidence(evidenceCandidates);
+        if(consistent is not null&&consistent==raster&&proposed is not null)
+            onVerified?.Invoke(proposed);
+        return consistent;
     }
 }
 
@@ -129,7 +138,10 @@ internal sealed class RuneLitePositionSource:IDisposable
 {
     private readonly BackgroundWindowCapture capture=new();
     private readonly RuneLiteOverlayConfirmation confirmation=new();
-    internal void Reset()=>confirmation.Reset();
+    private readonly RuneLitePixelGridReader.ConfirmedGlyphHistory history=new();
+    private IntPtr historyWindow;
+    private Size historySize;
+    internal void Reset(){confirmation.Reset();history.Clear();historyWindow=default;historySize=default;}
     private string CaptureDiagnostic=>$"capture_state={capture.State} frame_events={capture.FrameEvents} "+
         $"frame_copies={capture.FrameCopies} capture_error={capture.LastFrameError} "+
         $"geometry={capture.Geometry} alpha={capture.AlphaState}";
@@ -153,30 +165,43 @@ internal sealed class RuneLitePositionSource:IDisposable
             catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception){rejected++;}
         }
         string windowDiagnostic=$"processes={scanned} trusted_windows={windows.Count} rejected={rejected}";
-        if(windows.Count!=1){confirmation.Reset();return new(windows.Count==0?"RUNELITE_NOT_RUNNING":"MULTIPLE_RUNELITE_CLIENTS",
+        if(windows.Count!=1){Reset();return new(windows.Count==0?"RUNELITE_NOT_RUNNING":"MULTIPLE_RUNELITE_CLIENTS",
             Diagnostic:windowDiagnostic);}
         try
         {
             using var frame=await capture.ReadClientAsync(windows[0],ct);
-            if(frame is null){confirmation.Reset();return new("CAPTURE_UNAVAILABLE",
+            if(frame is null){Reset();return new("CAPTURE_UNAVAILABLE",
                 Diagnostic:windowDiagnostic+" "+CaptureDiagnostic);}
+            if(historyWindow!=windows[0]||historySize!=frame.Image.Size)
+            {
+                history.Clear();historyWindow=windows[0];historySize=frame.Image.Size;
+            }
+            history.Expire(frame.CapturedUtc);
             int passes=0,validPasses=0,labelRows=0;
+            IReadOnlyList<RuneLitePixelGridReader.GlyphSnapshot>? verifiedTemplates=null;
             var evidence=await RuneLiteGridReader.Read(frame.Image,engine,rows=>
             {
                 passes++;
                 if(RuneLiteGridReader.Parse(rows) is not null)validPasses++;
                 labelRows+=rows.Count(row=>Regex.IsMatch(row,@"^(Tile|Chunk\s+ID|Region\s+ID)",RegexOptions.IgnoreCase));
                 diagnostic?.Invoke(rows);
-            },pixelDiagnostic);
+            },pixelDiagnostic,history,snapshots=>verifiedTemplates=snapshots);
             var now=DateTimeOffset.UtcNow;
             var state=confirmation.Observe(windows[0],frame.Image.Size,frame.CapturedUtc,now,evidence);
+            if(state.Tile is not null&&verifiedTemplates is not null)
+            {
+                history.Confirm(verifiedTemplates,frame.CapturedUtc);
+                pixelDiagnostic?.Invoke($"stage=GLYPH_HISTORY result=CONFIRMED_FRAMES_ONLY "+
+                    $"frames={history.Frames} snapshots={history.Snapshots} ttl_seconds=300 "+
+                    "source=SAME_SESSION_CONFIRMED_ID_PIXELS");
+            }
             return state with{Diagnostic=windowDiagnostic+" "+CaptureDiagnostic+
                 $" client={frame.Image.Width}x{frame.Image.Height} age_ms={(now-frame.CapturedUtc).TotalMilliseconds:0} "+
                 $"ocr_passes={passes} valid_passes={validPasses} label_rows={labelRows} "+
                 $"candidate_consistent={evidence is not null} frame_confirmed={state.Tile is not null}"};
         }
         catch(Exception ex) when(ex is not OperationCanceledException)
-        {confirmation.Reset();return new("INTERNAL_ERROR",
+        {Reset();return new("INTERNAL_ERROR",
             Diagnostic:windowDiagnostic+" "+CaptureDiagnostic+
             " "+ExceptionDiagnostic.Describe(ex));}
     }
