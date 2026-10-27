@@ -222,8 +222,17 @@ internal static class RuneLitePixelGridReaderTests
         Require(tooltipQuorum is {Data:{X:3152,Y:3197,Chunk:"807311",Region:"12593"},
                 XYVotes:4,ChunkVotes:2,RegionVotes:4}&&
                 tooltipDiagnostic.Contains("region_ignored_suffixes=4")&&
-                tooltipDiagnostic.Contains("chunk_ignored_suffixes=1"),
-            "only whitespace-separated extra game text may be ignored after exact fixed-width IDs");
+                tooltipDiagnostic.Contains("chunk_ignored_suffixes=0"),
+            "only whitespace-separated extra game text may be ignored after exact fixed-width IDs: "+tooltipDiagnostic);
+        // The fourth chunk ID above is OCR-damaged (8ø7311), so its Pot
+        // suffix MUST NOT be counted. Check an otherwise complete chunk ID
+        // with a legitimate separated tooltip independently.
+        var chunkTooltipPasses=tooltipPasses.Select(rows=>rows.ToArray()).ToArray();
+        chunkTooltipPasses[0][1]="Chunk ID 807311 Pot (GE: 12 gp)";
+        var chunkTooltipQuorum=RuneLitePixelGridReader.ReadFieldQuorum(chunkTooltipPasses,out string chunkTooltipDiagnostic);
+        Require(chunkTooltipQuorum is {Data:{X:3152,Y:3197,Chunk:"807311",Region:"12593"}}&&
+                chunkTooltipDiagnostic.Contains("chunk_ignored_suffixes=1"),
+            "a complete six-digit Chunk ID may keep its value with a separated tooltip: "+chunkTooltipDiagnostic);
         using(var tooltipBitmap=Fixture(tileX:3152,tileY:3197))
         {
             var proven=RuneLitePixelGridReader.Read(tooltipBitmap,Array.Empty<RuneLitePixelGridReader.Observation>(),
