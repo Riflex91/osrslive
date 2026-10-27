@@ -65,7 +65,9 @@ internal static class RuneLitePixelGridReaderTests
         {
             var candidates=new[]{observation!.Value,observation.Value};
             var result=RuneLitePixelGridReader.Read(bitmap,candidates,out string diagnostic);
-            Require(result?.Tile==new WorldTile(3143,3210,0)&&diagnostic.Contains("PIXEL_GRID_VERIFIED"),
+            Require(result?.Tile==new WorldTile(3143,3210,0)&&
+                    diagnostic.Contains("PIXEL_GRID_VERIFIED")&&
+                    diagnostic.Contains("single_xy_matches_pixels=not_applicable"),
                 "independently trained digit pixels, commas and strict IDs must verify a plane-0 bitmap");
             Require(RuneLitePixelGridReader.Read(bitmap,candidates.Take(1).ToArray(),out _) is null,
                 "one OCR reading cannot authorize a pixel-derived position");
@@ -313,6 +315,7 @@ internal static class RuneLitePixelGridReaderTests
                 idQuorum:loneNumeric);
             Require(proven?.Tile==new WorldTile(3150,3196,0)&&
                     lonePixelDiagnostic.Contains("single_xy_matches_pixels=true")&&
+                    lonePixelDiagnostic.Contains("ocr_agreements=1")&&
                     lonePixelDiagnostic.Contains("ID_ONLY_PIXEL_ENUMERATION"),
                 "one matching OCR observation must still require every independent digit pixel: "+lonePixelDiagnostic);
             var contradictoryFullLine=fullLine.Value with{Chunk="803215"};

@@ -6,6 +6,7 @@ namespace OSRSLiveDiagnostics;
 internal sealed class RuneLiteWindow:Form
 {
     private readonly RuneLitePositionSource source=new();
+    private readonly RuneLiteMotionTrace movement=new();
     private readonly Diagnostics log=new();
     private readonly ClientFailureLog failureLog;
     private readonly Label status=new(),position=new(),detail=new(),failureBanner=new(),updateStatus=new();
@@ -67,7 +68,7 @@ internal sealed class RuneLiteWindow:Form
         var pause=new Button{Text="Verbindung pausieren",AutoSize=true};
         pause.Click+=(_,_)=>
         {
-            paused=!paused;generation++;source.Reset();position.Text="Position unbekannt";
+            paused=!paused;generation++;source.Reset();movement.Reset();position.Text="Position unbekannt";
             if(!paused)lastConfirmedUtc=DateTimeOffset.UtcNow;
             status.Text=paused?"Verbindung pausiert":"Warte auf neue Positionsbilder";
             log.Add(Severity.INFO,"RUNELITE",paused?"USER_PAUSED":"USER_RESUMED",
@@ -105,9 +106,12 @@ internal sealed class RuneLiteWindow:Form
         healthTimer.Tick+=(_,_)=>
         {
             using var process=Process.GetCurrentProcess();
+            var motion=movement.Statistics;
             log.Add(Severity.DEBUG,"RUNTIME","HEALTH",
                 $"uptime_s={uptime.Elapsed.TotalSeconds:0} samples={samples} paused={paused} "+
                 $"busy={busy} status={lastStatus??"none"} working_set_mib={process.WorkingSet64/1024/1024} "+
+                $"confirmed_position_frames={motion.ConfirmedFrames} stable_frames={motion.StableFrames} "+
+                $"observed_tile_changes={motion.Changes} non_adjacent_observations={motion.NonAdjacent} "+
                 $"log_storage={failureLog.StorageStatus} clipboard={failureLog.ClipboardStatus}");
             RefreshLogPreview();
         };
@@ -208,6 +212,24 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.DEBUG,"RUNELITE","POSITION_SAMPLE",
             $"sample={sequence} result={state.Status} {state.Diagnostic} "+
             (state.Tile is WorldTile tile?$"x={tile.X} y={tile.Y} plane={tile.Plane}":"position=NOT_RELEASED"));
+        // Movement telemetry is strictly downstream of the pixel and
+        // independent-frame confirmation. No unconfirmed OCR is tracked.
+        if(state.Tile is WorldTile confirmedTile)
+        {
+            string? observation=movement.Observe(confirmedTile,state.ObservedUtc,sequence);
+            if(observation is not null)
+                log.Add(Severity.INFO,"RUNELITE_MOTION","OBSERVATION",observation);
+        }
+        else if(state.Status is "RUNELITE_NOT_RUNNING" or "MULTIPLE_RUNELITE_CLIENTS" or
+            "CAPTURE_UNAVAILABLE" or "STALE_FRAME" or "INTERNAL_ERROR" or "OCR_LANGUAGE_UNAVAILABLE")
+        {
+            if(movement.Statistics.ConfirmedFrames>0)
+            {
+                log.Add(Severity.INFO,"RUNELITE_MOTION","RESET",
+                    $"reason={state.Status} verified_position_history_discarded=true");
+                movement.Reset();
+            }
+        }
         if(lastStatus!=state.Status)
         {
             log.Add(Severity.INFO,"RUNELITE","STATUS_CHANGE",
