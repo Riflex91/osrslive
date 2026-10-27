@@ -163,46 +163,61 @@ internal static class RuneLitePixelGridReader
     // numeric OCR reading is not independent evidence: it must first agree
     // with BOTH corroborated IDs and subsequently with the unique pixel tile.
     // Two independent reads of BOTH labelled IDs plus the Tile label merely
-    // constrain 64 possible cells. Every X/Y glyph needs an independently
-    // labelled pixel; no character repair or guessed/repeated unknown glyph.
+    // constrain 64 possible cells. As a separately logged last resort, one
+    // Chunk read is also allowed when a distinct OCR pass gives exactly one
+    // checksummed XY pair and THREE matching Region reads; all real pixel
+    // glyphs and the separate second-frame gate remain compulsory. Every
+    // X/Y glyph needs an independently labelled pixel; no character repair.
     internal static IdQuorum? ReadIdQuorum(IReadOnlyList<string[]> passes,out string diagnostic)
     {
         var chunks=new List<string>();var regions=new List<string>();
         var xyReadings=new List<(int X,int Y)>();
+        var chunkPasses=new List<int>();var xyPasses=new List<int>();
         int tileLabels=0;
-        foreach(var pass in passes)
+        for(int index=0;index<passes.Count;index++)
         {
+            var pass=passes[index];
             var rows=pass.Select(s=>s.Trim()).ToArray();
             if(rows.Any(s=>Regex.IsMatch(s,@"^Tile\s*:?\s*",RegexOptions.IgnoreCase)))tileLabels++;
             var xy=rows.Select(s=>Regex.Match(s,
                 @"^Tile\s*:?\s*(\d{4})\D{1,4}(\d{4})(?:\D.*)?$",RegexOptions.IgnoreCase))
                 .Where(m=>m.Success).ToArray();
-            if(xy.Length==1)xyReadings.Add((int.Parse(xy[0].Groups[1].Value),
-                int.Parse(xy[0].Groups[2].Value)));
+            if(xy.Length==1)
+            {
+                xyReadings.Add((int.Parse(xy[0].Groups[1].Value),
+                    int.Parse(xy[0].Groups[2].Value)));
+                xyPasses.Add(index);
+            }
             var c=rows.Select(s=>Regex.Match(s,
                 @"^Chunk\s+ID\s*:?\s*(\d{6})(?:\s+\S.*)?$",RegexOptions.IgnoreCase))
                 .Where(m=>m.Success).ToArray();
             var r=rows.Select(s=>Regex.Match(s,
                 @"^Region\s+ID\s*:?\s*(\d{5})(?:\s+\S.*)?$",RegexOptions.IgnoreCase))
                 .Where(m=>m.Success).ToArray();
-            if(c.Length==1)chunks.Add(c[0].Groups[1].Value);
+            if(c.Length==1){chunks.Add(c[0].Groups[1].Value);chunkPasses.Add(index);}
             if(r.Length==1)regions.Add(r[0].Groups[1].Value);
         }
         var cg=chunks.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
         var rg=regions.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
-        if(xyReadings.Count>1||tileLabels<2||cg.Length!=1||rg.Length!=1)
+        bool assistedSingleChunk=chunks.Count==1&&xyReadings.Count==1&&
+            rg.Length==1&&rg[0].Count()>=3&&chunkPasses[0]!=xyPasses[0];
+        if(xyReadings.Count>1||tileLabels<2||(cg.Length!=1&&!assistedSingleChunk)||rg.Length!=1)
         {
             diagnostic=$"stage=ID_ONLY_QUORUM result=NOT_READY xy_readings={xyReadings.Count} "+
                 $"tile_label_votes={tileLabels} chunk_readings={chunks.Count} region_readings={regions.Count} "+
-                $"chunk_quorums={cg.Length} region_quorums={rg.Length}";
+                $"chunk_quorums={cg.Length} region_quorums={rg.Length} "+
+                $"single_chunk_assisted=false";
             return null;
         }
-        int chunk=int.Parse(cg[0].Key),region=int.Parse(rg[0].Key);
+        string chunkValue=assistedSingleChunk?chunks[0]:cg[0].Key;
+        int chunkVotes=assistedSingleChunk?1:cg[0].Count();
+        int chunk=int.Parse(chunkValue),region=int.Parse(rg[0].Key);
         int baseX=(chunk>>11)<<3,baseY=(chunk&2047)<<3;
         if(baseX>9992||baseY>9992||((baseX>>6)<<8|(baseY>>6))!=region)
         {
-            diagnostic=$"stage=ID_ONLY_QUORUM result=CHECKSUM_REJECTED chunk_votes={cg[0].Count()} "+
-                $"region_votes={rg[0].Count()} tile_label_votes={tileLabels}";
+            diagnostic=$"stage=ID_ONLY_QUORUM result=CHECKSUM_REJECTED chunk_votes={chunkVotes} "+
+                $"region_votes={rg[0].Count()} tile_label_votes={tileLabels} "+
+                $"single_chunk_assisted={assistedSingleChunk.ToString().ToLowerInvariant()}";
             return null;
         }
         (int X,int Y)? singleXY=xyReadings.Count==1?xyReadings[0]:null;
@@ -210,14 +225,16 @@ internal static class RuneLitePixelGridReader
            (x<baseX||x>=baseX+8||y<baseY||y>=baseY+8))
         {
             diagnostic=$"stage=ID_ONLY_QUORUM result=SINGLE_XY_CHECKSUM_REJECTED "+
-                $"xy_readings=1 chunk_votes={cg[0].Count()} region_votes={rg[0].Count()} "+
-                $"tile_label_votes={tileLabels}";
+                $"xy_readings=1 chunk_votes={chunkVotes} region_votes={rg[0].Count()} "+
+                $"tile_label_votes={tileLabels} "+
+                $"single_chunk_assisted={assistedSingleChunk.ToString().ToLowerInvariant()}";
             return null;
         }
-        diagnostic=$"stage=ID_ONLY_QUORUM result=IDS_VERIFIED chunk_votes={cg[0].Count()} "+
+        diagnostic=$"stage=ID_ONLY_QUORUM result={(assistedSingleChunk?"SINGLE_CHUNK_CROSSCHECK_VERIFIED":"IDS_VERIFIED")} chunk_votes={chunkVotes} "+
             $"region_votes={rg[0].Count()} tile_label_votes={tileLabels} xy_readings={xyReadings.Count} "+
+            $"single_chunk_assisted={assistedSingleChunk.ToString().ToLowerInvariant()} "+
             "candidate_tiles=64 pixel_label_required_for_every_xy_digit=true";
-        return new(cg[0].Key,rg[0].Key,cg[0].Count(),rg[0].Count(),tileLabels,singleXY);
+        return new(chunkValue,rg[0].Key,chunkVotes,rg[0].Count(),tileLabels,singleXY);
     }
 
     internal static RuneLiteGridEvidence? Read(Bitmap bitmap,IReadOnlyList<Observation> observations,

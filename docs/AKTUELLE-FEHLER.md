@@ -1,4 +1,34 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.14
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.15
+
+**1.8.15 – eine einzige Chunk-ID-Stimme trotz ausreichender anderer Hinweise:**
+Das echte 1.8.14-Live-Log vom 27.10.2026, 22:54–22:55 Uhr
+(Europe/Berlin) bestätigt die automatische Installation
+(`PREVIOUS_UPDATE`, `ALREADY_CURRENT`), korrekt funktionierende
+Bewegungsereignisse und die automatische Zwischenablagekopie.
+Zwölf Positionswechsel werden als `RUNELITE_MOTION OBSERVATION`
+einschließlich Aufnahmeabstand und Richtungsdifferenz protokolliert.
+Bei Probe 69–75 liegt eine neue reale Blockade vor: `Chunk ID 809360`
+wird nur von `nearest_2x` vollständig gelesen, während
+`nearest_3x` unter anderem `Tile3163» 3200» o` und eine beschädigte
+Chunk-ID liefert. `Region ID 12594` wird in mindestens drei
+Bildaufbereitungen vollständig bestätigt. Die seit 1.8.12 nötigen
+zwei Chunk-Stimmen fehlen (`chunk_readings=1`, `chunk_quorums=0`),
+also wird keine unabhängige Pixelprüfung gestartet. Der Status
+`GRID_INFO_NOT_READABLE` löst nach vier Sekunden wie vorgesehen
+den roten Hinweis samt neuer vollständiger Logkopie aus.
+
+Der 1.8.15-Sonderweg setzt eine **einzelne** sechsstellige Chunk-ID,
+**eine** komplette X/Y-Zahlenablesung eines **anderen** OCR-Passes,
+mindestens **drei** übereinstimmende Region-IDs und alle beiden
+mathematischen Checksummen voraus. Unter `single_chunk_assisted=true`
+werden die 64 mathematisch möglichen Felder ausschließlich mit
+sichtbaren, unabhängig benannten Pixelziffern verifiziert. Die eine
+OCR-X/Y-Lesung muss dem eindeutigen Pixelort entsprechen; die Ebene,
+echte Trennzeichen und ein zweiter frischer Frame bleiben zwingend.
+Fehlende Unabhängigkeit, eine zweite abweichende Chunk-ID, Region-
+oder Pixelmangel und falsche Checksummen sperren die Freigabe.
+**Noch kein 1.8.15-Live-Test.** Die eigentliche RuneLite-Automation
+bleibt ausdrücklich unimplementiert.
 
 **1.8.14 – Bewegungsfolge zwischen bestätigten Positionen bisher unsichtbar:**
 Der 1.8.13-Live-Lauf vom 27.10.2026, 22:40–22:41 Uhr bestätigte
