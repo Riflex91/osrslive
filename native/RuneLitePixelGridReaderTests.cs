@@ -204,6 +204,61 @@ internal static class RuneLitePixelGridReaderTests
                     detail.Contains("evidence_source=FIELD_QUORUM"),
                 "independent numeric field votes plus same-frame visible glyphs confirm the tile");
         }
+        // Real 1.8.10 log, sample 43: a GE/Pot tooltip shares the Region
+        // screen row. Each pass still has an exact 5-digit Region prefix;
+        // the 2 nearest passes have clean 6-digit Chunk IDs. The full OCR
+        // observations remain deliberately invalid, but separated suffixes
+        // must not discard a separately checksummed and pixel-proved ID.
+        string[][] tooltipPasses=
+        [
+            ["Tile3152„ 3197» o","Chunk ID 807311","Region ID 12593 12"],
+            ["Tile3152» 3197» o","Chunk ID 807311","Region ID 12593 12"],
+            ["Tile 3152, 3197, ø","Chunk ID 8ø7311","Region ID 12593 Pot (GE: 12 gp)"],
+            ["Tile 3152, 3197, ø","Chunk ID 8ø7311 Pot (GE: 12 gp)","Region ID 12593 Pot (GE: 12 gp)"]
+        ];
+        Require(RuneLitePixelGridReader.ReadObservation(tooltipPasses[0]) is null,
+            "the legacy whole-row OCR parser must not mistake tooltip text for an exact panel row");
+        var tooltipQuorum=RuneLitePixelGridReader.ReadFieldQuorum(tooltipPasses,out string tooltipDiagnostic);
+        Require(tooltipQuorum is {Data:{X:3152,Y:3197,Chunk:"807311",Region:"12593"},
+                XYVotes:4,ChunkVotes:2,RegionVotes:4}&&
+                tooltipDiagnostic.Contains("region_ignored_suffixes=4")&&
+                tooltipDiagnostic.Contains("chunk_ignored_suffixes=0"),
+            "only whitespace-separated extra game text may be ignored after exact fixed-width IDs: "+tooltipDiagnostic);
+        // The fourth chunk ID above is OCR-damaged (8ø7311), so its Pot
+        // suffix MUST NOT be counted. Check an otherwise complete chunk ID
+        // with a legitimate separated tooltip independently.
+        var chunkTooltipPasses=tooltipPasses.Select(rows=>rows.ToArray()).ToArray();
+        chunkTooltipPasses[0][1]="Chunk ID 807311 Pot (GE: 12 gp)";
+        var chunkTooltipQuorum=RuneLitePixelGridReader.ReadFieldQuorum(chunkTooltipPasses,out string chunkTooltipDiagnostic);
+        Require(chunkTooltipQuorum is {Data:{X:3152,Y:3197,Chunk:"807311",Region:"12593"}}&&
+                chunkTooltipDiagnostic.Contains("chunk_ignored_suffixes=1"),
+            "a complete six-digit Chunk ID may keep its value with a separated tooltip: "+chunkTooltipDiagnostic);
+        using(var tooltipBitmap=Fixture(tileX:3152,tileY:3197))
+        {
+            var proven=RuneLitePixelGridReader.Read(tooltipBitmap,Array.Empty<RuneLitePixelGridReader.Observation>(),
+                out string tooltipPixelDiagnostic,tooltipQuorum);
+            Require(proven?.Tile==new WorldTile(3152,3197,0)&&
+                    tooltipPixelDiagnostic.Contains("PIXEL_GRID_VERIFIED"),
+                "a tooltip-tainted OCR quorum still requires real same-frame digit pixels and commas");
+        }
+        string[][] tooLongId=
+        [
+            ["Tile3152„ 3197» o","Chunk ID 807311","Region ID 1259312"],
+            ["Tile3152» 3197» o","Chunk ID 807311","Region ID 1259312"]
+        ];
+        Require(RuneLitePixelGridReader.ReadFieldQuorum(tooLongId,out string tooLongDiagnostic) is null&&
+                tooLongDiagnostic.Contains("region_readings=0"),
+            "adjacent digits may not be silently truncated into a valid Region ID");
+        string[][] contradictorySuffix=
+        [
+            ["Tile3152„ 3197» o","Chunk ID 807311","Region ID 12593 Pot"],
+            ["Tile3152» 3197» o","Chunk ID 807311","Region ID 12593 Pot"],
+            ["Tile3152, 3197, ø","Chunk ID 807311","Region ID 12594 Pot"],
+            ["Tile3152, 3197, ø","Chunk ID 807311","Region ID 12594 Pot"]
+        ];
+        Require(RuneLitePixelGridReader.ReadFieldQuorum(contradictorySuffix,out string suffixSplitDiagnostic) is null&&
+                suffixSplitDiagnostic.Contains("region_quorums=2"),
+            "conflicting suffixed Region IDs must remain blocked");
         string[][] conflicting=
         [
             ["Tile3145„ 3210»","Chunk ID 805265","Region ID 12594"],

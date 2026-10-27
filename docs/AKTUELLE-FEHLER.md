@@ -1,4 +1,18 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.10
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.11
+
+**1.8.11 – fremder HUD-Text teilt OCR-Zeile mit einer ID:**
+Der echte 1.8.10-Live-Test bestätigt den Updateweg, vollständige
+mehrhundertstellige Pixel-Logeinträge und mehrere bewegte Positionen
+mit `OVERLAY_CONFIRMED`. In einigen Frames verschmilzt jedoch
+`Pot (GE: 12 gp)` mit `Region ID 12593` oder `Chunk ID 805263`,
+z. B. `Region ID 12593 12`. Ein bisher strenger Zeilen-Endanker
+verwirft dann die ganze ID, obwohl Zahl und mathematische Prüfsumme
+passen. 1.8.11 entnimmt im Feldquorum nur die **genau** fünf bzw.
+sechs Ziffern vor einem durch Leerraum abgetrennten OCR-Suffix;
+adjazente Extraziffern, widersprechende Quoren, Checksumme- oder
+Pixelverweigerung bleiben Sperrgründe. Ein neuer Zähler zeigt pro
+Frame, wie oft ein Suffix übersprungen wurde. Kein Live-Test der
+Änderung und weiterhin keine automatisch ausgeführten Spielaktionen.
 
 **1.8.10 – vollständige Fehlerereignisse statt 480-Zeichen-Abschneidung:**
 Das echte 1.8.9-Log belegt das automatische Update, die unabhängige
