@@ -1,4 +1,37 @@
-# OSRS Play 1.8.15 – Pixelbeweis bei einzeln gelesener Chunk-ID
+# OSRS Play 1.8.16 – Mehrfach bestätigtes X/Y bei einzelner Chunk-ID
+
+**Neu in 1.8.16 – echte OCR-Lücke aus dem 1.8.15-Live-Test geschlossen:**
+Das echte Live-Protokoll vom 27.10.2026, 23:11–23:12 Uhr bestätigt
+`version=1.8.15`, `PREVIOUS_UPDATE`, `ALREADY_CURRENT`,
+automatisch kopierte Fehlerlogs und neue bestätigte Bewegungen.
+In den Proben 7, 10, 11, 26, 28, 35, 37, 38 und 44 erscheint
+die **Chunk-ID nur in einem OCR-Durchlauf vollständig**, aber zwei
+bis vier OCR-Varianten stimmen beim X/Y-Paar überein. Der für genau
+eine X/Y-Lesung eingerichtete Sonderweg aus 1.8.15 lehnte diese
+zusätzlichen unabhängigen Belege bislang ab (`attempted=false`).
+
+1.8.16 akzeptiert in diesem **streng begrenzten Sonderweg** auch
+mehrere numerische X/Y-Lesungen – nur wenn **alle identisch** sind,
+mindestens eine aus einem **anderen OCR-Pass als die einzige
+Chunk-ID** stammt und **mindestens drei** identische Region-IDs
+vorliegen. Die Chunk-/Region-Prüfsummen, höchstens 64 rechnerisch
+passende Felder, aus realen Pixeln benannte Ziffern, sichtbare
+Kommas, tatsächliche Ebene, eine eindeutige Position und zwei
+zeitlich getrennte Aufnahmen bleiben unverändert Pflicht.
+`xy_distinct_values`, `cross_pass_xy_votes` und `id_xy_votes`
+zeigen im Diagnoseprotokoll, welche Quellen den Kandidaten tragen.
+Widersprechende OCR-Paare, fehlende Pixel oder unbekannte
+Einzelglyphen sperren weiter.
+
+Unabhängige 1.8.15-Live-Aufnahmen bestätigten weiterhin mehrere
+Positionen, aber ein zeitweiser `GRID_INFO_NOT_READABLE`-Fehler
+blieb auch bei zwei regulären Chunk-Stimmen bestehen, weil die
+Pixelprüfung eine unbekannte, nur einmal vorkommende Tile-Ziffer
+nicht benennen konnte. Das wird **nicht geraten**. Die neue
+1.8.16-Regel ist synthetisch geprüft; ein Live-Test steht noch aus.
+Automatische RuneLite-Spielaktionen sind weiterhin nicht vorhanden.
+
+## Vorherige Verbesserungen
 
 **Neu in 1.8.15 – Chunk-ID nur einmal lesbar, XY und Region getrennt:**
 Der echte 1.8.14-Live-Test bestätigt erneut das automatische Update,

@@ -414,6 +414,66 @@ internal static class RuneLitePixelGridReaderTests
         splitSingleChunks[2][1]="Chunk ID 809361";
         Require(RuneLitePixelGridReader.ReadIdQuorum(splitSingleChunks,out _) is null,
             "two different single Chunk readings must not be merged into a plausible value");
+        // Actual 1.8.15 movement log, samples 35/37/38: one full Chunk
+        // in nearest_2x but THREE or FOUR identical numeric XY readings
+        // from different OCR scales. The 1.8.15 exception wrongly rejected
+        // the stronger cross-pass evidence simply because XY had >1 vote.
+        string[][] manyXYOneChunk=
+        [
+            ["Tile3151» 3196» o","Chunk ID 805263","Region ID 12593"],
+            ["Tile3151» 3196, O","Region ID 12593"],
+            ["Tile3151, 3196, Ø","Chunk ID 8Ø5263","Region ID 12593"],
+            ["Tile3151, 3196, Ø","Chunk ID 8ø5263","Region ID 12593"]
+        ];
+        Require(RuneLitePixelGridReader.ReadFieldQuorum(manyXYOneChunk,out _) is null,
+            "one Chunk vote must not quietly become an ordinary field quorum");
+        var multiXYAssisted=RuneLitePixelGridReader.ReadIdQuorum(manyXYOneChunk,out string multiXYDiag);
+        Require(multiXYAssisted is {Chunk:"805263",Region:"12593",ChunkVotes:1,
+                RegionVotes:4,XYVotes:4,SingleXY:(3151,3196)}&&
+                multiXYDiag.Contains("SINGLE_CHUNK_CROSSCHECK_VERIFIED")&&
+                multiXYDiag.Contains("xy_distinct_values=1")&&
+                multiXYDiag.Contains("cross_pass_xy_votes=3"),
+            "all four agreeing numeric XY reads must safely crosscheck one independent Chunk: "+multiXYDiag);
+        using(var multiXYBitmap=Fixture(tileX:3151,tileY:3196))
+        {
+            var isolated=manyXYOneChunk.Select(RuneLitePixelGridReader.ReadObservation)
+                .Where(o=>o is not null).Select(o=>o!.Value).ToArray();
+            Require(isolated.Length<=1,
+                "the live one-Chunk case has at most one complete OCR panel");
+            var verified=RuneLitePixelGridReader.Read(multiXYBitmap,isolated,out string detail,
+                idQuorum:multiXYAssisted);
+            Require(verified?.Tile==new WorldTile(3151,3196,0)&&
+                    detail.Contains("id_xy_votes=4")&&
+                    detail.Contains("single_xy_matches_pixels=true")&&
+                    detail.Contains("PIXEL_GRID_VERIFIED"),
+                "cross-pass XY can release only a unique, fully labelled, same-frame pixel grid: "+detail);
+            // Even unanimous text cannot replace a real pixel separator.
+            for(int dy=0;dy<11;dy++)for(int dx=0;dx<7;dx++)
+                multiXYBitmap.SetPixel(7+8*7+dx,13+dy,Color.FromArgb(21,26,32));
+            Require(RuneLitePixelGridReader.Read(multiXYBitmap,isolated,out _,
+                    idQuorum:multiXYAssisted) is null,
+                "four numeric XY votes never excuse a missing first comma");
+        }
+        var mixedXY=manyXYOneChunk.Select(x=>x.ToArray()).ToArray();
+        mixedXY[3][0]="Tile3152, 3196, Ø";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(mixedXY,out string disagreementXY) is null&&
+                disagreementXY.Contains("xy_distinct_values=2"),
+            "a conflicting in-chunk XY read must veto the single-Chunk exception");
+        var samePassOnly=manyXYOneChunk.Select(x=>x.ToArray()).ToArray();
+        for(int i=1;i<samePassOnly.Length;i++)samePassOnly[i][0]="Tile315Ø, 3196, Ø";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(samePassOnly,out string independentXYDiag) is null&&
+                independentXYDiag.Contains("cross_pass_xy_votes=0"),
+            "a lone Chunk and its own XY read cannot corroborate each other without a separate pass");
+        var twoRegionMultiXY=manyXYOneChunk.Select(x=>x.ToArray()).ToArray();
+        twoRegionMultiXY[2][2]="Region ID 12Ø93";
+        twoRegionMultiXY[3][2]="Region ID 12ø93";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(twoRegionMultiXY,out _) is null,
+            "several XY votes cannot reduce the strict three-Region requirement");
+        var wrongChunkMultiXY=manyXYOneChunk.Select(x=>x.ToArray()).ToArray();
+        wrongChunkMultiXY[0][1]="Chunk ID 805262";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(wrongChunkMultiXY,out string wrongChunkDiag) is null&&
+                wrongChunkDiag.Contains("SINGLE_XY_CHECKSUM_REJECTED"),
+            "same-region but wrong Chunk may not be rescued by repeated XY OCR guesses");
         var incorrectIds=damagedXY.Select(a=>a.ToArray()).ToArray();
         foreach(var pass in incorrectIds)pass[2]="Region ID 12594";
         Require(RuneLitePixelGridReader.ReadIdQuorum(incorrectIds,out string wrongIdDiagnostic) is null&&

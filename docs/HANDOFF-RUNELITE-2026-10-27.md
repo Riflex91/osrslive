@@ -1,4 +1,47 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.15
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.16
+
+## 1.8.15 live: starke X/Y-Mehrheit sperrt den Ein-Chunk-Sonderweg (1.8.16)
+
+Das Benutzerprotokoll vom 27.10.2026, 23:11–23:12 Uhr (Europe/Berlin)
+bestätigt die automatisch installierte Version `1.8.15` mit
+`PREVIOUS_UPDATE`, `ALREADY_CURRENT`, Push-Build `40592198060`
+und `clipboard=COPIED`. Die Bewegungschronik bestätigte u. a.
+3158/3190, 3158/3187, 3157/3197, 3158/3201, 3153/3193
+und 3159/3199, jeweils nach der unabhängigen Zweibildprüfung.
+Weder der Updatepfad noch der Kopierpfad müssen erneut geraten werden.
+
+Die in 1.8.15 ergänzte `SINGLE_CHUNK_CROSSCHECK_VERIFIED`-Route
+trat im echten Protokoll nicht auf: Bei Probe 35, 37 und 38 sieht
+`nearest_2x` als einzige OCR-Variante die Chunk-ID `805263`.
+`nearest_3x`, `bicubic_4x` und `contrast_4x` lesen das **gleiche**
+numerische X/Y `3151/3196`; zwei bis vier volle X/Y-Lesungen
+führten zum Log `ID_ONLY_QUORUM NOT_READY xy_readings=3/4
+chunk_readings=1 single_chunk_assisted=false`. Vergleichbare
+Ereignisse gab es bei Probe 7, 10, 11, 26, 28 und 44.
+
+1.8.16 erweitert **nur die Ein-Chunk-Ausnahme**: Beliebig viele
+vollständige X/Y-Zahlenpaare aus den vorhandenen vier OCR-Pässen
+sind zulässig, falls alle **denselben** Wert haben, mindestens
+eine vollständige Lesung nicht aus dem Chunk-Pass stammt und drei
+Region-Stimmen übereinstimmen. Widersprechende X/Y-Werte oder
+mehr als eine abweichende Chunk-ID sperren. Die Checksummen von
+Chunk/Region/X/Y, der Vergleich zur einzigen echten 64-Kandidaten-
+Pixelposition, echte Ziffernvorlagen samt sichtbaren Trennzeichen
+und Ebene und die zweite frische Aufnahme bleiben Pflicht.
+Neu im Log: `xy_distinct_values`, `cross_pass_xy_votes`,
+`id_xy_votes`. Negative Tests simulieren widersprechende Werte,
+fehlende OCR-Unabhängigkeit, zu wenige Regionsstimmen, falsche
+Chunk-ID und fehlendes echtes Komma. Der Windows-CI-Test ist
+noch ausstehend; keine Spielsteuerung.
+
+Unabhängig davon gab es bei Proben 41/42 eine echte zweite Grenze:
+`FIELD_QUORUM CHECKSUM_VERIFIED xy_votes=4 chunk_votes=2
+region_votes=4`, aber `RUNELITE_PIXEL unknown_singleton_rejects=6
+full_matches=0`. Ohne eindeutig benannte oder historisch zweifach
+bestätigte Ziffernglyphe wird auch ein korrekt gelesenes X/Y
+**nicht** freigegeben. Das erklärt den roten
+`GRID_INFO_NOT_READABLE`-Fehler und die automatische Logkopie,
+ist jedoch **kein** Grund, unbenannte Pixelziffern zu erraten.
 
 ## Chunk nur in einem OCR-Pass vorhanden; Positionsprüfung blockiert (1.8.15)
 

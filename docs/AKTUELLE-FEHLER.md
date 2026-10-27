@@ -1,4 +1,33 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.15
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.16
+
+**1.8.16 – mehrfach erkannte X/Y-Werte bei einzelner Chunk-ID:**
+Das echte 1.8.15-Protokoll (27.10.2026, 23:11–23:12 Uhr)
+belegt die automatische Updateinstallation, passende Release-
+Metadaten, mehrfach bestätigte Bewegungskoordinaten und die
+automatische Kopie der Fehlerlogdatei. Die neue Ein-Chunk-Route
+aus 1.8.15 wurde nicht aktiviert, obwohl mehrere Proben nur
+**eine** Chunk-ID, **drei bis vier** Region-ID-Lesungen und
+**zwei bis vier übereinstimmende** X/Y-Paare enthielten.
+Ursache war die alte Bedingung `xyReadings.Count==1`, die
+mehrere übereinstimmende Werte ebenfalls ablehnte.
+
+1.8.16 erlaubt in dieser Ausnahme mehrere X/Y-Lesungen, aber
+nur bei einem **einzigen identischen** Wert, mindestens einer
+Lesung aus einem vom Chunk unabhängigen OCR-Pass und mindestens
+drei gleichen Region-ID-Werten. Jede konkurrierende X/Y-Lesung,
+ein falscher Chunk, fehlende Pixelziffer oder Trennzeichen und
+die fehlende frische Zweitaufnahme sperren weiterhin.
+`xy_distinct_values`, `cross_pass_xy_votes` und `id_xy_votes`
+zeigen die tatsächliche Evidenz; die echte Windows-CI-/Live-
+Bestätigung steht noch aus.
+
+**Separat offen:** Probe 42 des 1.8.15-Laufs besaß volle Feldquoren,
+aber nur unzureichend benannte Ziffernvorlagen im Pixelraster
+(`unknown_singleton_rejects=6`, `full_matches=0`). Der Client
+verweigerte daher berechtigt die Position, meldete nach Timeout
+rot `GRID_INFO_NOT_READABLE` und kopierte das Log. Die genuine
+fehlende Pixelbeweiskette und die bislang nicht implementierte
+Gameplay-Automation bleiben offene Punkte; es wird nichts geraten.
 
 **1.8.15 – eine einzige Chunk-ID-Stimme trotz ausreichender anderer Hinweise:**
 Das echte 1.8.14-Live-Log vom 27.10.2026, 22:54–22:55 Uhr
