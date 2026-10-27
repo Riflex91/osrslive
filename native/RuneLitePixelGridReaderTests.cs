@@ -259,6 +259,61 @@ internal static class RuneLitePixelGridReaderTests
         Require(RuneLitePixelGridReader.ReadFieldQuorum(contradictorySuffix,out string suffixSplitDiagnostic) is null&&
                 suffixSplitDiagnostic.Contains("region_quorums=2"),
             "conflicting suffixed Region IDs must remain blocked");
+        // Real movement OCR can read '315Ø' in EVERY pass. Repeated IDs
+        // alone only narrow the tile to an 8x8 chunk. The new independent
+        // pixel path must match ALL eight labelled XY glyphs exactly and
+        // uniquely, with real commas and a separately visible floor.
+        string[][] damagedXY=
+        [
+            ["Tile315Ø„ 3196» o","Chunk ID 805263","Region ID 12593"],
+            ["Tile315Ø» 3196» o","Chunk ID 805263","Region ID 12593"],
+            ["Tile 315Ø, 3196, ø","Chunk ID 8Ø5263","Region ID 12593"],
+            ["Tile315Ø, 3196, ø","Chunk ID 8ø5263","Region ID 12593"]
+        ];
+        Require(RuneLitePixelGridReader.ReadFieldQuorum(damagedXY,out _) is null,
+            "no damaged Tile digit may become a numeric field vote");
+        var onlyIds=RuneLitePixelGridReader.ReadIdQuorum(damagedXY,out string idDiagnostic);
+        Require(onlyIds is {Chunk:"805263",Region:"12593",ChunkVotes:2,RegionVotes:4,TileLabelVotes:4}&&
+                idDiagnostic.Contains("candidate_tiles=64"),
+            "complete independent ID fields can constrain but not guess an unreadable XY pair: "+idDiagnostic);
+        using(var idBitmap=Fixture(tileX:3150,tileY:3196))
+        {
+            var fromPixels=RuneLitePixelGridReader.Read(idBitmap,
+                Array.Empty<RuneLitePixelGridReader.Observation>(),out string idRasterDiagnostic,
+                idQuorum:onlyIds);
+            Require(fromPixels?.Tile==new WorldTile(3150,3196,0)&&
+                    idRasterDiagnostic.Contains("ID_ONLY_PIXEL_ENUMERATION")&&
+                    idRasterDiagnostic.Contains("distinct_positions=1")&&
+                    idRasterDiagnostic.Contains("PIXEL_GRID_VERIFIED"),
+                "real labelled pixels and two real commas must uniquely determine a tile within the 64-cell chunk: "+idRasterDiagnostic);
+            // The comma pixels are not optional even when two IDs agree.
+            for(int dy=0;dy<11;dy++)for(int dx=0;dx<7;dx++)
+                idBitmap.SetPixel(7+14*7+dx,13+dy,Color.FromArgb(21,26,32));
+            Require(RuneLitePixelGridReader.Read(idBitmap,
+                    Array.Empty<RuneLitePixelGridReader.Observation>(),out _,idQuorum:onlyIds) is null,
+                "ID-only evidence must fail if a visible comma is missing");
+        }
+        var oneIdPass=RuneLitePixelGridReader.ReadIdQuorum(damagedXY.Take(1).ToArray(),out _);
+        Require(oneIdPass is null,"one OCR frame cannot certify ID-only candidate enumeration");
+        var numericXY=damagedXY.Select(a=>a.ToArray()).ToArray();
+        numericXY[0][0]="Tile3150» 3196» o";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(numericXY,out string numericDiagnostic) is null&&
+                numericDiagnostic.Contains("xy_readings=1"),
+            "an available numeric XY reading must veto the ID-only fallback even if its peers are damaged");
+        var incorrectIds=damagedXY.Select(a=>a.ToArray()).ToArray();
+        foreach(var pass in incorrectIds)pass[2]="Region ID 12594";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(incorrectIds,out string wrongIdDiagnostic) is null&&
+                wrongIdDiagnostic.Contains("CHECKSUM_REJECTED"),
+            "valid-looking independent IDs with an impossible chunk-to-region mapping must fail");
+        using(var incompleteBitmap=Fixture(tileX:3140,tileY:3199))
+        {
+            var incompleteId=RuneLitePixelGridReader.ReadIdQuorum(new[]{
+                new[]{"Tile314Ø» 3199» o","Chunk ID 803215","Region ID 12593"},
+                new[]{"Tile314Ø» 3199» o","Chunk ID 803215","Region ID 12593"}},out _);
+            Require(incompleteId is not null&&RuneLitePixelGridReader.Read(incompleteBitmap,
+                    Array.Empty<RuneLitePixelGridReader.Observation>(),out _,idQuorum:incompleteId) is null,
+                "an unknown unlabelled singleton may not be inferred from one bitmap and two ID votes");
+        }
         string[][] conflicting=
         [
             ["Tile3145„ 3210»","Chunk ID 805265","Region ID 12594"],

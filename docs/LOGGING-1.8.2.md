@@ -55,6 +55,7 @@
 | Sitzungsinterne Pixelvorlagen (ab 1.8.9) | `stage=GLYPH_HISTORY`, `trusted_history_frames`, `historical_glyph_matches`, `historical_contradictions` dokumentieren die Prüfung gegen unabhängig bestätigte ältere Glyphen ohne deren Rohdaten zu speichern. |
 | Lange Ereignisse (ab 1.8.10) | Vollständige Pixelprüfungen überschreiten die frühere pauschale 480-Zeichen-Grenze. Detailfelder behalten jetzt bis zu 16.384 bereinigte Zeichen inklusive `full_matches`, `distinct_positions`, `elapsed_ms` und `result`. Ausnahmsweise darüber hinaus gekürzte Einträge nennen die Anzahl ausgelassener Zeichen ausdrücklich. |
 | Fremde OCR-Suffixe (ab 1.8.11) | `chunk_ignored_suffixes` und `region_ignored_suffixes` zählen durch Whitespace abgesetzten zusätzlichen HUD-/Tooltiptext hinter korrekt langen Chunk-/Region-ID-Ziffern. Konkurrierende Stimmen, Checksummen und echte Pixelprüfung bleiben sichtbar und verbindlich. |
+| Reine ID-/Pixelpositionsprüfung (ab 1.8.12) | `stage=ID_ONLY_QUORUM` zählt numerische X/Y-OCR-Lesungen, gültige Tile-Labels sowie ID-Stimmen; bei exakt null X/Y-Lesungen und eindeutigen IDs werden höchstens 64 Chunk-Felder streng pixelgeprüft (`evidence_source=ID_ONLY_PIXEL_ENUMERATION`, `tile_candidates=64`). Kein Glyphraten, weiterhin reale Kommas, Ebene und Zweibildbestätigung. |
 | Altes Backend | Zusätzlich bestehende Render-, Login-, Welt-, Inventar-, Navigations-, Kampf- und Aktivitätsereignisse sowie blockierte Executor-Zustände |
 
 Die Datei speichert **keine Bildschirmbilder**, Prozessspeicher, Jagex-

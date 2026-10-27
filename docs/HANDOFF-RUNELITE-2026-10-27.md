@@ -1,4 +1,51 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.11
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.12
+
+## Letzter OCR-Block: beschädigte X/Y-Ziffer in allen Varianten (1.8.12)
+
+Das echte 1.8.11-Live-Protokoll vom 27.10.2026 um 22:02
+(Europe/Berlin) bestätigt `version=1.8.11`, Push-Build
+`40582676507`, automatische Installation, aktuelle Manifest-
+und Release-API-Version 1.8.11. `region_ignored_suffixes=3`
+trat u. a. in Probe 51–53 auf, die beide ID-Prüfsummen,
+`PIXEL_GRID_VERIFIED` (`full_matches=4`, `distinct_positions=1`)
+und ab Probe 52 die echte Freigabe **3145/3196/Ebene 0**
+erreichten. Weitere bestätigte Bewegungspositionen waren
+3142/3201, 3142/3205, 3145/3208, 3146/3210, 3145/3199
+und 3146/3195. **Die 1.8.11-Feldsuffixänderung funktioniert live.**
+
+Bei anderem Bewegungsgang stehen hingegen mehrfach `Tile315Ø`
+oder `Tile314Ø` in ALLEN vier Windows-OCR-Varianten: X ist also
+nie vollständig numerisch. Selbst wenn beide Chunk- und Region-IDs
+mehrfach konsistent gelesen werden, bleibt `FIELD_QUORUM NOT_READY`
+mit `xy_readings=0`; die nachgelagerte Pixelprüfung wird gar nicht
+erreicht. Blindes `Ø`→`0` bleibt verboten.
+
+1.8.12 fügt einen eng begrenzten und separat protokollierten
+`ID_ONLY_QUORUM`-Ausweichweg ein: Er ist nur bei **null** vollständigen
+numerischen X/Y-OCR-Lesungen, mindestens zwei erkannten `Tile`-Labels,
+einem jeweils eindeutigen und mindestens zweifach bestätigten
+Chunk-/Region-ID-Wert sowie der mathematischen Konsistenz beider
+IDs anwendbar. Dadurch sind nur noch **64 mögliche Felder** innerhalb
+dieses Chunks denkbar. Die tatsächliche X/Y-Position wird dann aus
+realen Pixelrasterformen der Chunk-/Region-ID desselben Bildes
+und gegebenenfalls aus Glyphen von mindestens zwei früheren
+vollständig bestätigten Aufnahmen bestimmt. Anders als bei der
+OCR-begleiteten Rasterprüfung sind **keine unbekannten,
+nur wiederholten Glyphen** erlaubt: Jede der acht X/Y-Ziffern muss
+einen unabhängig bezeichneten Pixelbeleg besitzen. Dasselbe
+Bild muss weiterhin echte Kommas und eine trainierte Ebenenziffer
+zeigen; ausschließlich **eine** eindeutige Rasterposition darf
+übrigbleiben, danach ist eine zweite frische Aufnahme zwingend.
+Der sonstige OCR-Konfliktveto und alle früheren Sperren bleiben.
+
+Offline-Fixtures erproben explizit `Tile315Ø` mit wahrer
+Position 3150/3196, mutiertes Komma, fehlenden ID-Quorum,
+vorhandenes numerisches Gegenpaar, unmögliche Chunk-/Region-Zuordnung
+und ein für Pixel nicht belegbares unbekanntes Singleton.
+Die Diagnose nennt `stage=ID_ONLY_QUORUM`, `candidate_tiles=64`
+und `evidence_source=ID_ONLY_PIXEL_ENUMERATION`.
+**Noch kein echter 1.8.12-Live-Test und keinerlei automatische
+Spielaktion.**
 
 ## Neue OCR-Zeilenverschmelzung durch andere HUD-Texte (1.8.11)
 
