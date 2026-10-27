@@ -1,4 +1,24 @@
-# OSRS Play 1.8.11 – RuneLite-Companion mit abgesicherten OCR-Feldern
+# OSRS Play 1.8.12 – unabhängige Pixelkoordinaten bei OCR-Ausfall
+
+**Neu in 1.8.12 – beschädigte X/Y-Ziffern nicht blind ersetzen:**
+Das echte 1.8.11-Live-Log bestätigt die Tooltip-Suffix-Korrektur:
+Mit `region_ignored_suffixes=3` gelang in mehreren aufeinanderfolgenden
+Bildern die Pixel- und Zweibildfreigabe für Position 3145/3196/0.
+Manche andere Positionen bleiben aber blockiert, weil alle OCR-
+Aufbereitungen z. B. `315Ø` statt vier numerischer X-Ziffern lesen.
+Wenn **keine** OCR-Aufbereitung ein vollständiges numerisches X/Y-Paar
+liefert, jedoch Chunk und Region jeweils zweimal identisch erkannt
+werden, kann der Leser den Suchraum nun rein mathematisch auf die
+64 Felder eines Chunks beschränken. Er muss danach für **jede einzelne
+X/Y-Ziffer** einen zugewiesenen realen Pixel-Glyphen aus dem aktuellen
+ID-Bild oder mindestens zwei früher bestätigten Aufnahmen nachweisen.
+Weder wiederholte unbenannte Zeichen noch spekulative `Ø`→`0`-
+Ersetzungen werden freigegeben. Eindeutige Pixelposition, zwei echte
+Kommas, visuell belegte Ebene, Chunk-/Regionsprüfsummen und eine
+zweite unabhängige frische Aufnahme bleiben Pflicht. Neue
+`stage=ID_ONLY_QUORUM`-/`ID_ONLY_PIXEL_ENUMERATION`-Diagnose und
+synthetische Negativtests begleiten diesen **bis zum Live-Test rein
+offline geprüften** Ausweichweg. Gameplay-Eingaben bleiben aus.
 
 **Neu in 1.8.11 – HUD-/Tooltiptext neben Chunk- und Region-IDs:**
 Der 1.8.10-Live-Test bestätigt die automatische Installation und die

@@ -102,11 +102,17 @@ internal static class RuneLiteGridReader
         }
         var fieldQuorum=RuneLitePixelGridReader.ReadFieldQuorum(ocrFields,out string fieldDiagnostic);
         pixelDiagnostic?.Invoke(fieldDiagnostic);
+        RuneLitePixelGridReader.IdQuorum? idQuorum=null;
+        if(fieldQuorum is null)
+        {
+            idQuorum=RuneLitePixelGridReader.ReadIdQuorum(ocrFields,out string idDiagnostic);
+            pixelDiagnostic?.Invoke(idDiagnostic);
+        }
         // Retain templates only if the raster evidence survives all OCR
         // contradictions, then let the caller enforce the separate frame gate.
         IReadOnlyList<RuneLitePixelGridReader.GlyphSnapshot>? proposed=null;
         var raster=RuneLitePixelGridReader.Read(crop,observations,out string rasterDiagnostic,
-            fieldQuorum,history,snapshots=>proposed=snapshots);
+            fieldQuorum,history,snapshots=>proposed=snapshots,idQuorum);
         pixelDiagnostic?.Invoke(rasterDiagnostic);
         // A valid pixel reading cannot override a different valid OCR reading.
         // The existing two-independent-fresh-frames gate remains unchanged.

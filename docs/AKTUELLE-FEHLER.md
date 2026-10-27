@@ -1,4 +1,20 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.11
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.12
+
+**1.8.12 – kompletter numerischer X/Y-Ausfall trotz sauberer IDs:**
+Das echte 1.8.11-Live-Log bestätigt die neue Feldsuffixregel:
+`region_ignored_suffixes=3` und anschließend
+`PIXEL_GRID_VERIFIED` sowie `OVERLAY_CONFIRMED` für 3145/3196.
+Andere Proben mit `Tile315Ø`/`Tile314Ø` in allen vier OCR-Pässen
+bleiben gesperrt, weil die X/Y-Feldstimmen fehlen. 1.8.12 lässt
+**nur in dieser speziellen Lage** nach zwei eindeutigen, rechnerisch
+passenden Chunk-/Region-ID-Quoren die maximal 64 möglichen Tile-Felder
+pixelweise prüfen. Jede der acht Ziffern benötigt einen unabhängig
+benannten Glyphbeleg aus aktuellen IDs oder früheren bestätigten
+Frames; OCR-Zeichenersatz oder unbenannte Wiederholung sind
+ausgeschlossen. Kommas, Ebene, Eindeutigkeit und zwei frische Frames
+bleiben Pflicht. Keine Freigabe bei widersprechendem OCR-X/Y,
+fehlender ID, ungültigen Pixeln oder falschen Checksummen. Der
+Live-Test dieser neuen strengeren Ausweichroute steht aus.
 
 **1.8.11 – fremder HUD-Text teilt OCR-Zeile mit einer ID:**
 Der echte 1.8.10-Live-Test bestätigt den Updateweg, vollständige
