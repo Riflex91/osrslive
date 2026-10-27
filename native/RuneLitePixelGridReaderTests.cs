@@ -16,14 +16,14 @@ internal static class RuneLitePixelGridReaderTests
         ['9']=["11110","10001","10001","11111","00001","00001","00001"]
     };
 
-    private static Bitmap Fixture(int plane=0)
+    private static Bitmap Fixture(int plane=0,int offsetX=0,int offsetY=0)
     {
-        var image=new Bitmap(145,82);
+        var image=new Bitmap(145+offsetX,82+offsetY);
         using(var g=Graphics.FromImage(image))g.Clear(Color.FromArgb(21,26,32));
         string[] lines={"Tile3143, 3210, "+plane,"Chunk ID   803217","Region ID   12594"};
         for(int row=0;row<lines.Length;row++)for(int col=0;col<lines[row].Length;col++)
         {
-            int x0=7+col*7,y0=13+row*15;
+            int x0=7+offsetX+col*7,y0=13+offsetY+row*15;
             char symbol=lines[row][col];
             if(Digits.TryGetValue(symbol,out var digit))
             {
@@ -79,6 +79,20 @@ internal static class RuneLitePixelGridReaderTests
         using(var bitmap=Fixture(2))
             Require(RuneLitePixelGridReader.Read(bitmap,new[]{observation!.Value,observation.Value},out _)?.Tile.Plane==2,
                 "the pixel decoder must preserve a real nonzero floor instead of guessing zero");
+        // The supplied full-window screenshot has exactly the same thresholded
+        // 131x55 panel pixels as the cropped screenshot, translated +14,+53.
+        // Neither private image is embedded in this synthetic regression.
+        using(var offsetBitmap=Fixture(offsetX:14,offsetY:53))
+            Require(RuneLitePixelGridReader.Read(offsetBitmap,
+                new[]{observation!.Value,observation.Value},out _)?.Tile==new WorldTile(3143,3210,0),
+                "the observed full-window offset must decode without assuming a cropped-panel origin");
+        using(var offsetBitmap=Fixture(offsetX:118,offsetY:82))
+        {
+            var shifted=RuneLitePixelGridReader.Read(offsetBitmap,
+                new[]{observation!.Value,observation.Value},out string detail);
+            Require(shifted?.Tile==new WorldTile(3143,3210,0)&&detail.Contains("PIXEL_GRID_VERIFIED"),
+                "a cropped screenshot origin must not be mistaken for the real RuneLite overlay offset");
+        }
         using(var bitmap=Fixture())
         {
             for(int y=0;y<11;y++)for(int x=0;x<7;x++)

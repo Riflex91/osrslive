@@ -1,12 +1,24 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.4
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.5
+
+**1.8.5 – erweiterte Suche nach World-Location-Pixeln:** Das erste echte
+1.8.4-Log zeigt in jeder Aufnahme zwei übereinstimmende OCR-ID-/X/Y-Beobachtungen,
+aber `comma_layouts=0` bei 4.536 geprüften Rasterankern. Die auf den
+zugeschnittenen Screenshot beschränkte Ankersuche wird auf den vollständigen
+350×220-OCR-Bereich erweitert. Ein später bereitgestelltes vollständiges
+RuneLite-Fensterbild bestätigte die Panelverschiebung um +14/+53 Pixel
+gegenüber dem Ausschnitt bei **identischen** binären Panelpixeln. Eine
+neue stufenweise Diagnose trennt fehlende
+helle Pixel, nichtpassende Kommas/Leerstellen und Ziffernmuster. Live-Ergebnis
+noch unbekannt; Spielaktionen weiterhin gesperrt.
 
 **1.8.4 – bisher ungelöste Live-Position:** Ein vom Benutzer zugeschnittener
 World-Location-Ausschnitt zeigte eine feste monospaced Rasterstruktur und
 sichtbare Kommas/Null, die Windows-OCR nicht zuverlässig erkannte. Ein neuer
 streng geprüfter, bildgestützter Leser gleicht Tile-Ziffern mit Vorlagen
 aus den bereits konsistenten Chunk-/Region-ID-Zeilen derselben Aufnahme ab.
-Die analoge Auswertung des Benutzerbilds ist plausibel; der eigentliche
-WGC-/RuneLite-Live-Lauf von 1.8.4 steht noch aus. Keine ungesicherten
+Die analoge Auswertung des Benutzerbilds ist plausibel; der echte
+WGC-/RuneLite-Lauf von 1.8.4 scheiterte allerdings an der zu eng begrenzten
+Ankersuche und wurde in 1.8.5 adressiert. Keine ungesicherten
 Ziffernersetzungen, keine Freigabe von Spieleingaben.
 
 **1.8.3 – Auto-Update im RuneLite-Modus:** Der automatische GitHub-Check war

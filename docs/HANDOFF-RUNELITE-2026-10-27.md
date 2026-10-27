@@ -1,4 +1,36 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.4
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.5
+
+## Erste echte 1.8.4-Rasterprobe und Positionssuchfenster-Fix (1.8.5)
+
+Der Benutzer stellte ein vollständiges 1.8.4-Sitzungslog nach dem
+Auto-Update bereit. Der Updater holte das Manifest in 143 ms und meldete
+die lokale 1.8.4 als aktuell. Genau ein vertrauenswürdiges RuneLite-Fenster
+und frische, opake Hintergrundbilder wurden erneut bestätigt. Die zwei
+Nearest-OCR-Lesungen erkannten in allen Proben dieselben Chunk-/Region-IDs
+und X/Y-Werte. Die neue Rasterprüfung wurde **tatsächlich** ausgeführt:
+`ocr_agreements=2`, `anchors_tested=4536`, aber bei allen Proben
+`comma_layouts=0`, `digit_templates=0`, `full_matches=0`.
+
+Der ursprüngliche Benutzer-Screenshot war auf das Panel selbst zugeschnitten;
+die Koordinaten seines ersten Glyphs im Vollbild müssen daher nicht x=7/y=13
+sein. Die erste Version des Pixel-Lesers suchte nur im oberen linken
+240×120-Bereich mit Ankerursprüngen x≤80/y≤55. Ein weiterer Screenshot
+zeigte das komplette RuneLite-Fenster: Der darin enthaltene 131×55-
+Panelbereich stimmt nach binärer Schwellenwertprüfung **in jedem Pixel**
+mit dem früheren engen Ausschnitt überein, liegt aber bei +14/+53 Pixeln.
+Der darin sichtbare erste Glyphenanker (x=21,y=66) lag jenseits der
+alten Grenze y≤55. Auch alle Ziffernvorlagen, zwei sichtbare Kommas und
+die Tile-Ebenenziffer 0 bestanden die unabhängige Rasterprüfung dieses
+Vollbilds. Die privaten Bilder werden nicht ins Repository übernommen.
+1.8.5 verwendet stattdessen
+**den gesamten schon zuvor in Windows-OCR zugelassenen 350×220-Ausschnitt**
+für die Pixelmaske und mögliche Textanker. Zusätzlich protokolliert sie
+das exakte Suchfenster, den Anteil heller Pixel, die gestaffelten
+Komma-/Trennzeichen-Prüfungen, die Ziffernvorlagen, vollständige Treffer
+und die Laufzeit. Ein verschobenes synthetisches Panel jenseits der alten
+Grenzen ergänzt die Regressionstests. Die harten Schranken für sichtbare
+Kommas, unabhängige OCR-Aufbereitungen, Ziffernähnlichkeit, IDs und zwei
+frische Frames bleiben bestehen. **Noch keine 1.8.5-Live-Bestätigung.**
 
 ## Gezielte Pixel-Ziffernprüfung aus einem echten Panel-Ausschnitt (1.8.4)
 
