@@ -19,6 +19,7 @@ internal sealed class RuneLiteWindow:Form
     private long generation,samples;
     private string? lastStatus;
     private DateTimeOffset blockedSince;
+    private DateTimeOffset lastConfirmedUtc=DateTimeOffset.UtcNow;
 
     internal RuneLiteWindow()
     {
@@ -66,6 +67,7 @@ internal sealed class RuneLiteWindow:Form
         pause.Click+=(_,_)=>
         {
             paused=!paused;generation++;source.Reset();position.Text="Position unbekannt";
+            if(!paused)lastConfirmedUtc=DateTimeOffset.UtcNow;
             status.Text=paused?"Verbindung pausiert":"Warte auf neue Positionsbilder";
             log.Add(Severity.INFO,"RUNELITE",paused?"USER_PAUSED":"USER_RESUMED",
                 $"generation={generation} old_position_discarded=true");
@@ -150,6 +152,11 @@ internal sealed class RuneLiteWindow:Form
                 $"previous={lastStatus??"none"} current={state.Status} sample={sequence}");
             lastStatus=state.Status;blockedSince=DateTimeOffset.UtcNow;
         }
+        if(state.Tile is not null)lastConfirmedUtc=DateTimeOffset.UtcNow;
+        else if(!paused&&DateTimeOffset.UtcNow-lastConfirmedUtc>=TimeSpan.FromSeconds(10))
+            failureLog.ReportFailure("RUNELITE","POSITION_NOT_CONFIRMED_TIMEOUT",
+                $"sample={sequence} latest_status={state.Status} "+
+                $"unconfirmed_s={(DateTimeOffset.UtcNow-lastConfirmedUtc).TotalSeconds:0} {state.Diagnostic}");
         bool stalledSecondFrame=state.Status=="WAITING_FOR_SECOND_FRAME"&&
             DateTimeOffset.UtcNow-blockedSince>=TimeSpan.FromSeconds(8);
         if(stalledSecondFrame||(FailureLogPolicy.RuneLiteBlocked(state.Status)&&

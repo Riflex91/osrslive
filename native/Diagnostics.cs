@@ -52,8 +52,10 @@ internal sealed class Diagnostics
             entries.Add(added);
             if(level==Severity.ERROR)errors++;
             if(level==Severity.WARN)warnings++;
+            // Serialise file subscribers under the same lock as sequence IDs:
+            // concurrent capture/observer threads must not invert log order.
+            try{EntryAdded?.Invoke(added);}catch{} // Storage cannot interrupt gameplay.
         }
-        try{EntryAdded?.Invoke(added);}catch{} // Log storage must never interrupt gameplay.
         Notify();
     }
     internal LogEvent[] Snapshot(){lock(sync)return entries.ToArray();}

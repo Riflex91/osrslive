@@ -26,6 +26,9 @@
   Clients sofort gemeldet. Im Legacy-Modus wird ein geplanter, aber länger als
   30 Sekunden in einem Waiting-Zustand nicht ausgeführter Auftrag gesondert
   protokolliert (nicht während einer Nutzerpause oder im Beobachtungsmodus).
+  Selbst wenn der RuneLite-OCR-Status zwischen mehreren Warteständen wechselt,
+  entsteht nach zehn Sekunden ohne bestätigte Position eine zusätzliche
+  `POSITION_NOT_CONFIRMED_TIMEOUT`-Diagnose.
 - Der RuneLite-Companion ist noch **nur lesend**. Die fehlende automatische
   Spielausführung wird einmalig als `AUTOMATION_NOT_IMPLEMENTED` protokolliert
   und kopiert; die rote Meldung ist daher derzeit selbst bei erfolgreich
