@@ -1,4 +1,20 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.0
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.1
+
+## Weiterarbeit an der Overlay-OCR (1.8.1)
+
+Die Positions-OCR prüft nun auch zusammengezogene `Chunk ID`-/`Region ID`-
+Beschriftungen, skaliert bei Bedarf bicubisch auf 4× und probiert eine zweite,
+kontrastverstärkte 4×-Ansicht (alles nur im RAM). Zwei reguläre 2×-/3×-Lesungen
+bleiben der schnelle Standardpfad. Falls mehrere Verfahren gültige, aber
+unterschiedliche Koordinaten erkennen, wird das Bild **abgelehnt**, selbst wenn
+Chunk- und Region-ID bei beiden passen. Parser-Regressionen prüfen den Fall.
+
+**Noch keine Live-Bestätigung auf `auto`:** Der bisherige `Tile3142» 3212» o`-
+Befund ist dadurch nicht automatisch korrigiert. Es findet keine pauschale
+`»`→`,`- oder `o`→`0`-Ersetzung statt; Eingaben bleiben deaktiviert. Nach
+Windows-CI ist der nächste aussagekräftige Test `--runelite-position-probe`
+auf der gestarteten regulären RuneLite-Sitzung. Erst dessen echte, frische
+Ergebnisse entscheiden über weitere Schritte.
 
 ## Zuerst lesen
 

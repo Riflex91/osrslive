@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Windows.Globalization;
 using Windows.Media.Ocr;
@@ -17,25 +19,63 @@ internal static class RuneLiteGridReader
     {
         var text=lines.Select(s=>s.Trim()).ToArray();
         var tiles=text.Select(s=>Regex.Match(s,@"^Tile\s*:?\s*(\d{1,5})\s*,\s*(\d{1,5})\s*,\s*([0-3])$",RegexOptions.IgnoreCase)).Where(m=>m.Success).ToArray();
-        var chunks=text.Select(s=>Regex.Match(s,@"^Chunk\s+ID\s*:?\s+(\d{1,7})$",RegexOptions.IgnoreCase)).Where(m=>m.Success).ToArray();
-        var regions=text.Select(s=>Regex.Match(s,@"^Region\s+ID\s*:?\s+(\d{1,5})$",RegexOptions.IgnoreCase)).Where(m=>m.Success).ToArray();
+        var chunks=text.Select(s=>Regex.Match(s,@"^Chunk\s+ID\s*:?\s*(\d{1,7})$",RegexOptions.IgnoreCase)).Where(m=>m.Success).ToArray();
+        var regions=text.Select(s=>Regex.Match(s,@"^Region\s+ID\s*:?\s*(\d{1,5})$",RegexOptions.IgnoreCase)).Where(m=>m.Success).ToArray();
         if(tiles.Length!=1||chunks.Length!=1||regions.Length!=1)return null;
         int x=int.Parse(tiles[0].Groups[1].Value),y=int.Parse(tiles[0].Groups[2].Value),plane=int.Parse(tiles[0].Groups[3].Value);
         int chunk=int.Parse(chunks[0].Groups[1].Value),region=int.Parse(regions[0].Groups[1].Value);
         if(x>16383||y>16383||chunk!=((x>>3)<<11|(y>>3))||region!=((x>>6)<<8|(y>>6)))return null;
         return new(new(x,y,plane),chunk,region);
     }
+    // Different OCR treatments of one image must never resolve to different
+    // valid player tiles. A matching chunk/region ID cannot distinguish two
+    // tiles within the same chunk, or distinguish floors.
+    internal static RuneLiteGridEvidence? ConsistentEvidence(IEnumerable<RuneLiteGridEvidence?> candidates)
+    {
+        var distinct=candidates.Where(c=>c is not null).Distinct().ToArray();
+        return distinct.Length==1?distinct[0]:null;
+    }
+
+    private static void IncreaseTextContrast(Bitmap bitmap)
+    {
+        // Work only on an in-memory OCR copy. The semitransparent panel can
+        // otherwise dominate the antialiased comma and slashed zero glyphs.
+        var area=new Rectangle(Point.Empty,bitmap.Size);
+        var bits=bitmap.LockBits(area,ImageLockMode.ReadWrite,PixelFormat.Format32bppArgb);
+        try
+        {
+            if(bits.Stride<=0)return; // GDI's bottom-up buffers are not assumed contiguous here.
+            int length=checked(bits.Stride*bitmap.Height);
+            var bytes=new byte[length];Marshal.Copy(bits.Scan0,bytes,0,length);
+            for(int y=0;y<bitmap.Height;y++)for(int x=0;x<bitmap.Width;x++)
+            {
+                int i=y*bits.Stride+x*4;
+                int luma=(29*bytes[i]+150*bytes[i+1]+77*bytes[i+2])>>8;
+                byte gray=(byte)Math.Clamp((luma-110)*3+128,0,255);
+                bytes[i]=bytes[i+1]=bytes[i+2]=gray;bytes[i+3]=255;
+            }
+            Marshal.Copy(bytes,0,bits.Scan0,length);
+        }
+        finally{bitmap.UnlockBits(bits);}
+    }
+
     internal static async Task<RuneLiteGridEvidence?> Read(Bitmap bitmap,OcrEngine engine,Action<string[]>? diagnostic=null)
     {
         // Fresh profiles place Grid Info at the canvas top-left. Read only the
         // small overlay region, excluding chat and account panes. No image saved.
         using var crop=bitmap.Clone(new Rectangle(0,0,Math.Min(350,bitmap.Width),Math.Min(220,bitmap.Height)),
-            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        foreach(int scale in new[]{2,3})
+            PixelFormat.Format32bppArgb);
+        var evidenceCandidates=new List<RuneLiteGridEvidence?>();
+        foreach(var (scale,contrast) in new[]{(2,false),(3,false),(4,false),(4,true)})
         {
             using var enlarged=new Bitmap(crop.Width*scale,crop.Height*scale);
             using(var g=Graphics.FromImage(enlarged))
-            {g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;g.DrawImage(crop,new Rectangle(Point.Empty,enlarged.Size));}
+            {
+                g.InterpolationMode=scale==4?System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic:
+                    System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                g.DrawImage(crop,new Rectangle(Point.Empty,enlarged.Size));
+            }
+            if(contrast)IncreaseTextContrast(enlarged);
             var result=await VisualStartup.RecognizeRaw(enlarged,engine);
             var rows=new List<List<OcrWord>>();
             foreach(var word in result.Lines.SelectMany(l=>l.Words).OrderBy(w=>w.BoundingRect.Y))
@@ -47,9 +87,12 @@ internal static class RuneLiteGridReader
             var text=rows.Select(r=>string.Join(" ",r.OrderBy(w=>w.BoundingRect.X).Select(w=>w.Text))).ToArray();
             diagnostic?.Invoke(text);
             var evidence=Parse(text);
-            if(evidence is not null)return evidence;
+            evidenceCandidates.Add(evidence);
+            // The cheap, existing paths still get an agreement check. Avoid
+            // expensive extra OCR unless neither has produced a valid panel.
+            if(scale==3&&evidenceCandidates.Any(e=>e is not null))break;
         }
-        return null;
+        return ConsistentEvidence(evidenceCandidates);
     }
 }
 

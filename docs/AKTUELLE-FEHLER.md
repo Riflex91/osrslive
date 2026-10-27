@@ -1,4 +1,9 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.0
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.1
+
+**1.8.1 (noch ohne neuen Live-Test):** Zusätzliche Bildaufbereitung für die
+World-Location-OCR und strengere Ablehnung widersprüchlicher gültiger
+Koordinaten aus demselben Bild sind ergänzt. Die Ebene-0-Lesbarkeit ist dadurch
+noch nicht nachgewiesen; die letzte bekannte Live-Sperre gilt weiterhin.
 
 **Architekturwechsel am 27.10.:** RuneLite muss über den offiziellen Jagex Launcher starten. Der eigene Entwicklungsclient samt privatem Export-Plugin wurde daher verworfen und aus dem aktuellen Standardstart entfernt. Der nur lesende Companion-Entwurf soll stattdessen das Spielerkoordinaten-Overlay von World Location per OCR lesen. Das lokale Profil auto samt fünf Hub-Plugins ist eingerichtet. Die Live-Probe liest unter anderem `Tile3142» 3212» o` statt 3142/3212/0 und verwirft die Position korrekt. Reine Tests und unzweideutige Ebene-2-OCR-Fixtures bestehen; die bekannte Ebene-0-Ablehnung wird ausdrücklich als Grenze ausgewiesen. Automatische RuneLite-Spielaktionen sind nicht implementiert. [Vollständige Übergabe](HANDOFF-RUNELITE-2026-10-27.md). [Migration](RUNELITE-MIGRATION-2026-10-27.md), [vollständiges Plugin-Screening und Auswahl](RUNELITE-PLUGIN-PRUEFUNG-2026-10-27.md).
 
