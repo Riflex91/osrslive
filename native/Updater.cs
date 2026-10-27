@@ -62,19 +62,31 @@ internal static class Updater
             digest.Any(c=>!Uri.IsHexDigit(c))) throw new FormatException("Invalid SHA256");
         return new UpdateInfo(parsed,uri,digest.ToLowerInvariant());
     }
-    internal static async Task<bool> CheckAndUpdateAsync(Action<string> status,CancellationToken cancellationToken=default)
+    internal static async Task<bool> CheckAndUpdateAsync(Action<string> status,CancellationToken cancellationToken=default,
+        Action<string,string>? diagnostic=null,Action<Exception>? onError=null,HttpClient? testClient=null)
     {
+        var transport=testClient??Client;
         var current=System.Reflection.Assembly.GetExecutingAssembly().GetName().Version ?? new Version(Diagnostics.Version);
+        var elapsed=Stopwatch.StartNew();
         try
         {
             status("Suche nach neuer Version auf GitHub ...");
-            using var manifestResponse=await Client.GetAsync(Manifest,HttpCompletionOption.ResponseHeadersRead,cancellationToken);
+            diagnostic?.Invoke("MANIFEST_REQUEST",$"current_version={current} host={Manifest.Host} channel=stable");
+            using var manifestResponse=await transport.GetAsync(Manifest,HttpCompletionOption.ResponseHeadersRead,cancellationToken);
             manifestResponse.EnsureSuccessStatusCode();
             var manifest=await manifestResponse.Content.ReadAsStringAsync(cancellationToken);
             var update=ParseManifest(manifest);
-            if(update.Version<=current) {status($"Version {Diagnostics.Version} ist aktuell.");return false;}
+            diagnostic?.Invoke("MANIFEST_VERIFIED",
+                $"remote_version={update.Version} current_version={current} asset={Path.GetFileName(update.Url.AbsolutePath)} manifest_characters={manifest.Length}");
+            if(update.Version<=current)
+            {
+                status($"Version {Diagnostics.Version} ist aktuell.");
+                diagnostic?.Invoke("ALREADY_CURRENT",$"remote_version={update.Version} elapsed_ms={elapsed.ElapsedMilliseconds}");
+                return false;
+            }
             if(!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
             status($"Lade Version {update.Version} herunter ...");
+            diagnostic?.Invoke("DOWNLOAD_STARTED",$"remote_version={update.Version} asset={Path.GetFileName(update.Url.AbsolutePath)} max_bytes=250000000");
             Log($"Update available {update.Version}");
             string temp=Path.Combine(Base,"updates",Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temp);
@@ -82,7 +94,8 @@ internal static class Updater
             string updaterExe=Path.Combine(temp,"helper.exe");
             try
             {
-                using(var response=await Client.GetAsync(update.Url,HttpCompletionOption.ResponseHeadersRead,cancellationToken))
+                long downloadedBytes=0;
+                using(var response=await transport.GetAsync(update.Url,HttpCompletionOption.ResponseHeadersRead,cancellationToken))
                 {
                     response.EnsureSuccessStatusCode();
                     if(response.Content.Headers.ContentLength is long n && (n>250_000_000 || n<10_000)) throw new InvalidDataException("Unexpected update size");
@@ -96,6 +109,7 @@ internal static class Updater
                             await file.WriteAsync(buf.AsMemory(0,read),cancellationToken);
                         }
                         if(sum<10_000) throw new InvalidDataException("Unexpected update size");
+                        downloadedBytes=sum;
                     }
                 }
                 await using(var file=File.OpenRead(newExe))
@@ -104,6 +118,8 @@ internal static class Updater
                     if(!hash.Equals(update.Sha256,StringComparison.OrdinalIgnoreCase))
                         throw new InvalidDataException("SHA256 mismatch");
                 }
+                diagnostic?.Invoke("DOWNLOAD_VERIFIED",
+                    $"remote_version={update.Version} bytes={downloadedBytes} sha256_match=true elapsed_ms={elapsed.ElapsedMilliseconds}");
                 // Windows cannot replace a running executable. A temporary copy of THIS trusted EXE
                 // waits for the current process to exit, installs the verified EXE and restarts it.
                 string original=Environment.ProcessPath ?? throw new InvalidOperationException("Missing executable path");
@@ -114,18 +130,73 @@ internal static class Updater
                 psi.ArgumentList.Add(original);
                 psi.ArgumentList.Add(newExe);
                 psi.ArgumentList.Add(update.Sha256);
-                _ = Process.Start(psi) ?? throw new InvalidOperationException("Cannot start update helper");
+                using var helper=Process.Start(psi) ?? throw new InvalidOperationException("Cannot start update helper");
                 status("Update verifiziert. Anwendung wird neu gestartet ...");
+                diagnostic?.Invoke("HELPER_STARTED",
+                    $"helper_pid={helper.Id} target_file={Path.GetFileName(original)} elapsed_ms={elapsed.ElapsedMilliseconds} restart_only_osrs_play=true");
                 Log("Verified updater helper started");
                 return true;
             }
             catch { try {Directory.Delete(temp,true);} catch {} throw; }
         }
+        catch(OperationCanceledException) when(cancellationToken.IsCancellationRequested)
+        {
+            diagnostic?.Invoke("CHECK_CANCELLED",$"elapsed_ms={elapsed.ElapsedMilliseconds} closing=true");
+            return false;
+        }
         catch(Exception e)
         {
             Log("Update check/install failed: "+e.GetType().Name+" "+e.Message);
+            diagnostic?.Invoke("CHECK_FAILED",$"elapsed_ms={elapsed.ElapsedMilliseconds} {ExceptionDiagnostic.Describe(e)}");
             status($"Updateprüfung fehlgeschlagen ({e.GetType().Name}); lokale Version läuft weiter.");
+            onError?.Invoke(e);
             return false;
+        }
+    }
+    internal static async Task SelfTestAsync()
+    {
+        string release=$"https://github.com/Riflex91/osrslive/releases/download/v{Diagnostics.Version}/OSRS-Play.exe";
+        string valid=$"version={Diagnostics.Version}\nexeUrl={release}\nexeSha256={new string('a',64)}";
+        var phases=new List<string>();
+        var messages=new List<string>();
+        int errors=0;
+        using(var stub=new ManifestTestHandler(valid,HttpStatusCode.OK))
+        using(var http=new HttpClient(stub))
+        {
+            bool restart=await CheckAndUpdateAsync(messages.Add,default,
+                (eventName,_)=>phases.Add(eventName),_=>errors++,http);
+            if(restart||errors!=0||stub.Requests!=1||stub.LastUri!=Manifest||
+               !phases.SequenceEqual(new[]{"MANIFEST_REQUEST","MANIFEST_VERIFIED","ALREADY_CURRENT"})||
+               !messages.Any(s=>s.Contains("aktuell")))
+                throw new Exception("Updater did not perform an offline, verified, no-download current-version check");
+        }
+        phases.Clear();messages.Clear();
+        using(var stub=new ManifestTestHandler("bad manifest",HttpStatusCode.OK))
+        using(var http=new HttpClient(stub))
+        {
+            bool restart=await CheckAndUpdateAsync(messages.Add,default,
+                (eventName,_)=>phases.Add(eventName),_=>errors++,http);
+            if(restart||errors!=1||!phases.Contains("CHECK_FAILED")||
+               !messages.Any(s=>s.Contains("fehlgeschlagen")))
+                throw new Exception("Updater must report an invalid manifest instead of restarting");
+        }
+        if(ParseManifest(valid).Url.Host!="github.com")throw new Exception("Updater accepted wrong release host");
+        try
+        {
+            ParseManifest(valid.Replace("github.com","other.example",StringComparison.Ordinal));
+            throw new Exception("Updater accepted an untrusted release host");
+        }
+        catch(FormatException){}
+    }
+    private sealed class ManifestTestHandler(string manifest,HttpStatusCode responseCode):HttpMessageHandler
+    {
+        internal int Requests {get;private set;}
+        internal Uri? LastUri {get;private set;}
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken cancellationToken)
+        {
+            Requests++;
+            LastUri=request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(responseCode){Content=new StringContent(manifest)});
         }
     }
     internal static int Apply(string[] args)

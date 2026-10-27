@@ -1,4 +1,12 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.2
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.3
+
+**1.8.3 – Auto-Update im RuneLite-Modus:** Der automatische GitHub-Check war
+im älteren `MainWindow`, nicht im Standard-`RuneLiteWindow` verdrahtet.
+Version 1.8.3 integriert Startup-, 30-Minuten- und manuelle Updateprüfungen
+inklusive Log-/Clipboard-Fehlerdiagnose. Frühere Builds müssen einmalig
+manuell durch 1.8.3 ersetzt werden. Das vom Benutzer angehängte 1.8.2-Log
+bestätigt weiterhin unlesbare Ebene-0-Tile-Zeilen bei gültigen Capture-Frames;
+an der fail-closed OCR-Sperre ändert dieser Fix nichts.
 
 **1.8.2 – Diagnose statt stiller Sperre:** Ausführliche lokale Ereignislogs,
 automatische Zwischenablage-Kopie bei Fehler/nicht ausgeführter Aktion und
