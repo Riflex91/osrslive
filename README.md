@@ -1,4 +1,19 @@
-# OSRS Play 1.8.7 – RuneLite statt Atlas-Positionssuche
+# OSRS Play 1.8.8 – RuneLite statt Atlas-Positionssuche
+
+**Neu in 1.8.8 – unabhängig bestätigte OCR-Zahlenfelder:** Das echte
+1.8.7-Live-Log zeigt, dass bei der Bewegung die Region `12594` von
+manchen Bildaufbereitungen als `12534` gelesen wird, während andere
+Varianten Chunk und Tile-Zahlen unvollständig lesen. 1.8.8 bestätigt
+deshalb **jedes vollständige Zahlenfeld getrennt** in mindestens zwei
+OCR-Aufbereitungen: X/Y als zusammengehöriges Paar, Chunk-ID und Region-ID.
+Die Ergebnisse dürfen nur dann gemeinsam in die Pixelprüfung einfließen,
+wenn jedes Feld eine **eindeutige** Stimmenmehrheit hat und beide IDs
+mathematisch zu X/Y passen. Die eigentlichen Kommas, Zeichenformen und
+Ebenenziffer müssen weiterhin im selben Bild pixelbasiert bestätigt
+werden; widersprüchliche gültige Positionen bleiben gesperrt. Separate
+`FIELD_QUORUM`-Logeinträge zählen Feldstimmen, Ausreißer und Blockgründe.
+Ein erfolgreicher echter 1.8.8-Live-Test steht noch aus. **Keine
+automatische RuneLite-Spielaktion wird dadurch freigeschaltet.**
 
 **Neu in 1.8.7 – Bewegungsziffern und unabhängiger Updatekanal:**
 Das erste 1.8.6-Bewegungslog zeigte gute RuneLite-Frames mit X=3144/Y=3211,

@@ -1,4 +1,43 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.7
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.8
+
+## Komplementäre OCR-Feldfehler bei lebender Positionsverschiebung (1.8.8)
+
+Das vom Benutzer gelieferte 1.8.7-Live-Log vom 27.10., 20:53–20:54
+(Europe/Berlin), bestätigt den erfolgreich installierten 1.8.7-Push-Build.
+Sowohl Start- als auch manuelle Updateprüfung ermittelten in der Raw-Datei
+und beim offiziellen GitHub-Release-Endpunkt konsistent Version 1.8.7.
+Die automatische Log-Zwischenablage wurde bei der gesperrten Positionslesung
+ausgelöst und `clipboard=COPIED` im Gesundheitslog bestätigt.
+
+Positionsaufnahme: Die OCR-Varianten identifizierten u. a. `Tile3145`/`3210`
+und `Chunk 805265`, aber die Region laut Nearest-2× `12594`, laut
+Nearest-3× `12534`. Hochskaliertes Bicubic las die korrekte Region
+`12594`, aber Y als `321Ø` und Chunk als `8Ø5265`. Daher gab es in den
+meisten Proben nur eine oder null vollständige `Observation`s. In Probe 17
+lieferte die neuere, wiederholungsbasierte Pixelprüfung tatsächlich
+`PIXEL_GRID_VERIFIED`, `unknown_tile_digits=4`,
+`repeated_unknown_layouts=4`, `distinct_positions=1`, aber am nächsten
+Frame verwarf die bisherige Zwei-Gesamt-OCR-Beobachtungs-Regel die
+Position erneut. **Kein stabiler neuer Positionserfolg behauptet.**
+
+1.8.8 ergänzt einen weiteren rein lesenden Vorfilter: Jede der vier
+Bildaufbereitungen liefert ihre exakt erkannten numerischen Tile-X/Y-Paare,
+Chunk-IDs und Region-IDs getrennt. X/Y müssen gemeinsam in wenigstens
+zwei Pässen vorkommen, jede ID ebenfalls mindestens zweimal. Es darf pro
+Feld **nur ein einziger Quorumwert** existieren. Die rechnerischen Chunk-
+und Region-IDs müssen zu den beiden Tile-Koordinaten passen. Ein anderweitig
+vollständig gültiger, mathematisch anderer OCR-Positionsbeleg widerspricht
+dem Quorum und stoppt die Freigabe. Erst danach prüft der Bitmap-Leser
+wie zuvor tatsächlich sichtbare zwei Kommas, wiederholte unbekannte
+Tile-Glyphen, trainierte Ebenenziffer und die unveränderte Zwei-Frame-
+Bestätigung. Kein `Ø`→`0`, `o`→`0`, `»`→`,` oder Verwerfen einer gültigen
+Gegenposition. Jede Probe protokolliert getrennt `stage=FIELD_QUORUM`
+mit Stimmen, Ausreißern, Checksumme bzw. Verweigerung sowie die bisherige
+Rasterdiagnose mit `evidence_source=FIELD_QUORUM` oder `FULL_OBSERVATIONS`.
+Synthetische Regressionen verwenden die im Live-Log vorkommende Kombination
+aus jeweils unvollständigen, aber pro Feld zweifach bestätigten OCR-Werten;
+konkurrierende Quoren und falsche Checksummen bleiben gesperrt.
+**Noch keine 1.8.8-Live-Bestätigung, weiterhin keine RuneLite-Automatik.**
 
 ## Erste Bewegung, veränderte ID-Ziffern und weiterhin veraltetes Manifest (1.8.7)
 

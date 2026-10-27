@@ -10,7 +10,8 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   Aufgaben sind noch nicht implementiert. Die eigenständige Pixelprüfung hat
   die Position live in 1.8.5 bestätigt. Der erste Bewegungs-Live-Lauf in
   1.8.6 scheiterte an fehlenden Ziffernvorlagen der neuen Chunk-ID;
-  Navigation und Spieleingaben bleiben unimplementiert.
+  1.8.7 an komplementären OCR-Feldfehlern trotz einer erfolgreichen
+  Einzelbild-Pixelprüfung. Navigation und Spieleingaben bleiben unimplementiert.
 - Erfolgreiche Offline-Fixtures belegen keine funktionierende Live-Navigation.
   Bekannte OCR-Mehrdeutigkeiten nicht durch geratenen Ziffernersatz freigeben.
 - Das lokale RuneLite-Profil `auto` liegt nicht im Git-Checkout. Keine Konto-,

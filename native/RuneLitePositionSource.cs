@@ -69,6 +69,7 @@ internal static class RuneLiteGridReader
             PixelFormat.Format32bppArgb);
         var evidenceCandidates=new List<RuneLiteGridEvidence?>();
         var observations=new List<RuneLitePixelGridReader.Observation>();
+        var ocrFields=new List<string[]>();
         foreach(var (scale,contrast) in new[]{(2,false),(3,false),(4,false),(4,true)})
         {
             using var enlarged=new Bitmap(crop.Width*scale,crop.Height*scale);
@@ -88,6 +89,7 @@ internal static class RuneLiteGridReader
                 if(row is null){row=new();rows.Add(row);}row.Add(word);
             }
             var text=rows.Select(r=>string.Join(" ",r.OrderBy(w=>w.BoundingRect.X).Select(w=>w.Text))).ToArray();
+            ocrFields.Add(text);
             diagnostic?.Invoke(text);
             if(RuneLitePixelGridReader.ReadObservation(text) is { } observation)observations.Add(observation);
             var evidence=Parse(text);
@@ -96,7 +98,9 @@ internal static class RuneLiteGridReader
             // expensive extra OCR unless neither has produced a valid panel.
             if(scale==3&&evidenceCandidates.Any(e=>e is not null))break;
         }
-        var raster=RuneLitePixelGridReader.Read(crop,observations,out string rasterDiagnostic);
+        var fieldQuorum=RuneLitePixelGridReader.ReadFieldQuorum(ocrFields,out string fieldDiagnostic);
+        pixelDiagnostic?.Invoke(fieldDiagnostic);
+        var raster=RuneLitePixelGridReader.Read(crop,observations,out string rasterDiagnostic,fieldQuorum);
         pixelDiagnostic?.Invoke(rasterDiagnostic);
         // A valid pixel reading cannot override a different valid OCR reading.
         // The existing two-independent-fresh-frames gate remains unchanged.

@@ -1,4 +1,20 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.7
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.8
+
+**1.8.8 – pro Feld übereinstimmende OCR statt nur vollständige Zeilen:**
+Das echte 1.8.7-Log bestätigt die Release-API und Raw-Manifest bei Start
+und manueller Prüfung jeweils auf 1.8.7. Der Pixel-Leser erkannte in
+Probe 17 die zusätzliche Ziffernregel erfolgreich (`full_matches=4`,
+`distinct_positions=1`, `repeated_unknown_layouts=4`), aber die zweite
+frische Aufnahme konnte die Position nicht bestätigen. Bei Positionen
+um 3145/3210 liefern die Nearest-OCR-Varianten gleiche Tile-X/Y- und
+Chunkwerte, jedoch `Region 12594` gegen `12534`; die bicubischen
+Varianten erkennen die richtige Region, aber nicht alle Chunk-/Y-Ziffern.
+1.8.8 bildet pro Feld einen Quorumwert aus mindestens zwei vollständigen
+Beobachtungen, prüft Region-/Chunkchecksummen und lässt dann erst
+den unverändert konservativen Pixel-Leser entscheiden. Zwei verschiedene
+Quoren für dasselbe Feld, gültig widersprechende Positionen und
+unklare Ziffern/Kommas bleiben blockiert. Ein echter Bewegungsnachweis
+mit 1.8.8 fehlt noch. Die Log-Zwischenablage funktioniert weiter.
 
 **1.8.7 – neuer Live-Ort belegt fehlende Vorlagen:** Das echte 1.8.6-Log
 vom 27.10., 20:28–20:29 (Europe/Berlin) zeigte bereits in Probe 1
