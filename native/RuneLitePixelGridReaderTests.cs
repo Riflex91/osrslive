@@ -96,6 +96,7 @@ internal static class RuneLitePixelGridReaderTests
                 new[]{observation!.Value,observation.Value},out string detail);
             Require(shifted?.Tile==new WorldTile(3143,3210,0)&&detail.Contains("PIXEL_GRID_VERIFIED"),
                 "a cropped screenshot origin must not be mistaken for the real RuneLite overlay offset");
+        }
         var moved=RuneLitePixelGridReader.ReadObservation(new[]{
             "Tile3144» 3211» o","Chunk ID 805265","Region ID 12594"});
         Require(moved is {X:3144,Y:3211,Chunk:"805265",Region:"12594"},
@@ -127,7 +128,51 @@ internal static class RuneLitePixelGridReaderTests
                     !diagnostic.Contains("unknown_singleton_rejects=0 "),
                 "a once-only unknown digit must remain blocked despite agreeing OCR passes");
         }
+        // Actual 1.8.7 log: one nearest pass reads Region 12594 but lacks
+        // the plane character; the other has all Tile digits yet misreads
+        // Region as 12534. Two bicubic passes independently corroborate the
+        // correct region, while chunk/XY each have two exact readings.
+        string[][] partialPasses=
+        [
+            ["Tile3145„ 3210»","Chunk ID 805265","Region ID 12594"],
+            ["Tile3145» 3210» o","Chunk ID 805265","Region ID 12534"],
+            ["Tile3145, 321Ø, Ø","Chunk ID 8Ø5265","Region ID 12594"],
+            ["Tile3145, 321ø,","Chunk ID 86265","Region ID 12594"]
+        ];
+        var fields=RuneLitePixelGridReader.ReadFieldQuorum(partialPasses,out var fieldDiagnostic);
+        Require(fields is {Data:{X:3145,Y:3210,Chunk:"805265",Region:"12594"},
+                XYVotes:2,ChunkVotes:2,RegionVotes:3,OutlierFields:1}&&
+                fieldDiagnostic.Contains("CHECKSUM_VERIFIED"),
+            "two independent votes per field can be combined without changing damaged glyphs");
+        using(var movedBitmap=Fixture(tileX:3145,tileY:3210))
+        {
+            var isolated=partialPasses.Select(RuneLitePixelGridReader.ReadObservation)
+                .Where(o=>o is not null).Select(o=>o!.Value).ToArray();
+            Require(isolated.Length<2,
+                "the regression must exercise a frame with fewer than two valid complete OCR lines");
+            var verified=RuneLitePixelGridReader.Read(movedBitmap,isolated,out string detail,fields);
+            Require(verified?.Tile==new WorldTile(3145,3210,0)&&
+                    detail.Contains("evidence_source=FIELD_QUORUM"),
+                "independent numeric field votes plus same-frame visible glyphs confirm the tile");
         }
+        string[][] conflicting=
+        [
+            ["Tile3145„ 3210»","Chunk ID 805265","Region ID 12594"],
+            ["Tile3145» 3210» o","Chunk ID 805265","Region ID 12534"],
+            ["Tile3145, 3210, o","Chunk ID 805265","Region ID 12534"],
+            ["Tile3145, 3210, o","Chunk ID 805265","Region ID 12594"]
+        ];
+        Require(RuneLitePixelGridReader.ReadFieldQuorum(conflicting,out string splitDiagnostic) is null&&
+                splitDiagnostic.Contains("region_quorums=2"),
+            "two competing region quorums must fail closed");
+        string[][] badChecksum=
+        [
+            ["Tile3145„ 3210»","Chunk ID 805265","Region ID 12534"],
+            ["Tile3145» 3210» o","Chunk ID 805265","Region ID 12534"]
+        ];
+        Require(RuneLitePixelGridReader.ReadFieldQuorum(badChecksum,out string mismatchDiagnostic) is null&&
+                mismatchDiagnostic.Contains("CHECKSUM_REJECTED"),
+            "consistent OCR cannot override the mathematical Region ID checksum");
         using(var bitmap=Fixture())
         {
             for(int y=0;y<11;y++)for(int x=0;x<7;x++)

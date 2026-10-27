@@ -22,6 +22,8 @@ internal static class RuneLitePixelGridReader
     }
 
     internal readonly record struct Observation(string Chunk,string Region,int X,int Y);
+    internal readonly record struct FieldQuorum(Observation Data,int XYVotes,int ChunkVotes,
+        int RegionVotes,int OutlierFields);
 
     internal static Observation? ReadObservation(IEnumerable<string> lines)
     {
@@ -41,17 +43,84 @@ internal static class RuneLitePixelGridReader
             int.Parse(tiles[0].Groups[1].Value),int.Parse(tiles[0].Groups[2].Value));
     }
 
+    // Different OCR scales may damage DIFFERENT fields. Require each complete
+    // numeric field to be read identically in at least two passes, then check
+    // the independent Chunk/Region checksums before consulting real pixels.
+    // This never repairs a character ('Ø', 'o', '»') or accepts its meaning.
+    internal static FieldQuorum? ReadFieldQuorum(IReadOnlyList<string[]> passes,out string diagnostic)
+    {
+        var xy=new List<(int X,int Y)>();var chunks=new List<string>();
+        var regions=new List<string>();
+        foreach(var pass in passes)
+        {
+            var rows=pass.Select(s=>s.Trim()).ToArray();
+            var tile=rows.Select(s=>Regex.Match(s,
+                @"^Tile\s*:?\s*(\d{4})\D{1,4}(\d{4})(?:\D.*)?$",RegexOptions.IgnoreCase))
+                .Where(m=>m.Success).ToArray();
+            var chunk=rows.Select(s=>Regex.Match(s,
+                @"^Chunk\s+ID\s*:?\s*(\d{6})$",RegexOptions.IgnoreCase))
+                .Where(m=>m.Success).ToArray();
+            var region=rows.Select(s=>Regex.Match(s,
+                @"^Region\s+ID\s*:?\s*(\d{5})$",RegexOptions.IgnoreCase))
+                .Where(m=>m.Success).ToArray();
+            if(tile.Length==1)xy.Add((int.Parse(tile[0].Groups[1].Value),int.Parse(tile[0].Groups[2].Value)));
+            if(chunk.Length==1)chunks.Add(chunk[0].Groups[1].Value);
+            if(region.Length==1)regions.Add(region[0].Groups[1].Value);
+        }
+        var xyGroups=xy.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
+        var chunkGroups=chunks.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
+        var regionGroups=regions.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
+        if(xyGroups.Length!=1||chunkGroups.Length!=1||regionGroups.Length!=1)
+        {
+            diagnostic=$"stage=FIELD_QUORUM result=NOT_READY passes={passes.Count} "+
+                $"xy_readings={xy.Count} chunk_readings={chunks.Count} region_readings={regions.Count} "+
+                $"xy_quorums={xyGroups.Length} chunk_quorums={chunkGroups.Length} region_quorums={regionGroups.Length}";
+            return null;
+        }
+        var (x,y)=xyGroups[0].Key;
+        string chunkValue=chunkGroups[0].Key,regionValue=regionGroups[0].Key;
+        if(x>16383||y>16383||int.Parse(chunkValue)!=((x>>3)<<11|(y>>3))||
+           int.Parse(regionValue)!=((x>>6)<<8|(y>>6)))
+        {
+            diagnostic=$"stage=FIELD_QUORUM result=CHECKSUM_REJECTED passes={passes.Count} "+
+                $"xy_votes={xyGroups[0].Count()} chunk_votes={chunkGroups[0].Count()} "+
+                $"region_votes={regionGroups[0].Count()}";
+            return null;
+        }
+        int outliers=xy.Count-xyGroups[0].Count()+chunks.Count-chunkGroups[0].Count()+
+            regions.Count-regionGroups[0].Count();
+        var result=new FieldQuorum(new Observation(chunkValue,regionValue,x,y),
+            xyGroups[0].Count(),chunkGroups[0].Count(),regionGroups[0].Count(),outliers);
+        diagnostic=$"stage=FIELD_QUORUM result=CHECKSUM_VERIFIED passes={passes.Count} "+
+            $"xy_votes={result.XYVotes} chunk_votes={result.ChunkVotes} "+
+            $"region_votes={result.RegionVotes} rejected_field_outliers={outliers}";
+        return result;
+    }
+
     internal static RuneLiteGridEvidence? Read(Bitmap bitmap,IReadOnlyList<Observation> observations,
-        out string diagnostic)
+        out string diagnostic,FieldQuorum? fieldQuorum=null)
     {
         var elapsed=Stopwatch.StartNew();
         var agreed=observations.GroupBy(o=>o).Where(g=>g.Count()>=2).Select(g=>g.Key).ToArray();
-        if(agreed.Length!=1||observations.Any(o=>agreed.Length==1&&o!=agreed[0]))
+        Observation expected;
+        if(fieldQuorum is FieldQuorum quorum)
+        {
+            expected=quorum.Data;
+            // A conflicting complete, mathematically valid observation is
+            // stronger than a field quorum and must veto its use.
+            if(observations.Any(o=>o!=expected&&RuneLiteGridReader.Parse(new[]{
+                $"Tile {o.X}, {o.Y}, 0",$"Chunk ID {o.Chunk}",$"Region ID {o.Region}"}) is not null))
+            {
+                diagnostic="attempted=false mode=MONO7X11 reason=VALID_CONTRADICTORY_OCR_POSITION";
+                return null;
+            }
+        }
+        else if(agreed.Length!=1||observations.Any(o=>agreed.Length==1&&o!=agreed[0]))
         {
             diagnostic=$"attempted=false mode=MONO7X11 observations={observations.Count} agreeing_groups={agreed.Length} reason=INSUFFICIENT_INDEPENDENT_OCR_ID_AND_XY_AGREEMENT";
             return null;
         }
-        var expected=agreed[0];
+        else expected=agreed[0];
         // The user-supplied panel image was tightly cropped. In the actual
         // RuneLite framebuffer the overlay can be offset substantially from
         // that crop's origin. Search the SAME 350x220 top-left area already
@@ -193,7 +262,10 @@ internal static class RuneLitePixelGridReader
         }
         diagnostic=$"attempted=true mode=MONO7X11 threshold={WhiteThreshold} "+
             $"roi={width}x{height} bright_pixels={brightPixels} "+
-            $"ocr_agreements={observations.Count(o=>o==expected)} anchors_tested={visited} "+
+            $"ocr_agreements={observations.Count(o=>o==expected)} "+
+            $"evidence_source={(fieldQuorum is null?"FULL_OBSERVATIONS":"FIELD_QUORUM")} "+
+            $"field_xy_votes={fieldQuorum?.XYVotes??0} field_chunk_votes={fieldQuorum?.ChunkVotes??0} "+
+            $"field_region_votes={fieldQuorum?.RegionVotes??0} anchors_tested={visited} "+
             $"first_comma_shapes={firstCommaShapes} matching_comma_pairs={matchingCommas} "+
             $"empty_separator_pairs={emptySeparators} comma_layouts={commaCandidates} "+
             $"digit_templates={idCandidates} unknown_tile_digits={unknownTileDigits} "+
