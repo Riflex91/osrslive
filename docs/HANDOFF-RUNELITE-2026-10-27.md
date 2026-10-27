@@ -1,4 +1,39 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.12
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.13
+
+## Live-Erfolg mit unlesbarem X und eine fehlende Einzelstimme (1.8.13)
+
+Das echte 1.8.12-Live-Protokoll vom 27.10.2026, 22:24–22:25 Uhr
+(Europe/Berlin) bestätigt `PREVIOUS_UPDATE` und `ALREADY_CURRENT`
+bei Version 1.8.12, Push-Build `40585149835`. Die neue
+`ID_ONLY_QUORUM`-Route wird mehrfach `IDS_VERIFIED`: In Probe 13
+erreichen zwei Chunk- und vier Region-ID-Lesungen die Checksummen;
+alle X/Y-OCR-Texte enthalten aber `Tile315Ø`. Die unabhängige
+Pixelprüfung meldet bei 64 Kandidaten `full_matches=4`,
+`distinct_positions=1`, `PIXEL_GRID_VERIFIED`. Probe 14 ist der
+getrennte Zweibildbeleg für **3150/3193/0**; Proben 15–42
+bestätigen diese Position weiter. Nach manueller Bewegung werden
+auch **3157/3199**, **3153/3200** und **3148/3206** bestätigt.
+**Der 1.8.12-Ausweichweg funktioniert nachweislich live.**
+
+Neuer Block in Probe 12: `nearest_3x` liefert allein das vollständige
+numerische Paar `3150/3193`, aber alle anderen Varianten beschädigen
+die Null. Obwohl beide IDs mindestens zwei Stimmen haben, lehnt
+`FIELD_QUORUM` mangels zweiter X/Y-Stimme ab und
+`ID_ONLY_QUORUM` lehnt wegen `xy_readings=1` ab. Kein Pixeltest.
+1.8.13 weitet ausschließlich diesen Sonderfall aus: Höchstens eine
+vollständige numerische X/Y-Lesung darf zusammen mit beiden
+ID-Quoren den 64-Zellen-Pixelweg eröffnen, wenn die einzelne
+X/Y-Lesung schon mit den ID-Checksummen vereinbar ist. Der strenge
+ID-Pixelpfad bleibt unverändert (jede Ziffer aus aktuellen/zweimal
+bestätigten ID-Glyphen, zwei reale Kommas, Ebene, ein eindeutiger Ort).
+Ein einzelner vollständiger OCR-Beleg mit anderem Chunk oder
+Region-ID darf die Prüfung nicht umgehen. Außerdem wird das eine
+OCR-Zahlenpaar gegen den tatsächlich gefundenen eindeutigen Pixelort
+verglichen und bei Differenz gesperrt (`single_xy_matches_pixels=false`).
+Die Zweibildbestätigung bleibt Pflicht. Synthetische Tests prüfen
+Übereinstimmung, abweichendes X/Y im selben Chunk, abweichende IDs,
+X/Y außerhalb des Chunks und zwei Zahlenpaare. **Ein echter
+1.8.13-Live-Test fehlt**, automatische RuneLite-Aktionen fehlen auch.
 
 ## Letzter OCR-Block: beschädigte X/Y-Ziffer in allen Varianten (1.8.12)
 

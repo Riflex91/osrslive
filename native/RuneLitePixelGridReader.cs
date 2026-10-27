@@ -26,7 +26,7 @@ internal static class RuneLitePixelGridReader
     internal readonly record struct FieldQuorum(Observation Data,int XYVotes,int ChunkVotes,
         int RegionVotes,int OutlierFields);
     internal readonly record struct IdQuorum(string Chunk,string Region,int ChunkVotes,
-        int RegionVotes,int TileLabelVotes);
+        int RegionVotes,int TileLabelVotes,(int X,int Y)? SingleXY);
     internal sealed record GlyphSnapshot(IReadOnlyDictionary<char,Glyph> Digits);
 
     // Strictly ephemeral, local to one RuneLitePositionSource/one HWND and
@@ -158,21 +158,27 @@ internal static class RuneLitePixelGridReader
         return result;
     }
 
-    // Last-resort read-only path when NO OCR treatment can return a complete
-    // numeric Tile X/Y pair (e.g. "315Ø"). Two independent reads of BOTH
-    // labelled IDs, their mathematical relation and the visible Tile label
-    // merely constrain 64 possible grid cells. The actual X/Y digits must
-    // ALL be individually labelled by current/confirmed historical pixels;
-    // neither OCR repairs nor guessed/repeated unknown glyphs are permitted.
+    // Last-resort path when at most ONE OCR treatment returns complete
+    // numeric X/Y (e.g. three "315Ø" readings and one "3150"). A single
+    // numeric OCR reading is not independent evidence: it must first agree
+    // with BOTH corroborated IDs and subsequently with the unique pixel tile.
+    // Two independent reads of BOTH labelled IDs plus the Tile label merely
+    // constrain 64 possible cells. Every X/Y glyph needs an independently
+    // labelled pixel; no character repair or guessed/repeated unknown glyph.
     internal static IdQuorum? ReadIdQuorum(IReadOnlyList<string[]> passes,out string diagnostic)
     {
         var chunks=new List<string>();var regions=new List<string>();
-        int tileLabels=0,xyReadings=0;
+        var xyReadings=new List<(int X,int Y)>();
+        int tileLabels=0;
         foreach(var pass in passes)
         {
             var rows=pass.Select(s=>s.Trim()).ToArray();
             if(rows.Any(s=>Regex.IsMatch(s,@"^Tile\s*:?\s*",RegexOptions.IgnoreCase)))tileLabels++;
-            if(rows.Any(s=>Regex.IsMatch(s,@"^Tile\s*:?\s*\d{4}\D{1,4}\d{4}(?:\D.*)?$",RegexOptions.IgnoreCase)))xyReadings++;
+            var xy=rows.Select(s=>Regex.Match(s,
+                @"^Tile\s*:?\s*(\d{4})\D{1,4}(\d{4})(?:\D.*)?$",RegexOptions.IgnoreCase))
+                .Where(m=>m.Success).ToArray();
+            if(xy.Length==1)xyReadings.Add((int.Parse(xy[0].Groups[1].Value),
+                int.Parse(xy[0].Groups[2].Value)));
             var c=rows.Select(s=>Regex.Match(s,
                 @"^Chunk\s+ID\s*:?\s*(\d{6})(?:\s+\S.*)?$",RegexOptions.IgnoreCase))
                 .Where(m=>m.Success).ToArray();
@@ -184,9 +190,9 @@ internal static class RuneLitePixelGridReader
         }
         var cg=chunks.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
         var rg=regions.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
-        if(xyReadings!=0||tileLabels<2||cg.Length!=1||rg.Length!=1)
+        if(xyReadings.Count>1||tileLabels<2||cg.Length!=1||rg.Length!=1)
         {
-            diagnostic=$"stage=ID_ONLY_QUORUM result=NOT_READY xy_readings={xyReadings} "+
+            diagnostic=$"stage=ID_ONLY_QUORUM result=NOT_READY xy_readings={xyReadings.Count} "+
                 $"tile_label_votes={tileLabels} chunk_readings={chunks.Count} region_readings={regions.Count} "+
                 $"chunk_quorums={cg.Length} region_quorums={rg.Length}";
             return null;
@@ -199,10 +205,19 @@ internal static class RuneLitePixelGridReader
                 $"region_votes={rg[0].Count()} tile_label_votes={tileLabels}";
             return null;
         }
+        (int X,int Y)? singleXY=xyReadings.Count==1?xyReadings[0]:null;
+        if(singleXY is (int x,int y)&&
+           (x<baseX||x>=baseX+8||y<baseY||y>=baseY+8))
+        {
+            diagnostic=$"stage=ID_ONLY_QUORUM result=SINGLE_XY_CHECKSUM_REJECTED "+
+                $"xy_readings=1 chunk_votes={cg[0].Count()} region_votes={rg[0].Count()} "+
+                $"tile_label_votes={tileLabels}";
+            return null;
+        }
         diagnostic=$"stage=ID_ONLY_QUORUM result=IDS_VERIFIED chunk_votes={cg[0].Count()} "+
-            $"region_votes={rg[0].Count()} tile_label_votes={tileLabels} "+
+            $"region_votes={rg[0].Count()} tile_label_votes={tileLabels} xy_readings={xyReadings.Count} "+
             "candidate_tiles=64 pixel_label_required_for_every_xy_digit=true";
-        return new(cg[0].Key,rg[0].Key,cg[0].Count(),rg[0].Count(),tileLabels);
+        return new(cg[0].Key,rg[0].Key,cg[0].Count(),rg[0].Count(),tileLabels,singleXY);
     }
 
     internal static RuneLiteGridEvidence? Read(Bitmap bitmap,IReadOnlyList<Observation> observations,
@@ -227,7 +242,9 @@ internal static class RuneLitePixelGridReader
             }
             tileCandidates=[(expected.X,expected.Y)];
         }
-        else if(idQuorum is IdQuorum ids&&observations.Count==0)
+        else if(idQuorum is IdQuorum ids&&observations.Count<=1&&
+                observations.All(o=>ids.SingleXY is (int x,int y)&&o.X==x&&o.Y==y&&
+                    o.Chunk==ids.Chunk&&o.Region==ids.Region))
         {
             int chunk=int.Parse(ids.Chunk),baseX=(chunk>>11)<<3,baseY=(chunk&2047)<<3;
             expected=new Observation(ids.Chunk,ids.Region,0,0);
@@ -398,6 +415,10 @@ internal static class RuneLitePixelGridReader
                 acceptedSnapshots.Add(new GlyphSnapshot(new Dictionary<char,Glyph>(reference)));
             }
         }
+        bool loneXYMatchesPixels=true;
+        if(idQuorum is IdQuorum sampledIds&&sampledIds.SingleXY is (int loneX,int loneY))
+            loneXYMatchesPixels=accepted.Count==1&&
+                accepted.Single().Tile.X==loneX&&accepted.Single().Tile.Y==loneY;
         diagnostic=$"attempted=true mode=MONO7X11 threshold={WhiteThreshold} "+
             $"roi={width}x{height} bright_pixels={brightPixels} "+
             $"ocr_agreements={observations.Count(o=>o==expected)} "+
@@ -410,12 +431,13 @@ internal static class RuneLitePixelGridReader
             $"digit_templates={idCandidates} unknown_tile_digits={unknownTileDigits} "+
             $"unknown_singleton_rejects={unknownSingletonRejects} repeated_unknown_layouts={uniqueRepeatedDigitLayouts} "+
             $"id_only_unlabelled_rejects={idOnlyUnlabelledRejects} "+
+            $"single_xy_matches_pixels={loneXYMatchesPixels.ToString().ToLowerInvariant()} "+
             $"historical_glyph_matches={historicalGlyphMatches} historical_contradictions={historicalContradictions} "+
             $"trusted_history_frames={history?.Frames??0} trusted_history_snapshots={history?.Snapshots??0} "+
             $"full_matches={matched} distinct_positions={accepted.Count} "+
             $"elapsed_ms={elapsed.ElapsedMilliseconds} "+
-            $"result={(accepted.Count==1?"PIXEL_GRID_VERIFIED":"NOT_RELEASED")}";
-        if(accepted.Count!=1)return null;
+            $"result={(accepted.Count==1&&loneXYMatchesPixels?"PIXEL_GRID_VERIFIED":"NOT_RELEASED")}";
+        if(accepted.Count!=1||!loneXYMatchesPixels)return null;
         onVerified?.Invoke(acceptedSnapshots);
         return accepted.Single();
     }

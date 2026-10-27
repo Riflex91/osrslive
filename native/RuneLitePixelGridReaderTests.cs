@@ -297,9 +297,53 @@ internal static class RuneLitePixelGridReaderTests
         Require(oneIdPass is null,"one OCR frame cannot certify ID-only candidate enumeration");
         var numericXY=damagedXY.Select(a=>a.ToArray()).ToArray();
         numericXY[0][0]="Tile3150» 3196» o";
-        Require(RuneLitePixelGridReader.ReadIdQuorum(numericXY,out string numericDiagnostic) is null&&
-                numericDiagnostic.Contains("xy_readings=1"),
-            "an available numeric XY reading must veto the ID-only fallback even if its peers are damaged");
+        Require(RuneLitePixelGridReader.ReadFieldQuorum(numericXY,out _) is null,
+            "one correct XY OCR reading alone cannot establish an independent field quorum");
+        var loneNumeric=RuneLitePixelGridReader.ReadIdQuorum(numericXY,out string numericDiagnostic);
+        Require(loneNumeric is {SingleXY:(3150,3196)}&&
+                numericDiagnostic.Contains("xy_readings=1")&&
+                numericDiagnostic.Contains("candidate_tiles=64"),
+            "one complete XY reading matching both corroborated IDs may be checked pixel by pixel: "+numericDiagnostic);
+        using(var idBitmap=Fixture(tileX:3150,tileY:3196))
+        {
+            var fullLine=RuneLitePixelGridReader.ReadObservation(numericXY[0]);
+            Require(fullLine is not null,
+                "live sample 12 has one fully parseable OCR observation that cannot justify a position alone");
+            var proven=RuneLitePixelGridReader.Read(idBitmap,new[]{fullLine!.Value},out string lonePixelDiagnostic,
+                idQuorum:loneNumeric);
+            Require(proven?.Tile==new WorldTile(3150,3196,0)&&
+                    lonePixelDiagnostic.Contains("single_xy_matches_pixels=true")&&
+                    lonePixelDiagnostic.Contains("ID_ONLY_PIXEL_ENUMERATION"),
+                "one matching OCR observation must still require every independent digit pixel: "+lonePixelDiagnostic);
+            var contradictoryFullLine=fullLine.Value with{Chunk="803215"};
+            Require(RuneLitePixelGridReader.Read(idBitmap,new[]{contradictoryFullLine},out _,
+                    idQuorum:loneNumeric) is null,
+                "a complete observation with contradictory ID must veto the one-XY fallback");
+        }
+        var loneContradiction=numericXY.Select(a=>a.ToArray()).ToArray();
+        loneContradiction[0][0]="Tile3151» 3196» o";
+        var loneContradictoryIds=RuneLitePixelGridReader.ReadIdQuorum(loneContradiction,out _);
+        Require(loneContradictoryIds is {SingleXY:(3151,3196)},
+            "a wrong but in-chunk lone XY reading is not rejected before the independent pixels");
+        using(var trueTileBitmap=Fixture(tileX:3150,tileY:3196))
+        {
+            Require(RuneLitePixelGridReader.Read(trueTileBitmap,
+                    Array.Empty<RuneLitePixelGridReader.Observation>(),out string disagreement,
+                    idQuorum:loneContradictoryIds) is null&&
+                    disagreement.Contains("single_xy_matches_pixels=false")&&
+                    disagreement.Contains("result=NOT_RELEASED"),
+                "one contradictory numeric OCR reading must veto even uniquely verified true pixels: "+disagreement);
+        }
+        var outsideChunk=numericXY.Select(a=>a.ToArray()).ToArray();
+        outsideChunk[0][0]="Tile3140» 3196» o";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(outsideChunk,out string outsideDiagnostic) is null&&
+                outsideDiagnostic.Contains("SINGLE_XY_CHECKSUM_REJECTED"),
+            "a lone numeric OCR pair contradicting the independently established chunk must veto the fallback");
+        var repeatedNumeric=numericXY.Select(a=>a.ToArray()).ToArray();
+        repeatedNumeric[1][0]="Tile3150» 3196» o";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(repeatedNumeric,out string repeatedDiagnostic) is null&&
+                repeatedDiagnostic.Contains("xy_readings=2"),
+            "two complete XY OCR readings must use the ordinary quorum path, not the fallback");
         var incorrectIds=damagedXY.Select(a=>a.ToArray()).ToArray();
         foreach(var pass in incorrectIds)pass[2]="Region ID 12594";
         Require(RuneLitePixelGridReader.ReadIdQuorum(incorrectIds,out string wrongIdDiagnostic) is null&&
