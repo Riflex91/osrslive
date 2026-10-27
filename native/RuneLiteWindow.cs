@@ -192,7 +192,8 @@ internal sealed class RuneLiteWindow:Form
                     log.Add(Severity.DEBUG,"RUNELITE_OCR","PASS",
                         $"sample={sequence} variant={variant} grid_rows={gridRows.Length} "+
                         $"exact_panel_valid={RuneLiteGridReader.Parse(rows) is not null} text={string.Join(" || ",gridRows)}");
-                });
+                },details=>log.Add(Severity.DEBUG,"RUNELITE_PIXEL","VERIFICATION",
+                    $"sample={sequence} {details}"));
         }
         catch(OperationCanceledException){return;}
         catch(Exception ex)
