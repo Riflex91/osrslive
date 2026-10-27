@@ -14,6 +14,10 @@ internal static class Program
         if(args.Length>0 && args[0]=="--build-info")
         {Console.WriteLine(BuildIdentity.Log);return 0;}
         if(args.Length>0 && args[0]=="--self-test")return SelfTest.Run();
+        if(args.Length>0 && args[0]=="--runelite-self-test")
+        {try{RuneLitePositionTests.Run();return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
+        if(args.Length>0 && args[0]=="--runelite-position-probe")
+            return RuneLitePositionProbe.Run().GetAwaiter().GetResult();
         if(args.Length>0 && args[0]=="--world-map-self-test")
         {try{WorldMapTests.Run();return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
         if(args.Length>0 && args[0]=="--compass-self-test")
@@ -39,7 +43,14 @@ internal static class Program
         Application.ThreadException+=(_,e)=>
             MessageBox.Show(e.Exception.GetType().Name+": "+e.Exception.Message,
                 "OSRS Play: UI-Fehler",MessageBoxButtons.OK,MessageBoxIcon.Error);
-        try{Application.Run(new MainWindow(!args.Contains("--ui-smoke-test"),args.Contains("--observe-only")));return 0;}
+        try
+        {
+            // RuneLite is the default backend. Keep legacy diagnostics explicit;
+            // a missing bridge must never start the old C++ client automation.
+            if(args.Contains("--legacy-official"))Application.Run(new MainWindow(!args.Contains("--ui-smoke-test"),args.Contains("--observe-only")));
+            else Application.Run(new RuneLiteWindow());
+            return 0;
+        }
         catch(Exception ex)
         {
             try
@@ -836,6 +847,7 @@ internal static class SelfTest
             WorldFooterRecoveryTests.Run();
             WorldMapTests.Run();
             CompassTests.Run();
+            RuneLitePositionTests.Run();
             SurvivalRoutineTests.Run();
             GameScreenReaderTests.Run();
             SessionRecoveryTests.Run();

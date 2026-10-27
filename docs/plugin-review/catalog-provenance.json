@@ -1,0 +1,24 @@
+{
+  "source": "https://runelite.net/plugin-hub/",
+  "retrieved": "2026-10-27",
+  "html_sha256": "7d7761e6e12ecb81afeddfeedeeffe5d857fc65ea7efc6f6bf189be7ad7e109c",
+  "entries": 2810,
+  "category_counts": {
+    "Sammeln / Verarbeitung / XP": 299,
+    "Inventar / Bank / Items": 468,
+    "Zustand / Markierung / Kontrolle": 707,
+    "Schnittstellen / Daten": 100,
+    "Grafik / Leistung / Bedienung": 252,
+    "Weitere Spezialfunktion / manuell prüfen": 1212,
+    "Aufgaben / Quests / Clues": 127,
+    "Position / Navigation": 98
+  },
+  "method": "Keyword screening of all names and descriptions; overlapping categories; no code/security/compatibility audit",
+  "core": {
+    "ref": "runelite-parent-1.13.4",
+    "tree_sha": "ad137adad1cb5052a5fef6e391888a8895d09830",
+    "entries": 131,
+    "source": "https://api.github.com/repos/runelite/runelite/git/trees/runelite-parent-1.13.4?recursive=1",
+    "excluded_helper": "config/SearchablePlugin.java (no plugin descriptor)"
+  }
+}
