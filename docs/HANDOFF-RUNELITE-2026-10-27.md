@@ -1,4 +1,46 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.9
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.10
+
+## Live-Bewegung bestätigt; Pixel-Diagnose nach 480 Zeichen gekappt (1.8.10)
+
+Das am 27.10.2026 um 21:33 (Europe/Berlin) gelieferte echte
+1.8.9-Protokoll bestätigt die **automatische Installation** anhand
+`PREVIOUS_UPDATE`, `version=1.8.9`, `build_channel=push`,
+Build `40578229326`; Manifest und GitHub-Release-API liefern beide
+1.8.9 und `ALREADY_CURRENT`. Der reguläre RuneLite-Prozess mit Profil
+`auto` liefert frische opake 773×534-Frames. Im Kaltstart bei
+3139/3216/0 wurde die unverifizierte Einzelziffer `6` ohne bestätigte
+historische Vorlagen weiterhin abgelehnt – korrekt fail-closed.
+
+Nach manueller Bewegung wurden mehrere tatsächlich verschiedene Orte
+aus zwei unabhängigen Aufnahmen freigegeben: 3143/3212/0 ab Probe 10,
+3145/3206 ab 19, 3141/3213 ab 27, **3147/3208 ab 32** (zuvor
+wegen einmalig sichtbarer `7` gesperrt), 3152/3204 ab 37,
+3157/3202 ab 42, 3157/3198 ab 53, 3157/3192 ab 68 und
+3148/3199 ab 74. In Pixelproben 17–20, 30–35 u. a. zeigt
+`historical_glyph_matches=4` oder `8` und null historische
+Widersprüche. Der sitzungsinterne Vorlagenspeicher erreichte 24
+unterschiedliche bestätigte Frames mit 96 begrenzten Vorlagensätzen.
+Die Log-Kopie wurde bei der vorgesehenen
+`AUTOMATION_NOT_IMPLEMENTED`-Sperre automatisch angefordert und
+später manuell erneut ausgelöst; `clipboard=COPIED` wurde bestätigt.
+Die tatsächliche RuneLite-Spielautomatik bleibt ausstehend.
+
+**Neu entdeckt:** In 58 vom Benutzer kopierten `RUNELITE_PIXEL`-Zeilen
+steht `...[gekürzt]`. Ursache ist `Diagnostics.Add`:
+`Sanitize(details)` verwendet das 480-Zeichen-Standardlimit,
+BEVOR die vollständige Datei und deren Zwischenablagekopie erzeugt
+werden. So fehlen gerade `full_matches`, `distinct_positions`,
+`elapsed_ms` und `result` am Ende der detailreichen Pixelproben;
+das pauschale Versprechen „komplette Logdatei“ war inhaltlich
+damit eingeschränkt, obwohl technisch die ganze *Datei* kopiert wurde.
+1.8.10 verwendet für Detailtexte bis zu 16.384 Zeichen und einen
+expliziten Marker mit ausgelassener Zeichenzahl bei außergewöhnlich
+langen Einträgen. Vertrauliche Muster werden vor dem Schreiben
+weiter bereinigt; Quellen/Ereignisnamen behalten enge Grenzen.
+Ein Windows-Selbsttest verlangt einen über 480 Zeichen langen
+`RUNELITE_PIXEL`-Eintrag samt Endwerten im *tatsächlich kopierten*
+Dateiinhalt und prüft die Großereignis-Grenze. **Live-Freigabe
+1.8.10 noch nicht bestätigt.**
 
 ## Erstmals stabil bestätigte Bewegung und fehlende Einzelziffer (1.8.9)
 
