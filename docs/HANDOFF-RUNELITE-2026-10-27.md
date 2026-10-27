@@ -28,7 +28,11 @@ sowie `Pragma: no-cache`. Die bestehende Release-URL und SHA-256-Prüfung
 bleiben unverändert. Das neue Diagnosesignal `MANIFEST_BEHIND_LOCAL`
 meldet eine alte Quelle ausdrücklich, ohne ein Downgrade zuzulassen.
 Offline-Tests verlangen zwei unterschiedliche Manifest-URLs und beide
-Cache-Header. Eine bestätigte Verbesserung am echten CDN steht aus.
+Cache-Header. Zusätzlich gleicht der Versionsvergleich die vierteilige
+Windows-Assemblyversion (`1.8.6.0`) mit der dreiteiligen Manifestversion
+(`1.8.6`) semantisch ab; gleiche Versionen dürfen nicht fälschlich als
+`MANIFEST_BEHIND_LOCAL` gewertet werden. Eine bestätigte Verbesserung am
+echten CDN steht aus.
 
 ## Erste echte 1.8.4-Rasterprobe und Positionssuchfenster-Fix (1.8.5)
 

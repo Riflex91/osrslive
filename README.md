@@ -9,8 +9,10 @@ Manifest schon 1.8.5 enthielt. Um zwischengespeicherte alte Antworten
 zu vermeiden, holt der Updater die öffentliche Manifestdatei mit einer
 einmaligen URL-Kennung sowie `Cache-Control`- und `Pragma`-Headern. Eine
 ältere Remote-Version wird separat als `MANIFEST_BEHIND_LOCAL` geloggt und
-niemals installiert. Offline-Tests prüfen zwei unterschiedliche URLs und
-die Cache-Header. **RuneLite-Spielaktionen bleiben nicht implementiert.**
+niemals installiert. Der Vergleich behandelt `.0`-Assemblyrevisionen
+und dreiteilige Manifestversionen korrekt als gleich. Offline-Tests prüfen
+zwei unterschiedliche URLs und die Cache-Header. **RuneLite-Spielaktionen
+bleiben nicht implementiert.**
 
 **Neu in 1.8.5 – Positionsfenster statt Ausschnittsursprung:** Die Raster-
 Ziffernprüfung suchte zuvor nur in den ersten 240×120 Bildpunkten und

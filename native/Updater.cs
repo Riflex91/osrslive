@@ -81,6 +81,10 @@ internal static class Updater
     {
         var transport=testClient??Client;
         var current=System.Reflection.Assembly.GetExecutingAssembly().GetName().Version ?? new Version(Diagnostics.Version);
+        // Assembly versions include a fourth .0 revision while the published
+        // manifest uses three-part SemVer. Comparing them directly makes
+        // 1.8.6 appear older than 1.8.6.0 even though they are identical.
+        var installedVersion=new Version(current.Major,current.Minor,Math.Max(0,current.Build));
         var elapsed=Stopwatch.StartNew();
         try
         {
@@ -94,10 +98,10 @@ internal static class Updater
             var update=ParseManifest(manifest);
             diagnostic?.Invoke("MANIFEST_VERIFIED",
                 $"remote_version={update.Version} current_version={current} asset={Path.GetFileName(update.Url.AbsolutePath)} manifest_characters={manifest.Length}");
-            if(update.Version<current)
+            if(update.Version<installedVersion)
                 diagnostic?.Invoke("MANIFEST_BEHIND_LOCAL",
                     $"remote_version={update.Version} current_version={current} potential_cdn_staleness=true download_suppressed=true");
-            if(update.Version<=current)
+            if(update.Version<=installedVersion)
             {
                 status($"Version {Diagnostics.Version} ist aktuell.");
                 diagnostic?.Invoke("ALREADY_CURRENT",$"remote_version={update.Version} elapsed_ms={elapsed.ElapsedMilliseconds}");
@@ -194,7 +198,10 @@ internal static class Updater
                    uri.AbsolutePath!=Manifest.AbsolutePath||!uri.Query.StartsWith("?nonce=",StringComparison.Ordinal))||
                !phases.SequenceEqual(expectedPhases)||
                !messages.Any(s=>s.Contains("aktuell")))
-                throw new Exception("Updater must recheck uncached, unique manifest URLs and preserve no-download semantics");
+                throw new Exception("Updater must recheck uncached, unique manifest URLs and preserve no-download semantics: "+
+                    $"restarts={restart}/{repeatRestart} errors={errors} requests={stub.Requests} "+
+                    $"unique_urls={stub.Urls.Distinct().Count()} cache_headers={stub.CacheGuardsPresent} "+
+                    $"phases={string.Join(",",phases)}");
         }
         phases.Clear();messages.Clear();
         string previous=$"version=1.8.5\nexeUrl=https://github.com/Riflex91/osrslive/releases/download/v1.8.5/OSRS-Play.exe\nexeSha256={new string('a',64)}";
