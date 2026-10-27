@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace OSRSLiveDiagnostics;
@@ -43,6 +44,7 @@ internal static class RuneLitePixelGridReader
     internal static RuneLiteGridEvidence? Read(Bitmap bitmap,IReadOnlyList<Observation> observations,
         out string diagnostic)
     {
+        var elapsed=Stopwatch.StartNew();
         var agreed=observations.GroupBy(o=>o).Where(g=>g.Count()>=2).Select(g=>g.Key).ToArray();
         if(agreed.Length!=1||observations.Any(o=>agreed.Length==1&&o!=agreed[0]))
         {
@@ -50,16 +52,22 @@ internal static class RuneLitePixelGridReader
             return null;
         }
         var expected=agreed[0];
-        int width=Math.Min(bitmap.Width,240),height=Math.Min(bitmap.Height,120);
+        // The user-supplied panel image was tightly cropped. In the actual
+        // RuneLite framebuffer the overlay can be offset substantially from
+        // that crop's origin. Search the SAME 350x220 top-left area already
+        // used by Windows OCR, never an unrelated part of the game screen.
+        int width=Math.Min(bitmap.Width,350),height=Math.Min(bitmap.Height,220);
         if(width<119||height<41)
         {diagnostic="attempted=false mode=MONO7X11 reason=IMAGE_TOO_SMALL";return null;}
 
         // Build a binary bitmap once. Never retain or export captured pixels.
         var white=new bool[width*height];
+        int brightPixels=0;
         for(int y=0;y<height;y++)for(int x=0;x<width;x++)
         {
             var p=bitmap.GetPixel(x,y);
             white[y*width+x]=p.R>=WhiteThreshold&&p.G>=WhiteThreshold&&p.B>=WhiteThreshold;
+            if(white[y*width+x])brightPixels++;
         }
         Glyph Cell(int originX,int originY,int row,int cell)
         {
@@ -74,18 +82,22 @@ internal static class RuneLitePixelGridReader
             return new(low,high);
         }
 
-        int visited=0,commaCandidates=0,idCandidates=0,matched=0;
+        int visited=0,firstCommaShapes=0,matchingCommas=0,emptySeparators=0;
+        int commaCandidates=0,idCandidates=0,matched=0;
         var accepted=new HashSet<RuneLiteGridEvidence>();
-        for(int oy=0;oy<=Math.Min(55,height-(2*RowPitch+Height));oy++)
-        for(int ox=0;ox<=Math.Min(80,width-(16*Pitch+Pitch));ox++)
+        for(int oy=0;oy<=height-(2*RowPitch+Height);oy++)
+        for(int ox=0;ox<=width-(16*Pitch+Pitch);ox++)
         {
             visited++;
             var firstComma=Cell(ox,oy,0,8);var secondComma=Cell(ox,oy,0,14);
             // Two actual matching comma rasters and two visibly empty space
             // cells are required; no OCR punctuation substitutions occur.
-            if(firstComma.Ink is <3 or >9||firstComma.Distance(secondComma)>2||
-               Cell(ox,oy,0,9).Ink>1||Cell(ox,oy,0,15).Ink>1)
-                continue;
+            if(firstComma.Ink is <3 or >9)continue;
+            firstCommaShapes++;
+            if(firstComma.Distance(secondComma)>2)continue;
+            matchingCommas++;
+            if(Cell(ox,oy,0,9).Ink>1||Cell(ox,oy,0,15).Ink>1)continue;
+            emptySeparators++;
             // The comma has a low descender, not an upper-row digit/period.
             if((firstComma.Low&((1UL<<56)-1))!=0||firstComma.High==0)continue;
             if(Enumerable.Range(0,4).Any(i=>Cell(ox,oy,0,i).Ink<5))continue;
@@ -135,9 +147,12 @@ internal static class RuneLitePixelGridReader
             matched++;accepted.Add(evidence);
         }
         diagnostic=$"attempted=true mode=MONO7X11 threshold={WhiteThreshold} "+
+            $"roi={width}x{height} bright_pixels={brightPixels} "+
             $"ocr_agreements={observations.Count(o=>o==expected)} anchors_tested={visited} "+
-            $"comma_layouts={commaCandidates} digit_templates={idCandidates} "+
-            $"full_matches={matched} distinct_positions={accepted.Count} "+
+            $"first_comma_shapes={firstCommaShapes} matching_comma_pairs={matchingCommas} "+
+            $"empty_separator_pairs={emptySeparators} comma_layouts={commaCandidates} "+
+            $"digit_templates={idCandidates} full_matches={matched} distinct_positions={accepted.Count} "+
+            $"elapsed_ms={elapsed.ElapsedMilliseconds} "+
             $"result={(accepted.Count==1?"PIXEL_GRID_VERIFIED":"NOT_RELEASED")}";
         return accepted.Count==1?accepted.Single():null;
     }

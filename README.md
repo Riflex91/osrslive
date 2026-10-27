@@ -1,4 +1,18 @@
-# OSRS Play 1.8.4 – RuneLite statt Atlas-Positionssuche
+# OSRS Play 1.8.5 – RuneLite statt Atlas-Positionssuche
+
+**Neu in 1.8.5 – Positionsfenster statt Ausschnittsursprung:** Die Raster-
+Ziffernprüfung suchte zuvor nur in den ersten 240×120 Bildpunkten und
+ließ darin mögliche Panel-Anker bis x=80/y=55 zu. Das echte 1.8.4-Log
+lieferte zwar übereinstimmende Chunk-/Region-/X/Y-OCR-Zahlen, aber in
+4.536 Versuchen **kein einziges Kommapaar**. Das zweite vollständige
+Fensterbild bestätigte einen tatsächlichen Panel-Versatz von +14/+53
+Pixel gegenüber dem zugeschnittenen Ausschnitt (dessen binäre Pixel
+exakt übereinstimmen). Deshalb sucht 1.8.5 nun im vollständigen 350×220-
+OCR-Ausschnitt. Zusätzliche Logwerte zeigen die Helligkeitspixel,
+Kommakandidaten, Abstands-/Leerstellenprüfung, Treffer und Dauer, um
+Layoutversatz von einer Schrift-/Helligkeitsabweichung zu unterscheiden.
+Die Lesefreigabe-Regeln bleiben unverändert konservativ; ein echter
+WGC-Live-Test mit Profil `auto` steht weiter aus.
 
 **Neu in 1.8.4 – bildgestützte Prüfung der World-Location-Ziffern:** Ein
 kleiner zusätzlicher Rasterleser nutzt das feste 7×11-Pixel-Schriftbild der

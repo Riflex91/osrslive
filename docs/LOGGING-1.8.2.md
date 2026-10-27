@@ -44,6 +44,7 @@
 | OCR | Probe und Verfahren (`nearest_2x`, `nearest_3x`, `bicubic_4x`, `contrast_4x`), gelesene Grid-Zeilen, gültige/ungültige Parser-Entscheidung |
 | Position | Chunk-/Region-Prüfung, Anzahl der gültigen OCR-Durchläufe, Zweibildbestätigung, eindeutige Koordinaten bei bestätigter Position |
 | Pixelprüfung (ab 1.8.4) | `RUNELITE_PIXEL/VERIFICATION`: Übereinstimmende OCR-Beobachtungen, getestete Bildanker, sichtbare Trennzeichen, bestätigte Ziffernvorlagen, vollständige Rastertreffer und Anzahl eindeutiger Positionen. Keine Pixel oder Screenshotdaten im Log. |
+| Erweitertes Pixelprotokoll (ab 1.8.5) | Größe des 350×220-Pixel-Suchbereichs, Zahl heller Bildpunkte, erste Kommaformen, passende Kommapaare, leere Trennfelder, vollständig geprüfte Layouts, Laufzeit. Damit werden Positionierungs- und Helligkeitsfehler gezielt unterscheidbar. |
 | Ablauf | Statuswechsel, Pause/Fortsetzen, Launcher-Anforderung, abgelehnte oder veraltete Ergebnisse, 10-Sekunden-Gesundheitsdaten |
 | Fehler | Auslöser, Sperrgrund, Exception-Typ, HResult, bereinigte Nachricht, Methoden-/IL-Stack und Zustand der Log-Kopie |
 | Auto-Update (ab 1.8.3) | Prüfung beim GUI-Start, alle 30 Minuten und per Schaltfläche; Manifest-Version, Assetname, Downloadgröße, Dauer, SHA-256-Prüfergebnis, Helperstart, Ergebnis oder bereinigter Fehler. Bei Updatefehler automatische Log-Kopie mit roter Meldung. |
