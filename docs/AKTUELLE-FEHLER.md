@@ -1,4 +1,13 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.3
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.4
+
+**1.8.4 – bisher ungelöste Live-Position:** Ein vom Benutzer zugeschnittener
+World-Location-Ausschnitt zeigte eine feste monospaced Rasterstruktur und
+sichtbare Kommas/Null, die Windows-OCR nicht zuverlässig erkannte. Ein neuer
+streng geprüfter, bildgestützter Leser gleicht Tile-Ziffern mit Vorlagen
+aus den bereits konsistenten Chunk-/Region-ID-Zeilen derselben Aufnahme ab.
+Die analoge Auswertung des Benutzerbilds ist plausibel; der eigentliche
+WGC-/RuneLite-Live-Lauf von 1.8.4 steht noch aus. Keine ungesicherten
+Ziffernersetzungen, keine Freigabe von Spieleingaben.
 
 **1.8.3 – Auto-Update im RuneLite-Modus:** Der automatische GitHub-Check war
 im älteren `MainWindow`, nicht im Standard-`RuneLiteWindow` verdrahtet.

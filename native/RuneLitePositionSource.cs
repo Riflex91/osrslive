@@ -60,13 +60,15 @@ internal static class RuneLiteGridReader
         finally{bitmap.UnlockBits(bits);}
     }
 
-    internal static async Task<RuneLiteGridEvidence?> Read(Bitmap bitmap,OcrEngine engine,Action<string[]>? diagnostic=null)
+    internal static async Task<RuneLiteGridEvidence?> Read(Bitmap bitmap,OcrEngine engine,
+        Action<string[]>? diagnostic=null,Action<string>? pixelDiagnostic=null)
     {
         // Fresh profiles place Grid Info at the canvas top-left. Read only the
         // small overlay region, excluding chat and account panes. No image saved.
         using var crop=bitmap.Clone(new Rectangle(0,0,Math.Min(350,bitmap.Width),Math.Min(220,bitmap.Height)),
             PixelFormat.Format32bppArgb);
         var evidenceCandidates=new List<RuneLiteGridEvidence?>();
+        var observations=new List<RuneLitePixelGridReader.Observation>();
         foreach(var (scale,contrast) in new[]{(2,false),(3,false),(4,false),(4,true)})
         {
             using var enlarged=new Bitmap(crop.Width*scale,crop.Height*scale);
@@ -87,12 +89,18 @@ internal static class RuneLiteGridReader
             }
             var text=rows.Select(r=>string.Join(" ",r.OrderBy(w=>w.BoundingRect.X).Select(w=>w.Text))).ToArray();
             diagnostic?.Invoke(text);
+            if(RuneLitePixelGridReader.ReadObservation(text) is { } observation)observations.Add(observation);
             var evidence=Parse(text);
             evidenceCandidates.Add(evidence);
             // The cheap, existing paths still get an agreement check. Avoid
             // expensive extra OCR unless neither has produced a valid panel.
             if(scale==3&&evidenceCandidates.Any(e=>e is not null))break;
         }
+        var raster=RuneLitePixelGridReader.Read(crop,observations,out string rasterDiagnostic);
+        pixelDiagnostic?.Invoke(rasterDiagnostic);
+        // A valid pixel reading cannot override a different valid OCR reading.
+        // The existing two-independent-fresh-frames gate remains unchanged.
+        evidenceCandidates.Add(raster);
         return ConsistentEvidence(evidenceCandidates);
     }
 }
@@ -122,7 +130,8 @@ internal sealed class RuneLitePositionSource:IDisposable
         $"frame_copies={capture.FrameCopies} capture_error={capture.LastFrameError} "+
         $"geometry={capture.Geometry} alpha={capture.AlphaState}";
     private readonly OcrEngine? engine=OcrEngine.TryCreateFromLanguage(new Language("en-US"))??OcrEngine.TryCreateFromUserProfileLanguages();
-    internal async Task<RuneLitePositionState> ReadAsync(CancellationToken ct=default,Action<string[]>? diagnostic=null)
+    internal async Task<RuneLitePositionState> ReadAsync(CancellationToken ct=default,
+        Action<string[]>? diagnostic=null,Action<string>? pixelDiagnostic=null)
     {
         if(engine is null)return new("OCR_LANGUAGE_UNAVAILABLE",Diagnostic:"language=en-US/fallback unavailable");
         var windows=new List<IntPtr>();
@@ -154,7 +163,7 @@ internal sealed class RuneLitePositionSource:IDisposable
                 if(RuneLiteGridReader.Parse(rows) is not null)validPasses++;
                 labelRows+=rows.Count(row=>Regex.IsMatch(row,@"^(Tile|Chunk\s+ID|Region\s+ID)",RegexOptions.IgnoreCase));
                 diagnostic?.Invoke(rows);
-            });
+            },pixelDiagnostic);
             var now=DateTimeOffset.UtcNow;
             var state=confirmation.Observe(windows[0],frame.Image.Size,frame.CapturedUtc,now,evidence);
             return state with{Diagnostic=windowDiagnostic+" "+CaptureDiagnostic+

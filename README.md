@@ -1,4 +1,16 @@
-# OSRS Play 1.8.3 – RuneLite statt Atlas-Positionssuche
+# OSRS Play 1.8.4 – RuneLite statt Atlas-Positionssuche
+
+**Neu in 1.8.4 – bildgestützte Prüfung der World-Location-Ziffern:** Ein
+kleiner zusätzlicher Rasterleser nutzt das feste 7×11-Pixel-Schriftbild der
+lokal eingerichteten `auto`-Anzeige. Er lernt Ziffernformen ausschließlich
+aus den im selben Bild vorhandenen, mindestens zweimal per OCR identisch
+erkannten Chunk-/Region-IDs und gleicht anschließend die Tile-Zeile ab.
+Zwei tatsächlich sichtbare passende Kommas und leere Trennfelder sind
+Pflicht; es gibt keinerlei blindes `o`→`0` oder `»`→`,`.
+Unbekannte Ziffern, abweichende Schrift oder widersprüchliche OCR-
+Ergebnisse werden verworfen. Ein zweites frisches Fensterbild ist weiterhin
+notwendig; daraus entsteht **noch keine RuneLite-Spielautomatik**. Die erste
+Live-Bestätigung dieser neuen Lesemethode steht aus.
 
 **Neu in 1.8.3 – Auto-Update des RuneLite-Companions:** Der Standardclient
 prüft beim Start, alle 30 Minuten und auf Knopfdruck das Release-Manifest

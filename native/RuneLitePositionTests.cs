@@ -35,6 +35,7 @@ internal static class RuneLitePositionTests
         Require(RuneLiteGridReader.ConsistentEvidence(new RuneLiteGridEvidence?[]{null,good,null,good})==good,"nonconflicting OCR variants");
         Require(RuneLiteGridReader.ConsistentEvidence(new RuneLiteGridEvidence?[]{good,next}) is null,"conflicting valid OCR variants reject the frame");
         Require(RuneLiteGridReader.ConsistentEvidence(new RuneLiteGridEvidence?[]{null,null}) is null,"missing OCR evidence rejects the frame");
+        RuneLitePixelGridReaderTests.Run();
         Console.WriteLine("RUNELITE GRID PASS: player panel only, chunk/region checks, fresh independent frames, window changes, missing/stale rejection; no game input");
     }
     internal static async Task OcrFixture(OcrEngine engine)

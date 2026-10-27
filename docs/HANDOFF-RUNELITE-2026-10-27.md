@@ -1,4 +1,36 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.3
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.4
+
+## Gezielte Pixel-Ziffernprüfung aus einem echten Panel-Ausschnitt (1.8.4)
+
+Das vom Benutzer bereitgestellte 131×55-Pixel-Bild zeigt den World-Location-
+Text, dessen Kachel- und Ebenenziffern Windows-OCR trotz vier Durchläufen
+als `»`, `o` oder `Ø` verfälschte. Eine lokale **analytische** Untersuchung
+der gelieferten Bildpunkte (kein Bild oder Pixeltemplate ins Git-Repository
+übernommen) ergab ein regelmäßiges 7-Pixel-Zeichenraster mit 11 Pixel hohen
+Prüfzellen und 15 Pixel Zeilenabstand. Gleich benannte Ziffern aus der Tile-,
+Chunk- und Region-Zeile sind auf diesem Bild pixelgleich oder weichen
+um höchstens zwei Schwellenwert-Pixel ab. Beide Kommas sind pixelgleich.
+
+`RuneLitePixelGridReader` erzeugt daraufhin ausschließlich zur Laufzeit
+binäre Ziffernvorlagen aus Chunk-/Region-ID **derselben Aufnahme**. Diese
+beiden Werte samt X/Y-Token müssen zuvor in mindestens zwei voneinander
+unabhängigen Windows-OCR-Aufbereitungspässen übereinstimmen. Anschließend
+prüft der neue Leser jedes Zeichen der Tile-Zeile mit Abstand und
+Verwechslungsmarge gegenüber allen gelernten Ziffern, die beiden sichtbar
+identischen Kommas, leere Spalten, die aufgelesene Ziffer der Ebene und
+die mathematischen Chunk-/Region-IDs. Unbekannte Zeichen und andere Schrift-
+oder Layoutgeometrie führen zu `NOT_RELEASED`. Außerdem darf kein gültiger
+Windows-OCR-Kandidat zu einer anderen Position führen. Die frühere
+Zweibild-Frischebedingung bleibt unverändert. Neue `RUNELITE_PIXEL`-Logeinträge
+zeigen die Zahl geprüfter Kandidaten und die Ablehnungsstufe ohne Screenshots.
+
+Der kleinformatige Benutzerausschnitt konnte durch dieselben strengen
+Raster- und Vorlagenprüfungen *lokal analytisch* mit eindeutiger
+Kachel-/Ebenenablesung geprüft werden; das ist **kein** realer Lauf der
+Windows-EXE gegen die fortlaufenden WGC-Frames. Regressionen verwenden
+synthetische 7×11-Muster, keine privaten Bilddaten. Vor der Freigabe
+weiterer Funktionalität muss die neue 1.8.4-EXE mit `auto` im tatsächlichen
+Lauf eine stabile Position aus unabhängigen aktuellen Aufnahmen nachweisen.
 
 ## Update-Fix aus echtem Sitzungslog (1.8.3)
 
