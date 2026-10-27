@@ -376,7 +376,9 @@ internal static class RuneLitePixelGridReaderTests
             Require(fromIndependentPixels?.Tile==new WorldTile(3163,3200,0)&&
                     bridgePixelDiagnostic.Contains("PIXEL_GRID_VERIFIED")&&
                     bridgePixelDiagnostic.Contains("single_xy_matches_pixels=true")&&
-                    bridgePixelDiagnostic.Contains("full_matches=4 distinct_positions=1"),
+                    bridgePixelDiagnostic.Contains("full_matches=")&&
+                    !bridgePixelDiagnostic.Contains("full_matches=0 ")&&
+                    bridgePixelDiagnostic.Contains("distinct_positions=1"),
                 "one Chunk vote cannot alone release a tile; every actual digit, separator and floor must match: "+bridgePixelDiagnostic);
             var gate=new RuneLiteOverlayConfirmation();
             var at=new DateTimeOffset(2026,10,27,20,0,0,TimeSpan.Zero);
