@@ -1,4 +1,36 @@
-# OSRS Play 1.8.14 – nachvollziehbare bestätigte Spielerbewegung
+# OSRS Play 1.8.15 – Pixelbeweis bei einzeln gelesener Chunk-ID
+
+**Neu in 1.8.15 – Chunk-ID nur einmal lesbar, XY und Region getrennt:**
+Der echte 1.8.14-Live-Test bestätigt erneut das automatische Update,
+die automatische Logdatei-Kopie und die neue Bewegungschronik:
+`RUNELITE_MOTION OBSERVATION` enthält Richtung, Zeit- und
+Probenabstände, einschließlich der ausdrücklich unbekannten
+Zwischenroute. Der Client konnte zahlreiche manuelle Bewegungen
+nachvollziehen. Bei Probe 69–75 um **3163/3200/0** wird aber nur
+die Chunk-ID `809360` in einer OCR-Variante vollständig gelesen;
+eine andere Variante erkennt das X/Y-Paar und drei weitere
+OCR-Aufbereitungen bestätigen die Region `12594`. Der bisherige
+ID-/Pixel-Ausweichweg verlangt mindestens zwei numerische
+Chunk-ID-Stimmen und startet deshalb keine Pixelprüfung.
+
+1.8.15 erlaubt **ausschließlich** in diesem Muster einen weiteren
+schwach gewichteten, separat protokollierten Kandidaten: Genau
+eine vollständig gelesene Chunk-ID muss von einem **anderen**
+OCR-Pass mit genau einem vollständigen X/Y-Zahlenpaar sowie
+mindestens **drei** gleichen Region-ID-Stimmen gestützt werden.
+Alle Zahlen müssen rechnerisch zusammenpassen. Danach bleiben
+höchstens 64 Chunk-Felder für die strikte Rasterprüfung; jede
+der acht X/Y-Ziffern braucht eine tatsächlich vorhandene,
+unabhängig benannte Pixelvorlage. Echte Kommas, Ebene, eine
+eindeutige Pixelposition, exakter Vergleich mit dem einzelnen
+X/Y-Paar und eine zweite frische Aufnahme bleiben Pflicht.
+Der Logeintrag `SINGLE_CHUNK_CROSSCHECK_VERIFIED` mit
+`single_chunk_assisted=true` unterscheidet diesen Pfad von
+echten doppelten Chunk-ID-Stimmen. Ein falscher Einzelwert,
+fehlende Region-Mehrheit, zwei widersprechende Chunk-Werte,
+fehlende Pixel oder nur ein Bild bleiben gesperrt.
+Diese Erweiterung ist zunächst nur synthetisch getestet; eine
+echte 1.8.15-Live-Bestätigung steht aus. Spielaktionen bleiben aus.
 
 **Neu in 1.8.14 – Bewegungschronik als Vorbereitung für sichere Navigation:**
 Das echte 1.8.13-Live-Protokoll bestätigt automatisches Update,

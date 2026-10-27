@@ -1,4 +1,48 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.14
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.15
+
+## Chunk nur in einem OCR-Pass vorhanden; Positionsprüfung blockiert (1.8.15)
+
+Das echte 1.8.14-Live-Protokoll vom 27.10.2026 um 22:54–22:55 Uhr
+(Europe/Berlin) bestätigt `version=1.8.14`, `PREVIOUS_UPDATE`,
+`ALREADY_CURRENT`, korrekte Windows-Push-Build-Identität
+`40590145230` und `clipboard=COPIED` – auch nach erneutem Fehler.
+Die neue Bewegungschronik zeigt `FIRST_CONFIRMED` in Probe 8
+bei 3157/3197 und danach zwölf `CHANGED`-Ereignisse mit
+`dx`, `dy`, `plane_delta`, `sample_gap`, `capture_gap_ms` und
+`route_between_samples_unknown=true`. Die beobachteten
+Zeit-/Wegdifferenzen widersprechen keinem zweifach bestätigten
+Tile, und es werden keine unbekannten Zwischenpositionen erfunden.
+**1.8.14-Motion-Tracing wurde live bestätigt.**
+
+Neue OCR-Lücke in Probe 69–75 (Bewegung nach ungefähr 3163/3200):
+`nearest_2x` liefert `Chunk ID 809360`, aber ein unvollständiges
+Tile-Feld. `nearest_3x` erkennt `Tile3163» 3200» o`, aber nur
+`Chunk ID 80360` oder beschädigte Region. Die beiden 4×-Varianten
+lesen `Chunk ID 8Ø936ø` bzw. `8B36ø`, während `Region ID 12594`
+in mindestens drei Varianten eindeutig erscheint. Resultat:
+`FIELD_QUORUM NOT_READY chunk_readings=1`,
+`ID_ONLY_QUORUM NOT_READY chunk_quorums=0`,
+`attempted=false`; nach vier Sekunden rote Warnung und
+automatische Logdateikopie. Die nötige Chunk-ID kann nicht aus
+einer unvollständigen Zeile per `Ø`-Ersatz gewonnen werden.
+
+1.8.15 erweitert die bestehende strikt pixelabhängige Ausweichroute
+auf genau **eine** vollständige Chunk-ID, wenn gleichzeitig
+**genau ein** vollständiges X/Y-Zahlenpaar aus einem anderen
+OCR-Aufbereitungspass und **mindestens drei** gleiche Region-IDs
+vorliegen. Chunk- und Region-Checksummen müssen zum X/Y-Paar
+passen; ein weiteres konkurrierendes Chunk-Feld sperrt. Nur dann
+werden bis zu 64 mögliche Pixelpositionen geprüft. Wie zuvor
+erfordern diese echte eindeutig benannte Ziffern, zwei Kommas,
+sichtbare Ebenenziffer, eine einzige vollständig passende Position,
+keinen Widerspruch zum numerischen X/Y-Paar und die zweite
+unabhängige Aufnahme. Der Logbeleg nennt
+`stage=ID_ONLY_QUORUM result=SINGLE_CHUNK_CROSSCHECK_VERIFIED`
+mit `chunk_votes=1`, `region_votes>=3`, `xy_readings=1` und
+`single_chunk_assisted=true`. Synthetische Negativtests sperren
+falschen Chunk-Checksum, gleiche Chunk/XY-Quelle, zu wenige
+Region-Stimmen, konfliktreiche Chunkwerte und fehlende Kommapixel.
+Ein echter 1.8.15-Live-Test steht noch aus; keine Spielaktionen.
 
 ## Positionswechsel live bestätigt; Bewegungstimeline hinzugefügt (1.8.14)
 

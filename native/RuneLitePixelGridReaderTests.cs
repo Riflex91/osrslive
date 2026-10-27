@@ -347,6 +347,71 @@ internal static class RuneLitePixelGridReaderTests
         Require(RuneLitePixelGridReader.ReadIdQuorum(repeatedNumeric,out string repeatedDiagnostic) is null&&
                 repeatedDiagnostic.Contains("xy_readings=2"),
             "two complete XY OCR readings must use the ordinary quorum path, not the fallback");
+        // Real 1.8.14 sample 70: only nearest_2x sees full Chunk 809360;
+        // only nearest_3x sees full XY 3163/3200; three Region passes
+        // independently show 12594. Neither usual two-ID quorum can start
+        // the pixel reader, despite real same-frame raster glyphs.
+        string[][] oneChunkBridge=
+        [
+            ["Tile3163»","Chunk ID 809360","Region ID 12594"],
+            ["Tile3163» 3200» o","Chunk ID 80360","Region ID 12534"],
+            ["Tile3163, 32ØØ, Ø","Chunk ID 8Ø936ø","Region ID 12594"],
+            ["Tile3163, 32øø,","Chunk ID 8B36ø","Region ID 12594"]
+        ];
+        Require(RuneLitePixelGridReader.ReadFieldQuorum(oneChunkBridge,out string unreadyChunk) is null&&
+                unreadyChunk.Contains("chunk_readings=1"),
+            "one Chunk read must never be promoted to an ordinary two-vote field quorum");
+        var assistedChunk=RuneLitePixelGridReader.ReadIdQuorum(oneChunkBridge,out string bridgeDiagnostic);
+        Require(assistedChunk is {Chunk:"809360",Region:"12594",ChunkVotes:1,RegionVotes:3,
+                SingleXY:(3163,3200)}&&
+                bridgeDiagnostic.Contains("SINGLE_CHUNK_CROSSCHECK_VERIFIED")&&
+                bridgeDiagnostic.Contains("single_chunk_assisted=true")&&
+                bridgeDiagnostic.Contains("candidate_tiles=64"),
+            "a single Chunk may be considered only with a different XY OCR pass and three matching Region votes: "+bridgeDiagnostic);
+        using(var oneChunkBitmap=Fixture(tileX:3163,tileY:3200))
+        {
+            var fromIndependentPixels=RuneLitePixelGridReader.Read(oneChunkBitmap,
+                Array.Empty<RuneLitePixelGridReader.Observation>(),out string bridgePixelDiagnostic,
+                idQuorum:assistedChunk);
+            Require(fromIndependentPixels?.Tile==new WorldTile(3163,3200,0)&&
+                    bridgePixelDiagnostic.Contains("PIXEL_GRID_VERIFIED")&&
+                    bridgePixelDiagnostic.Contains("single_xy_matches_pixels=true")&&
+                    bridgePixelDiagnostic.Contains("full_matches=4 distinct_positions=1"),
+                "one Chunk vote cannot alone release a tile; every actual digit, separator and floor must match: "+bridgePixelDiagnostic);
+            var gate=new RuneLiteOverlayConfirmation();
+            var at=new DateTimeOffset(2026,10,27,20,0,0,TimeSpan.Zero);
+            Require(gate.Observe(new IntPtr(31),oneChunkBitmap.Size,at,at,fromIndependentPixels).Tile is null&&
+                    gate.Observe(new IntPtr(31),oneChunkBitmap.Size,at.AddMilliseconds(500),
+                        at.AddMilliseconds(500),fromIndependentPixels).Tile==new WorldTile(3163,3200,0),
+                "an assisted single-Chunk pixel match must still wait for a separate fresh capture");
+            for(int dy=0;dy<11;dy++)for(int dx=0;dx<7;dx++)
+                oneChunkBitmap.SetPixel(7+14*7+dx,13+dy,Color.FromArgb(21,26,32));
+            Require(RuneLitePixelGridReader.Read(oneChunkBitmap,
+                    Array.Empty<RuneLitePixelGridReader.Observation>(),out _,idQuorum:assistedChunk) is null,
+                "the independently visible second comma remains compulsory in the single-Chunk path");
+        }
+        var singleChunkWrong=oneChunkBridge.Select(x=>x.ToArray()).ToArray();
+        singleChunkWrong[0][1]="Chunk ID 809361";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(singleChunkWrong,out string bridgeMismatch) is null&&
+                bridgeMismatch.Contains("SINGLE_XY_CHECKSUM_REJECTED"),
+            "even a within-region single Chunk OCR error must fail when inconsistent with the separate XY reading");
+        var chunkXYSamePass=oneChunkBridge.Select(x=>x.ToArray()).ToArray();
+        chunkXYSamePass[0][0]="Tile3163» 3200» o";
+        chunkXYSamePass[1][0]="Tile3163»";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(chunkXYSamePass,out _) is null,
+            "a single Chunk and XY from the very same OCR pass are not independently crosschecked");
+        var chunkWithoutXY=oneChunkBridge.Select(x=>x.ToArray()).ToArray();
+        chunkWithoutXY[1][0]="Tile3163»";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(chunkWithoutXY,out _) is null,
+            "a single Chunk cannot enumerate pixels without a complete separate XY reading");
+        var chunkWithTwoRegionVotes=oneChunkBridge.Select(x=>x.ToArray()).ToArray();
+        chunkWithTwoRegionVotes[2][2]="Region ID 12Ø94";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(chunkWithTwoRegionVotes,out _) is null,
+            "the single-Chunk exception needs at least three matching Region votes");
+        var splitSingleChunks=oneChunkBridge.Select(x=>x.ToArray()).ToArray();
+        splitSingleChunks[2][1]="Chunk ID 809361";
+        Require(RuneLitePixelGridReader.ReadIdQuorum(splitSingleChunks,out _) is null,
+            "two different single Chunk readings must not be merged into a plausible value");
         var incorrectIds=damagedXY.Select(a=>a.ToArray()).ToArray();
         foreach(var pass in incorrectIds)pass[2]="Region ID 12594";
         Require(RuneLitePixelGridReader.ReadIdQuorum(incorrectIds,out string wrongIdDiagnostic) is null&&
