@@ -1,4 +1,19 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.5
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.6
+
+**1.8.6 – Updater-Cache und tatsächlicher Live-Durchbruch:** Das neue
+1.8.5-Sitzungslog vom 27.10. um 20:11 (Europe/Berlin) bestätigt bereits ab
+der zweiten unabhängigen WGC-Aufnahme `OVERLAY_CONFIRMED` und anschließend
+neun weitere stabile Ortsproben für X=3143/Y=3210/Ebene=0.
+`RUNELITE_PIXEL` meldet jedes Mal `PIXEL_GRID_VERIFIED`, 4 identische
+Rastertreffer und eine eindeutige Position; rund 11–12 ms nach der ersten
+Probe. **Die zuvor blockierte Live-Position ist damit an diesem einen Ort
+bestätigt.** RuneLite-Spielaktionen bleiben ausstehend und lösen
+`AUTOMATION_NOT_IMPLEMENTED` samt Log-Kopie/roter GUI-Meldung aus.
+Gleichzeitig lieferte die Update-Anfrage im 1.8.5-Client noch `remote_version=1.8.4`,
+obwohl Version 1.8.5 bereits veröffentlicht war. 1.8.6 fügt pro Abfrage
+einmalige URL-Kennungen, Cache-Vermeidungs-Header und `MANIFEST_BEHIND_LOCAL`
+hinzu; die Wirksamkeit gegen die reale CDN-Zwischenspeicherung benötigt
+einen weiteren Live-Lauf.
 
 **1.8.5 – erweiterte Suche nach World-Location-Pixeln:** Das erste echte
 1.8.4-Log zeigt in jeder Aufnahme zwei übereinstimmende OCR-ID-/X/Y-Beobachtungen,
@@ -8,8 +23,8 @@ zugeschnittenen Screenshot beschränkte Ankersuche wird auf den vollständigen
 RuneLite-Fensterbild bestätigte die Panelverschiebung um +14/+53 Pixel
 gegenüber dem Ausschnitt bei **identischen** binären Panelpixeln. Eine
 neue stufenweise Diagnose trennt fehlende
-helle Pixel, nichtpassende Kommas/Leerstellen und Ziffernmuster. Live-Ergebnis
-noch unbekannt; Spielaktionen weiterhin gesperrt.
+helle Pixel, nichtpassende Kommas/Leerstellen und Ziffernmuster. Der spätere
+1.8.5-Live-Lauf bestätigte damit die Positionslesung; Spielaktionen bleiben gesperrt.
 
 **1.8.4 – bisher ungelöste Live-Position:** Ein vom Benutzer zugeschnittener
 World-Location-Ausschnitt zeigte eine feste monospaced Rasterstruktur und

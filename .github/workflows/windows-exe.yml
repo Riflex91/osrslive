@@ -127,7 +127,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "OSRS Play ${tag}: expands the conservative RuneLite World Location pixel-grid search to the complete existing 350x220 OCR crop after live 1.8.4 logs reported zero comma anchors. Adds staged pixel/geometry diagnostics and shifted-panel tests. Digit templates still require same-frame matching Chunk/Region IDs, multiple OCR passes, visible comma pixels, exact checksums and two fresh frames; no blind substitutions, saved screenshots or automatic RuneLite game actions. Live confirmation is pending. See docs/HANDOFF-RUNELITE-2026-10-27.md."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "OSRS Play ${tag}: the 1.8.5 live RuneLite log confirmed repeated World Location positions (3143/3210/0) from two fresh WGC frames. Fixes stale auto-update manifest reads via a per-request cache-busting nonce plus explicit no-cache headers, logging MANIFEST_BEHIND_LOCAL if a source is older than the installed client. Windows self-tests verify unique requests, cache headers, safe downgrade rejection and position OCR. RuneLite game automation remains unimplemented; the red diagnostic banner and clipboard log export remain active. See docs/HANDOFF-RUNELITE-2026-10-27.md."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -1,4 +1,18 @@
-# OSRS Play 1.8.5 – RuneLite statt Atlas-Positionssuche
+# OSRS Play 1.8.6 – RuneLite statt Atlas-Positionssuche
+
+**Neu in 1.8.6 – zuverlässigerer Update-Manifestabruf:** Das erste
+1.8.5-Live-Protokoll bestätigt die Pixelposition über zwei unabhängige
+RuneLite-Aufnahmen und durchgehend weitere `OVERLAY_CONFIRMED`-Proben.
+Die Update-Abfrage erhielt unmittelbar nach dem Release jedoch noch
+`remote_version=1.8.4` bei lokal installiertem 1.8.5, obwohl das GitHub-
+Manifest schon 1.8.5 enthielt. Um zwischengespeicherte alte Antworten
+zu vermeiden, holt der Updater die öffentliche Manifestdatei mit einer
+einmaligen URL-Kennung sowie `Cache-Control`- und `Pragma`-Headern. Eine
+ältere Remote-Version wird separat als `MANIFEST_BEHIND_LOCAL` geloggt und
+niemals installiert. Der Vergleich behandelt `.0`-Assemblyrevisionen
+und dreiteilige Manifestversionen korrekt als gleich. Offline-Tests prüfen
+zwei unterschiedliche URLs und die Cache-Header. **RuneLite-Spielaktionen
+bleiben nicht implementiert.**
 
 **Neu in 1.8.5 – Positionsfenster statt Ausschnittsursprung:** Die Raster-
 Ziffernprüfung suchte zuvor nur in den ersten 240×120 Bildpunkten und
