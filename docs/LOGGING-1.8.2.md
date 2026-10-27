@@ -48,6 +48,7 @@
 | Ablauf | Statuswechsel, Pause/Fortsetzen, Launcher-Anforderung, abgelehnte oder veraltete Ergebnisse, 10-Sekunden-Gesundheitsdaten |
 | Fehler | Auslöser, Sperrgrund, Exception-Typ, HResult, bereinigte Nachricht, Methoden-/IL-Stack und Zustand der Log-Kopie |
 | Auto-Update (ab 1.8.3) | Prüfung beim GUI-Start, alle 30 Minuten und per Schaltfläche; Manifest-Version, Assetname, Downloadgröße, Dauer, SHA-256-Prüfergebnis, Helperstart, Ergebnis oder bereinigter Fehler. Bei Updatefehler automatische Log-Kopie mit roter Meldung. |
+| Cachefeste Manifestabfrage (ab 1.8.6) | `MANIFEST_REQUEST` nennt die frische URL-/Header-Richtlinie; `MANIFEST_BEHIND_LOCAL` meldet einen älteren remote Stand, ohne private URL-Kennung oder Daten preiszugeben. Eine Downgrade-Installation ist ausgeschlossen. |
 | Altes Backend | Zusätzlich bestehende Render-, Login-, Welt-, Inventar-, Navigations-, Kampf- und Aktivitätsereignisse sowie blockierte Executor-Zustände |
 
 Die Datei speichert **keine Bildschirmbilder**, Prozessspeicher, Jagex-

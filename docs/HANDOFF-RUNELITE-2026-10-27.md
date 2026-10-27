@@ -1,4 +1,34 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.5
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.6
+
+## Erstes erfolgreiches 1.8.5-WGC-Live-Protokoll und Update-Cache (1.8.6)
+
+Das nächste vom Benutzer gelieferte Live-Protokoll (`2026-10-27`, 20:11
+Europe/Berlin) meldet die echte aus GitHub Actions veröffentlichte
+`build_channel=push`-Version 1.8.5. Schon Probe 1 hatte
+`PIXEL_GRID_VERIFIED` (`roi=350x220`, `ocr_agreements=2`,
+`comma_layouts=4`, `digit_templates=4`, `full_matches=4`,
+`distinct_positions=1`), brauchte aber aus Sicherheitsgründen noch
+ein weiteres unabhängiges frisches Frame. Ab Probe 2 meldete die
+Original-EXE `OVERLAY_CONFIRMED` mit X=3143/Y=3210/Ebene=0. Bis Probe 11
+blieb diese Bestätigung stabil; die Pixelprüfung benötigte nach der ersten
+34-ms-Probe nur rund 11–12 ms. Die reguläre Windows-OCR las unverändert
+`»` oder `o` statt exakter Kommas/Null; es wurde **keine** Ersatzregel
+freigeschaltet. Ein automatisches Gameplay wird ausdrücklich nicht
+behauptet: Das rote `AUTOMATION_NOT_IMPLEMENTED` und die automatische
+Log-Zwischenablage sind der erwartete verbleibende Funktionsblock.
+
+Die automatische Updateprüfung empfing rund eine Minute nach der
+1.8.5-Veröffentlichung noch `remote_version=1.8.4` vom öffentlichen
+`raw.githubusercontent.com`-Manifest, während GitHub auf `main` bereits
+`version=1.8.5` zeigte. Als plausible Ursache bleibt CDN-Cache-Staleness,
+nicht ein fehlender Update-Aufruf (die Logs dokumentieren ihn).
+1.8.6 legt für jeden Manifestabruf eine neue zufällige, datenneutrale
+URL-Kennung an und setzt `Cache-Control: no-cache, no-store, max-age=0`
+sowie `Pragma: no-cache`. Die bestehende Release-URL und SHA-256-Prüfung
+bleiben unverändert. Das neue Diagnosesignal `MANIFEST_BEHIND_LOCAL`
+meldet eine alte Quelle ausdrücklich, ohne ein Downgrade zuzulassen.
+Offline-Tests verlangen zwei unterschiedliche Manifest-URLs und beide
+Cache-Header. Eine bestätigte Verbesserung am echten CDN steht aus.
 
 ## Erste echte 1.8.4-Rasterprobe und Positionssuchfenster-Fix (1.8.5)
 
@@ -30,7 +60,7 @@ Komma-/Trennzeichen-Prüfungen, die Ziffernvorlagen, vollständige Treffer
 und die Laufzeit. Ein verschobenes synthetisches Panel jenseits der alten
 Grenzen ergänzt die Regressionstests. Die harten Schranken für sichtbare
 Kommas, unabhängige OCR-Aufbereitungen, Ziffernähnlichkeit, IDs und zwei
-frische Frames bleiben bestehen. **Noch keine 1.8.5-Live-Bestätigung.**
+    frische Frames bleiben bestehen. **Der spätere 1.8.5-Live-Lauf bestätigte diese Lesung.**
 
 ## Gezielte Pixel-Ziffernprüfung aus einem echten Panel-Ausschnitt (1.8.4)
 

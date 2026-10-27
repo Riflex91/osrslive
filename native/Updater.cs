@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -16,6 +17,19 @@ internal static class Updater
     private static readonly string Base = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"OSRSLiveDiagnostics");
     internal static readonly string StartupLog = Path.Combine(Base,"startup.log");
     private static readonly string OutcomePath = Path.Combine(Base,"last-update.status");
+    private static HttpRequestMessage NewManifestRequest()
+    {
+        // A release's version/hash manifest changes at the SAME raw GitHub
+        // URL. Intermediary CDN caches have returned an older manifest even
+        // after main had advanced. A unique nonce also bypasses caches that
+        // ignore client Cache-Control/Pragma request headers.
+        var uri=new Uri(Manifest.AbsoluteUri+"?nonce="+Guid.NewGuid().ToString("N"));
+        var request=new HttpRequestMessage(HttpMethod.Get,uri);
+        request.Headers.CacheControl=new CacheControlHeaderValue
+        {NoCache=true,NoStore=true,MaxAge=TimeSpan.Zero};
+        request.Headers.Pragma.ParseAdd("no-cache");
+        return request;
+    }
     private static void RecordOutcome(string code)
     {
         try { Directory.CreateDirectory(Base); File.WriteAllText(OutcomePath,code); }
@@ -71,13 +85,18 @@ internal static class Updater
         try
         {
             status("Suche nach neuer Version auf GitHub ...");
-            diagnostic?.Invoke("MANIFEST_REQUEST",$"current_version={current} host={Manifest.Host} channel=stable");
-            using var manifestResponse=await transport.GetAsync(Manifest,HttpCompletionOption.ResponseHeadersRead,cancellationToken);
+            diagnostic?.Invoke("MANIFEST_REQUEST",$"current_version={current} host={Manifest.Host} channel=stable "+
+                "cache_policy=unique_url_no_cache no_private_data_in_query=true");
+            using var manifestRequest=NewManifestRequest();
+            using var manifestResponse=await transport.SendAsync(manifestRequest,HttpCompletionOption.ResponseHeadersRead,cancellationToken);
             manifestResponse.EnsureSuccessStatusCode();
             var manifest=await manifestResponse.Content.ReadAsStringAsync(cancellationToken);
             var update=ParseManifest(manifest);
             diagnostic?.Invoke("MANIFEST_VERIFIED",
                 $"remote_version={update.Version} current_version={current} asset={Path.GetFileName(update.Url.AbsolutePath)} manifest_characters={manifest.Length}");
+            if(update.Version<current)
+                diagnostic?.Invoke("MANIFEST_BEHIND_LOCAL",
+                    $"remote_version={update.Version} current_version={current} potential_cdn_staleness=true download_suppressed=true");
             if(update.Version<=current)
             {
                 status($"Version {Diagnostics.Version} ist aktuell.");
@@ -165,10 +184,28 @@ internal static class Updater
         {
             bool restart=await CheckAndUpdateAsync(messages.Add,default,
                 (eventName,_)=>phases.Add(eventName),_=>errors++,http);
-            if(restart||errors!=0||stub.Requests!=1||stub.LastUri!=Manifest||
-               !phases.SequenceEqual(new[]{"MANIFEST_REQUEST","MANIFEST_VERIFIED","ALREADY_CURRENT"})||
+            bool repeatRestart=await CheckAndUpdateAsync(messages.Add,default,
+                (eventName,_)=>phases.Add(eventName),_=>errors++,http);
+            var expectedPhases=new[]{"MANIFEST_REQUEST","MANIFEST_VERIFIED","ALREADY_CURRENT",
+                "MANIFEST_REQUEST","MANIFEST_VERIFIED","ALREADY_CURRENT"};
+            if(restart||repeatRestart||errors!=0||stub.Requests!=2||!stub.CacheGuardsPresent||
+               stub.Urls.Distinct().Count()!=2||
+               stub.Urls.Any(uri=>uri.Scheme!=Manifest.Scheme||uri.Host!=Manifest.Host||
+                   uri.AbsolutePath!=Manifest.AbsolutePath||!uri.Query.StartsWith("?nonce=",StringComparison.Ordinal))||
+               !phases.SequenceEqual(expectedPhases)||
                !messages.Any(s=>s.Contains("aktuell")))
-                throw new Exception("Updater did not perform an offline, verified, no-download current-version check");
+                throw new Exception("Updater must recheck uncached, unique manifest URLs and preserve no-download semantics");
+        }
+        phases.Clear();messages.Clear();
+        string previous=$"version=1.8.5\nexeUrl=https://github.com/Riflex91/osrslive/releases/download/v1.8.5/OSRS-Play.exe\nexeSha256={new string('a',64)}";
+        using(var stub=new ManifestTestHandler(previous,HttpStatusCode.OK))
+        using(var http=new HttpClient(stub))
+        {
+            bool restart=await CheckAndUpdateAsync(messages.Add,default,
+                (eventName,_)=>phases.Add(eventName),_=>errors++,http);
+            if(restart||errors!=0||!phases.Contains("MANIFEST_BEHIND_LOCAL")||
+               !phases.Contains("ALREADY_CURRENT"))
+                throw new Exception("A stale manifest must be explicitly diagnosed without installing an older EXE");
         }
         phases.Clear();messages.Clear();
         using(var stub=new ManifestTestHandler("bad manifest",HttpStatusCode.OK))
@@ -191,11 +228,14 @@ internal static class Updater
     private sealed class ManifestTestHandler(string manifest,HttpStatusCode responseCode):HttpMessageHandler
     {
         internal int Requests {get;private set;}
-        internal Uri? LastUri {get;private set;}
+        internal List<Uri> Urls {get;}=new();
+        internal bool CacheGuardsPresent {get;private set;}=true;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken cancellationToken)
         {
             Requests++;
-            LastUri=request.RequestUri;
+            Urls.Add(request.RequestUri!);
+            CacheGuardsPresent &= request.Headers.CacheControl is {NoCache:true,NoStore:true}&&
+                request.Headers.Pragma.Any(x=>x.Name.Equals("no-cache",StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(new HttpResponseMessage(responseCode){Content=new StringContent(manifest)});
         }
     }
