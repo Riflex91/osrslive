@@ -1,4 +1,30 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.12
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.13
+
+**1.8.13 – exakt eine vollständige X/Y-OCR-Lesung blockiert den Pixelweg:**
+Das echte 1.8.12-Live-Log vom 27.10.2026, 22:24–22:25 Uhr
+(Europe/Berlin) bestätigt den Start nach automatischer Installation
+(`PREVIOUS_UPDATE`, `version=1.8.12`, `ALREADY_CURRENT`). In Probe
+13 und 14 lesen alle vier OCR-Varianten `315Ø` statt `3150`;
+Chunk 805263 und Region 12593 werden ausreichend oft erkannt.
+Die neue reine ID-/Pixelprüfung findet 64 Kandidaten, vier echte
+Rastermatches und exakt einen Ort: **3150/3193/0**. Probe 14
+bestätigt ein unabhängig frisches zweites Bild. Viele weitere
+Proben und verschiedene Bewegungspositionen werden bestätigt.
+Probe 12 liest dagegen in einer Variante `Tile3150» 3193» o`;
+das Feldquorum hat nur eine statt zwei X/Y-Stimmen und die reine
+ID-Route lehnt die Probe wegen `xy_readings=1` ab.
+
+1.8.13 erlaubt diesen Sonderfall **nur mit einer einzigen**
+vollständig numerischen X/Y-Lesung, wenn deren Zahlen bereits zum
+Chunk und zur Region aus je mindestens zwei OCR-Pässen passen.
+Jede X/Y-Glyphe muss weiterhin unabhängig in echten Pixeln
+benannt sein, genau eine der 64 Positionen darf entstehen und die
+Pixelposition muss mit dem Einzel-OCR-Wert identisch sein; sonst
+`single_xy_matches_pixels=false` und keine Freigabe. Mehrere
+komplette OCR-Paare, widersprechende IDs, ungültige Pixel und
+fehlende Zweibildbestätigung bleiben gesperrt. Ein echter
+1.8.13-Live-Test steht aus. Die rote GUI-Meldung zu
+`AUTOMATION_NOT_IMPLEMENTED` ist sachlich unverändert richtig.
 
 **1.8.12 – kompletter numerischer X/Y-Ausfall trotz sauberer IDs:**
 Das echte 1.8.11-Live-Log bestätigt die neue Feldsuffixregel:

@@ -1,4 +1,27 @@
-# OSRS Play 1.8.12 – unabhängige Pixelkoordinaten bei OCR-Ausfall
+# OSRS Play 1.8.13 – einzelnes OCR-Zahlenpaar streng pixelprüfen
+
+**Neu in 1.8.13 – ein OCR-Zahlenpaar soll Pixelbeweise nicht blockieren:**
+Der echte 1.8.12-Live-Test bestätigt die automatische Installation
+und den neuen Ausweichweg: `ID_ONLY_PIXEL_ENUMERATION` erkannte die
+Position **3150/3193/0** trotz `Tile315Ø` in sämtlichen Varianten,
+mit `full_matches=4`, `distinct_positions=1` und wiederholter
+`OVERLAY_CONFIRMED`-Zweibildbestätigung. Auch Bewegung nach
+3157/3199, 3153/3200 und 3148/3206 wurde bestätigt.
+Bei Probe 12 wurde dagegen eine einzige gültige X/Y-Zeile gelesen,
+die drei anderen waren beschädigt. Weil weder das normale
+Zweierstimmen-Quorum noch die bislang nur bei **null** numerischen
+Paaren zulässige ID-Ausweichroute griff, unterblieb die Pixelprüfung.
+Die streng begrenzte Ergänzung erlaubt maximal **eine** vollständige
+X/Y-OCR-Lesung, aber nur wenn sie zu den jeweils mindestens zweifach
+bestätigten Chunk-/Region-IDs passt. Alle 64 Felder werden weiterhin
+aus echten, eindeutig benannten Ziffernglyphen pixelweise geprüft;
+die **einzige** Pixelposition muss zusätzlich exakt mit dem einzelnen
+OCR-Paar übereinstimmen. Zwei Zahlenpaare benutzen das normale
+Feldquorum; widersprechende IDs, Chunk-Checksummen oder Pixel lassen
+keine Position zu. Der neue Logwert `single_xy_matches_pixels`
+erläutert die Entscheidung. Synthetische Positiv-/Negativtests
+prüfen diese Erweiterung; eine echte 1.8.13-Live-Messung steht aus.
+Automatische RuneLite-Spielaktionen sind weiterhin nicht implementiert.
 
 **Neu in 1.8.12 – beschädigte X/Y-Ziffern nicht blind ersetzen:**
 Das echte 1.8.11-Live-Log bestätigt die Tooltip-Suffix-Korrektur:
@@ -17,8 +40,8 @@ Ersetzungen werden freigegeben. Eindeutige Pixelposition, zwei echte
 Kommas, visuell belegte Ebene, Chunk-/Regionsprüfsummen und eine
 zweite unabhängige frische Aufnahme bleiben Pflicht. Neue
 `stage=ID_ONLY_QUORUM`-/`ID_ONLY_PIXEL_ENUMERATION`-Diagnose und
-synthetische Negativtests begleiten diesen **bis zum Live-Test rein
-offline geprüften** Ausweichweg. Gameplay-Eingaben bleiben aus.
+synthetische Negativtests begleiteten diesen inzwischen **live
+bestätigten** Ausweichweg. Gameplay-Eingaben bleiben aus.
 
 **Neu in 1.8.11 – HUD-/Tooltiptext neben Chunk- und Region-IDs:**
 Der 1.8.10-Live-Test bestätigt die automatische Installation und die
