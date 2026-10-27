@@ -127,7 +127,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $exe $legacy --clobber
           } else {
-            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "OSRS Play $tag: experimental read-only RuneLite companion for the regular client started through Jagex Launcher. Reads the World Location Grid Info overlay; no automatic RuneLite gameplay actions are implemented. Live coordinate OCR remains blocked by ambiguous digits/punctuation despite successful offline regression tests. The previous official C++ client backend requires --legacy-official. See docs/HANDOFF-RUNELITE-2026-10-27.md for profile configuration, test evidence and next steps."
+            gh release create $tag $exe $legacy --title "OSRS Play $tag" --notes "OSRS Play ${tag}: experimental read-only RuneLite companion for the regular client started through Jagex Launcher. Reads the World Location Grid Info overlay; no automatic RuneLite gameplay actions are implemented. Live coordinate OCR remains blocked by ambiguous digits/punctuation despite successful offline regression tests. The previous official C++ client backend requires --legacy-official. See docs/HANDOFF-RUNELITE-2026-10-27.md for profile configuration, test evidence and next steps."
           }
           if ($LASTEXITCODE -ne 0) { throw 'Release publish failed' }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
