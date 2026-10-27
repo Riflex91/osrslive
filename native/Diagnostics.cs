@@ -9,19 +9,20 @@ internal enum Severity { DEBUG, INFO, WARN, ERROR }
 internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long MonotonicTicks,
     Severity Level, string Source, string Event, string Detail)
 {
-    public string Line => $"{Timestamp.LocalDateTime:yyyy-MM-dd HH:mm:ss.fff} [{Level}] [{Source}] {Event}" +
+    public string Line => $"{Timestamp:yyyy-MM-ddTHH:mm:ss.fffzzz} seq={Id} mono_ticks={MonotonicTicks} [{Level}] [{Source}] {Event}" +
         (string.IsNullOrEmpty(Detail) ? "" : " | " + Detail);
 }
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.8.1";
+    internal const string Version="1.8.2";
     private const int Capacity=10000;
     private readonly object sync=new();
     private readonly List<LogEvent> entries=new();
     private long id,dropped,errors,warnings;
     private string mode="LIVE ONLY: OFFIZIELLER JAGEX CLIENT";
     internal event Action? Changed;
+    internal event Action<LogEvent>? EntryAdded;
     private static readonly Regex Secret=new(
         @"(?i)(bearer\s+|(?:authorization|token|session|password|passwd|secret|api[_-]?key|cookie)\s*[:=]\s*)([^\s,;]+)",
         RegexOptions.Compiled);
@@ -41,14 +42,19 @@ internal sealed class Diagnostics
     }
     internal void Add(Severity level,string source,string kind,string details)
     {
+        LogEvent added;
         lock(sync)
         {
             if(entries.Count>=Capacity){entries.RemoveAt(0);dropped++;}
-            entries.Add(new LogEvent(++id,DateTimeOffset.Now,
+            added=new LogEvent(++id,DateTimeOffset.Now,
                 Stopwatch.GetTimestamp(),level,Sanitize(source,32),
-                Sanitize(kind,55),Sanitize(details)));
+                Sanitize(kind,55),Sanitize(details));
+            entries.Add(added);
             if(level==Severity.ERROR)errors++;
             if(level==Severity.WARN)warnings++;
+            // Serialise file subscribers under the same lock as sequence IDs:
+            // concurrent capture/observer threads must not invert log order.
+            try{EntryAdded?.Invoke(added);}catch{} // Storage cannot interrupt gameplay.
         }
         Notify();
     }

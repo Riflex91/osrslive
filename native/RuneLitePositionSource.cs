@@ -7,7 +7,8 @@ using Windows.Media.Ocr;
 
 namespace OSRSLiveDiagnostics;
 
-internal sealed record RuneLitePositionState(string Status,WorldTile? Tile=null,DateTimeOffset ObservedUtc=default);
+internal sealed record RuneLitePositionState(string Status,WorldTile? Tile=null,
+    DateTimeOffset ObservedUtc=default,string Diagnostic="");
 internal sealed record RuneLiteGridEvidence(WorldTile Tile,int ChunkId,int RegionId);
 
 // The regular World Location hub plugin renders the player's own API position.
@@ -117,31 +118,54 @@ internal sealed class RuneLitePositionSource:IDisposable
     private readonly BackgroundWindowCapture capture=new();
     private readonly RuneLiteOverlayConfirmation confirmation=new();
     internal void Reset()=>confirmation.Reset();
+    private string CaptureDiagnostic=>$"capture_state={capture.State} frame_events={capture.FrameEvents} "+
+        $"frame_copies={capture.FrameCopies} capture_error={capture.LastFrameError} "+
+        $"geometry={capture.Geometry} alpha={capture.AlphaState}";
     private readonly OcrEngine? engine=OcrEngine.TryCreateFromLanguage(new Language("en-US"))??OcrEngine.TryCreateFromUserProfileLanguages();
     internal async Task<RuneLitePositionState> ReadAsync(CancellationToken ct=default,Action<string[]>? diagnostic=null)
     {
-        if(engine is null)return new("OCR_LANGUAGE_UNAVAILABLE");
+        if(engine is null)return new("OCR_LANGUAGE_UNAVAILABLE",Diagnostic:"language=en-US/fallback unavailable");
         var windows=new List<IntPtr>();
+        int scanned=0,rejected=0;
         foreach(var process in Process.GetProcessesByName("RuneLite"))using(process)
         {
+            scanned++;
             try
             {
                 string expected=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"RuneLite","RuneLite.exe");
                 if(!process.HasExited&&process.MainWindowHandle!=IntPtr.Zero&&
                     string.Equals(process.MainModule?.FileName,expected,StringComparison.OrdinalIgnoreCase))windows.Add(process.MainWindowHandle);
+                else rejected++;
             }
-            catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception){}
+            catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception){rejected++;}
         }
-        if(windows.Count!=1){confirmation.Reset();return new(windows.Count==0?"RUNELITE_NOT_RUNNING":"MULTIPLE_RUNELITE_CLIENTS");}
+        string windowDiagnostic=$"processes={scanned} trusted_windows={windows.Count} rejected={rejected}";
+        if(windows.Count!=1){confirmation.Reset();return new(windows.Count==0?"RUNELITE_NOT_RUNNING":"MULTIPLE_RUNELITE_CLIENTS",
+            Diagnostic:windowDiagnostic);}
         try
         {
             using var frame=await capture.ReadClientAsync(windows[0],ct);
-            if(frame is null){confirmation.Reset();return new("CAPTURE_UNAVAILABLE");}
-            var evidence=await RuneLiteGridReader.Read(frame.Image,engine,diagnostic);
-            return confirmation.Observe(windows[0],frame.Image.Size,frame.CapturedUtc,DateTimeOffset.UtcNow,evidence);
+            if(frame is null){confirmation.Reset();return new("CAPTURE_UNAVAILABLE",
+                Diagnostic:windowDiagnostic+" "+CaptureDiagnostic);}
+            int passes=0,validPasses=0,labelRows=0;
+            var evidence=await RuneLiteGridReader.Read(frame.Image,engine,rows=>
+            {
+                passes++;
+                if(RuneLiteGridReader.Parse(rows) is not null)validPasses++;
+                labelRows+=rows.Count(row=>Regex.IsMatch(row,@"^(Tile|Chunk\s+ID|Region\s+ID)",RegexOptions.IgnoreCase));
+                diagnostic?.Invoke(rows);
+            });
+            var now=DateTimeOffset.UtcNow;
+            var state=confirmation.Observe(windows[0],frame.Image.Size,frame.CapturedUtc,now,evidence);
+            return state with{Diagnostic=windowDiagnostic+" "+CaptureDiagnostic+
+                $" client={frame.Image.Width}x{frame.Image.Height} age_ms={(now-frame.CapturedUtc).TotalMilliseconds:0} "+
+                $"ocr_passes={passes} valid_passes={validPasses} label_rows={labelRows} "+
+                $"candidate_consistent={evidence is not null} frame_confirmed={state.Tile is not null}"};
         }
         catch(Exception ex) when(ex is not OperationCanceledException)
-        {confirmation.Reset();return new("GRID_INFO_NOT_READABLE");}
+        {confirmation.Reset();return new("INTERNAL_ERROR",
+            Diagnostic:windowDiagnostic+" "+CaptureDiagnostic+
+            " "+ExceptionDiagnostic.Describe(ex));}
     }
     public void Dispose()=>capture.Dispose();
 }

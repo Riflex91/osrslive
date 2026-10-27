@@ -1,4 +1,10 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.1
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.2
+
+**1.8.2 – Diagnose statt stiller Sperre:** Ausführliche lokale Ereignislogs,
+automatische Zwischenablage-Kopie bei Fehler/nicht ausgeführter Aktion und
+roter Verbesserungsmeldung in beiden GUI-Modi sind ergänzt. Es gibt noch
+keinen neuen echten Positions- oder Bewegungstest; die bekannte Ebene-0-
+OCR-Sperre gilt unverändert. [Logging-Details](LOGGING-1.8.2.md).
 
 **1.8.1 (noch ohne neuen Live-Test):** Zusätzliche Bildaufbereitung für die
 World-Location-OCR und strengere Ablehnung widersprüchlicher gültiger

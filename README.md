@@ -1,4 +1,11 @@
-# OSRS Play 1.8.1 – RuneLite statt Atlas-Positionssuche
+# OSRS Play 1.8.2 – RuneLite statt Atlas-Positionssuche
+
+**Neu in 1.8.2 – ausführliche Fehlerprotokolle:** Jeder Start erzeugt ein
+fortlaufendes lokales Sitzungslog mit Buildkennung, Zeitstempeln, OCR-/Capture-
+Details und Sperrgründen. Bei einem Fehler oder einer nicht ausgeführten Aktion
+wird die vollständige Logdatei automatisch in die Zwischenablage kopiert; die
+GUI meldet in Rot **„VERBESSERUNG MUSS EINGEBAUT WERDEN“**. Der manuelle
+Kopierknopf bleibt verfügbar. [Verhalten, Logpfad, Datenschutz und Tests](docs/LOGGING-1.8.2.md).
 
 **RuneLite-Umstellung in Arbeit:** Der Standardstart ist ein nur lesender Companion für reguläres RuneLite aus dem offiziellen Jagex Launcher. Vorgesehen ist das Spielerkoordinaten-Overlay des Hub-Plugins World Location; unser Programm liest dessen Zahlen mittels OCR und prüft Chunk/Region sowie zwei frische Aufnahmen. Offline-Fixtures bestehen mit ausdrücklich dokumentierter Ebene-0-Grenze. Die echte Positionsprobe bleibt wegen falsch gelesener Ziffern/Interpunktion blockiert. Der separate Entwicklungsclient wurde auf Benutzerwunsch verworfen. Automatische RuneLite-Aufgaben sind noch nicht implementiert. Die alte C++-Client-Automatik bleibt ausdrücklich mit `--legacy-official` erreichbar. [Übergabe für die nächste KI](docs/HANDOFF-RUNELITE-2026-10-27.md), [aktueller Prüfstand](docs/RUNELITE-MIGRATION-2026-10-27.md), [Plugin-Prüfung mit vollständigen Katalogen](docs/RUNELITE-PLUGIN-PRUEFUNG-2026-10-27.md).
 
