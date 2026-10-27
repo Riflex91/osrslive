@@ -1,4 +1,26 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.13
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.14
+
+**1.8.14 – Bewegungsfolge zwischen bestätigten Positionen bisher unsichtbar:**
+Der 1.8.13-Live-Lauf vom 27.10.2026, 22:40–22:41 Uhr bestätigte
+Update, Logkopie und insbesondere den neuen Fall mit genau einer
+X/Y-OCR-Lesung in Probe 42 (`ID_ONLY_PIXEL_ENUMERATION`,
+`single_xy_matches_pixels=true`, `OVERLAY_CONFIRMED 3142/3202/0`).
+Die erkannte eigene Spielerposition ändert sich an vielen weiteren
+Stellen. Die Logdatei zeigt aber nur einzelne bestätigte Standorte,
+noch keine direkte Bewegungsänderung mit zeitlicher Lücke.
+
+1.8.14 protokolliert deshalb ausschließlich **bestätigte**
+Koordinatenwechsel als `RUNELITE_MOTION OBSERVATION` mit
+ΔX/ΔY/ΔEbene, Proben- und Aufnahmeabstand und einem ausdrücklich
+nicht als tatsächliche Route interpretierten Nicht-Nachbarschaftsflag.
+Periodische Health-Events zählen bestätigte/stabile/wechselnde
+Positionen. Bei Pause und Quellenverlust wird die Timeline verworfen.
+Fehlende oder nur einfach erkannte Positionen dürfen nie in diese
+Historie gelangen. Reine Feldquoren loggen nun nicht mehr fälschlich
+`single_xy_matches_pixels=true`, sondern `not_applicable`; beim
+Einzel-X/Y-Pfad wird die eine komplette OCR-Beobachtung korrekt gezählt.
+Das ist **Diagnose**, weder Eingabetransport noch echte Navigation.
+Ein Live-Test der 1.8.14-Protokollwerte steht aus.
 
 **1.8.13 – exakt eine vollständige X/Y-OCR-Lesung blockiert den Pixelweg:**
 Das echte 1.8.12-Live-Log vom 27.10.2026, 22:24–22:25 Uhr

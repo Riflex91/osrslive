@@ -415,13 +415,22 @@ internal static class RuneLitePixelGridReader
                 acceptedSnapshots.Add(new GlyphSnapshot(new Dictionary<char,Glyph>(reference)));
             }
         }
-        bool loneXYMatchesPixels=true;
+        string loneXYMatchesPixels="not_applicable";
         if(idQuorum is IdQuorum sampledIds&&sampledIds.SingleXY is (int loneX,int loneY))
-            loneXYMatchesPixels=accepted.Count==1&&
-                accepted.Single().Tile.X==loneX&&accepted.Single().Tile.Y==loneY;
+            loneXYMatchesPixels=(accepted.Count==1&&
+                accepted.Single().Tile.X==loneX&&accepted.Single().Tile.Y==loneY)
+                ?"true":"false";
+        // In this fallback expected.X/Y are intentionally zero because all
+        // 64 candidates come from IDs. A matching lone OCR reading must not
+        // be falsely logged as zero agreements (observed live in 1.8.13).
+        int ocrAgreements=idQuorum is IdQuorum idsWithXY&&
+            idsWithXY.SingleXY is (int ocrX,int ocrY)
+            ?observations.Count(o=>o.X==ocrX&&o.Y==ocrY&&
+                o.Chunk==idsWithXY.Chunk&&o.Region==idsWithXY.Region)
+            :observations.Count(o=>o==expected);
         diagnostic=$"attempted=true mode=MONO7X11 threshold={WhiteThreshold} "+
             $"roi={width}x{height} bright_pixels={brightPixels} "+
-            $"ocr_agreements={observations.Count(o=>o==expected)} "+
+            $"ocr_agreements={ocrAgreements} "+
             $"evidence_source={(idQuorum is not null?"ID_ONLY_PIXEL_ENUMERATION":fieldQuorum is null?"FULL_OBSERVATIONS":"FIELD_QUORUM")} "+
             $"tile_candidates={tileCandidates.Length} "+
             $"field_xy_votes={fieldQuorum?.XYVotes??0} field_chunk_votes={fieldQuorum?.ChunkVotes??0} "+
@@ -431,13 +440,13 @@ internal static class RuneLitePixelGridReader
             $"digit_templates={idCandidates} unknown_tile_digits={unknownTileDigits} "+
             $"unknown_singleton_rejects={unknownSingletonRejects} repeated_unknown_layouts={uniqueRepeatedDigitLayouts} "+
             $"id_only_unlabelled_rejects={idOnlyUnlabelledRejects} "+
-            $"single_xy_matches_pixels={loneXYMatchesPixels.ToString().ToLowerInvariant()} "+
+            $"single_xy_matches_pixels={loneXYMatchesPixels} "+
             $"historical_glyph_matches={historicalGlyphMatches} historical_contradictions={historicalContradictions} "+
             $"trusted_history_frames={history?.Frames??0} trusted_history_snapshots={history?.Snapshots??0} "+
             $"full_matches={matched} distinct_positions={accepted.Count} "+
             $"elapsed_ms={elapsed.ElapsedMilliseconds} "+
-            $"result={(accepted.Count==1&&loneXYMatchesPixels?"PIXEL_GRID_VERIFIED":"NOT_RELEASED")}";
-        if(accepted.Count!=1||!loneXYMatchesPixels)return null;
+            $"result={(accepted.Count==1&&loneXYMatchesPixels!="false"?"PIXEL_GRID_VERIFIED":"NOT_RELEASED")}";
+        if(accepted.Count!=1||loneXYMatchesPixels=="false")return null;
         onVerified?.Invoke(acceptedSnapshots);
         return accepted.Single();
     }

@@ -35,6 +35,36 @@ internal static class RuneLitePositionTests
         Require(RuneLiteGridReader.ConsistentEvidence(new RuneLiteGridEvidence?[]{null,good,null,good})==good,"nonconflicting OCR variants");
         Require(RuneLiteGridReader.ConsistentEvidence(new RuneLiteGridEvidence?[]{good,next}) is null,"conflicting valid OCR variants reject the frame");
         Require(RuneLiteGridReader.ConsistentEvidence(new RuneLiteGridEvidence?[]{null,null}) is null,"missing OCR evidence rejects the frame");
+        // Read-only movement diagnostics consume exclusively independently
+        // confirmed tile observations. A gap is NOT a reconstructed route.
+        var motion=new RuneLiteMotionTrace();
+        var initialMotion=motion.Observe(new WorldTile(3141,3212,0),now,2);
+        Require(initialMotion is not null&&initialMotion.Contains("FIRST_CONFIRMED")&&
+                initialMotion.Contains("autonomous_input=false"),
+            "movement log starts only after the caller supplies a confirmed tile");
+        Require(motion.Observe(new WorldTile(3141,3212,0),now.AddSeconds(1),3) is null,
+            "stable confirmed frames increment counters without duplicate movement events");
+        var movedMotion=motion.Observe(new WorldTile(3142,3212,0),now.AddSeconds(2),6);
+        Require(movedMotion is not null&&movedMotion.Contains("dx=1 dy=0")&&
+                movedMotion.Contains("sample_gap=3")&&
+                movedMotion.Contains("capture_gap_ms=1000")&&
+                movedMotion.Contains("non_adjacent_observation=false"),
+            "adjacent verified movement includes direction and observation latency");
+        var skippedMotion=motion.Observe(new WorldTile(3158,3204,0),now.AddSeconds(3),9);
+        Require(skippedMotion is not null&&skippedMotion.Contains("non_adjacent_observation=true")&&
+                skippedMotion.Contains("route_between_samples_unknown=true"),
+            "large jumps are observations, never invented traversed steps");
+        var planeMotion=motion.Observe(new WorldTile(3158,3204,1),now.AddSeconds(4),11);
+        Require(planeMotion is not null&&planeMotion.Contains("plane_delta=1")&&
+                planeMotion.Contains("non_adjacent_observation=true"),
+            "floor changes are reported without inventing stairs or teleport events");
+        Require(motion.Observe(new WorldTile(3199,3199,0),now.AddSeconds(3),10)?.Contains("REJECTED_NON_MONOTONIC")==true&&
+                motion.Statistics==(5,1,3,2),
+            "out-of-order positions cannot modify verified movement telemetry");
+        motion.Reset();
+        Require(motion.Statistics==(0,0,0,0)&&
+                motion.Observe(new WorldTile(3158,3204,1),now.AddSeconds(5),12)?.Contains("FIRST_CONFIRMED")==true,
+            "user pause, lost client or source reset starts an isolated movement session");
         RuneLitePixelGridReaderTests.Run();
         Console.WriteLine("RUNELITE GRID PASS: player panel only, chunk/region checks, fresh independent frames, window changes, missing/stale rejection; no game input");
     }

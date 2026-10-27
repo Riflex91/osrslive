@@ -1,4 +1,29 @@
-# OSRS Play 1.8.13 – einzelnes OCR-Zahlenpaar streng pixelprüfen
+# OSRS Play 1.8.14 – nachvollziehbare bestätigte Spielerbewegung
+
+**Neu in 1.8.14 – Bewegungschronik als Vorbereitung für sichere Navigation:**
+Das echte 1.8.13-Live-Protokoll bestätigt automatisches Update,
+`clipboard=COPIED` und viele unabhängig bestätigte Positionen.
+Insbesondere Probe 42 zeigt bei exakt einer gültigen X/Y-OCR-Lesung
+`ID_ONLY_QUORUM IDS_VERIFIED`, `single_xy_matches_pixels=true`,
+`PIXEL_GRID_VERIFIED` und `OVERLAY_CONFIRMED` für **3142/3202/0**.
+Die bis dahin offene Einzel-OCR-Fehlerklasse ist damit **live gelöst**.
+
+Der Companion protokolliert ab 1.8.14 bei tatsächlich bestätigter
+Position `RUNELITE_MOTION OBSERVATION`: Startkoordinate sowie bei
+jeder Änderung vorheriges und neues Tile, `dx`, `dy`, Ebenendifferenz,
+Manhattan-Distanz, Abstand der bestätigten Aufnahmezeitpunkte und
+fehlende Proben. Zwischenpositionen werden **nicht** rekonstruiert;
+`non_adjacent_observation=true` bedeutet ausdrücklich nur, dass die
+beiden beobachteten Positionen nicht benachbart sind. Ein separater
+Gesundheitszähler erfasst bestätigte, stabile und geänderte Positionen.
+Pausen und Verlust der RuneLite-Quelle löschen die Bewegungschronik;
+unbestätigte OCR-Zahlen dürfen sie nicht verändern. Der Pixel-Logwert
+`single_xy_matches_pixels` ist jetzt `not_applicable` für gewöhnliche
+OCR-Quoren statt irreführend `true`; beim Einzel-OCR-Ausweichweg
+wird auch `ocr_agreements=1` korrekt ausgewiesen. Windows-Selbsttests
+prüfen Bewegung, Sprünge, Ebenenwechsel, veraltete Zeitstempel und
+Reset. Keine Spielaktion oder automatische Wegplanung wird gestartet;
+ein echter 1.8.14-Live-Test steht aus.
 
 **Neu in 1.8.13 – ein OCR-Zahlenpaar soll Pixelbeweise nicht blockieren:**
 Der echte 1.8.12-Live-Test bestätigt die automatische Installation

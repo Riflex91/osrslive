@@ -1,4 +1,44 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.13
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.14
+
+## Positionswechsel live bestätigt; Bewegungstimeline hinzugefügt (1.8.14)
+
+Das Live-Protokoll vom 27.10.2026, 22:40–22:41 Uhr Europe/Berlin
+bestätigt `PREVIOUS_UPDATE`, `version=1.8.13`, Push-Build
+`40588083146`, `ALREADY_CURRENT` und `clipboard=COPIED`.
+Die neue Einzel-OCR-Route wurde genau in Probe **42** erfolgreich
+benutzt: `FIELD_QUORUM NOT_READY xy_readings=1`, danach
+`ID_ONLY_QUORUM IDS_VERIFIED chunk_votes=2 region_votes=3
+xy_readings=1`, 64 Pixelkandidaten, vier vollständige Layoutmatches,
+genau eine Position und `single_xy_matches_pixels=true`.
+Der anschließend freigegebene Ort **3142/3202/0** wurde bereits
+in Probe 41 unabhängig bestätigt. **1.8.13 funktioniert live.**
+53 von 66 Feldquoren melden `CHECKSUM_VERIFIED`. Viele
+Positionen wurden beim manuellen Gehen bestätigt, darunter
+3148/3206, 3145/3208, 3141/3210, 3142/3209 bis 3142/3202,
+3146/3198 und 3159/3204. Kurzzeitige Nichtlesbarkeit oder das
+Warten auf eine zweite Aufnahme löste sich wieder; kein neuer
+Positions-Timeout. Die einzige gemeldete Fehlfunktion bleibt die
+unimplementierte Automation.
+
+1.8.14 baut deshalb **keine** weiteren OCR-Vermutungen ein, sondern
+die nächste sicherheitsrelevante Diagnose für spätere Bewegung:
+`RuneLiteMotionTrace` akzeptiert nur bereits in zwei getrennten
+Frames bestätigte `WorldTile`-Positionen mit monotoner Zeit und
+Probennummer. Bei der ersten Position bzw. jeder Änderung protokolliert
+`RUNELITE_MOTION OBSERVATION` vollständige Koordinaten,
+Zeit-/Probenabstand, Richtung, Manhattan-Kacheldistanz, Ebene und
+`non_adjacent_observation`. Ein größerer Abstand ist **nur eine
+Beobachtungslücke**, kein Beweis für eine abgelaufene Wegstrecke,
+eine Teleportation oder einen berechenbaren Navigationspfad.
+Stabile Frames zählen ohne laute Duplikatereignisse; Gesundheitslogs
+zeigen Zähler. Pause, Prozess-/Fenster-/Aufnahmefehler löschen die
+Bewegungssitzung, nicht lesbare Einzelbilder erzeugen keine neue
+Position. Zusätzlich unterscheidet die Rasterdiagnose jetzt das
+nur bei Einzel-X/Y anwendbare `single_xy_matches_pixels` korrekt
+von `not_applicable` und zählt bei der echten Einzelstimme
+`ocr_agreements=1` statt irrtümlich null.
+Synthetische Tests prüfen diese Details; **1.8.14 selbst ist noch
+nicht live erprobt**, autonome Spielaktionen weiterhin deaktiviert.
 
 ## Live-Erfolg mit unlesbarem X und eine fehlende Einzelstimme (1.8.13)
 
