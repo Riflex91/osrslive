@@ -18,6 +18,16 @@ internal static class WindowLayoutTests
             finally{window.Close();}
         };
         Application.Run(window);
+        if(result==0)
+        {
+            using var runeLite=new RuneLiteWindow();
+            try
+            {
+                runeLite.VerifyDiagnosticLayout();
+                Console.WriteLine("RUNELITE LOG LAYOUT PASS: red improvement banner, read-only diagnostic transcript, copy button");
+            }
+            catch(Exception ex){Console.Error.WriteLine("RUNELITE LOG LAYOUT FAIL: "+ex);result=1;}
+        }
         return result;
     }
 }

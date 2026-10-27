@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
-using System.Text;
 
 namespace OSRSLiveDiagnostics;
 
@@ -41,8 +40,19 @@ internal static class Program
         if(args.Contains("--layout-self-test"))return WindowLayoutTests.Run();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException+=(_,e)=>
-            MessageBox.Show(e.Exception.GetType().Name+": "+e.Exception.Message,
+        {
+            try
+            {
+                if(Application.OpenForms.OfType<RuneLiteWindow>().FirstOrDefault() is RuneLiteWindow runeLite)
+                    runeLite.ReportUnhandled(e.Exception);
+                else if(Application.OpenForms.OfType<MainWindow>().FirstOrDefault() is MainWindow main)
+                    main.ReportUnhandled(e.Exception);
+            }
+            catch{} // The original UI exception remains visible.
+            MessageBox.Show("VERBESSERUNG MUSS EINGEBAUT WERDEN.\n"+
+                ExceptionDiagnostic.Describe(e.Exception)+"\nSitzungslog wurde nach Möglichkeit kopiert.",
                 "OSRS Play: UI-Fehler",MessageBoxButtons.OK,MessageBoxIcon.Error);
+        };
         try
         {
             // RuneLite is the default backend. Keep legacy diagnostics explicit;
@@ -55,14 +65,14 @@ internal static class Program
         {
             try
             {
-                var file=Path.Combine(Environment.GetFolderPath(
-                    Environment.SpecialFolder.LocalApplicationData),
-                    "OSRSLiveDiagnostics","fatal.log");
-                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-                File.AppendAllText(file,DateTimeOffset.Now+" "+ex+Environment.NewLine);
+                var diagnostic=new Diagnostics();
+                diagnostic.SetMode("STARTUP_FAILURE");
+                using var failure=new ClientFailureLog(diagnostic,ClientFailureLog.SessionPath("fatal"));
+                failure.ReportFailure("CORE","STARTUP_FAILED",ExceptionDiagnostic.Describe(ex));
             }
             catch{}
-            MessageBox.Show("Start fehlgeschlagen: "+ex.Message,
+            MessageBox.Show("VERBESSERUNG MUSS EINGEBAUT WERDEN.\nStart fehlgeschlagen: "+
+                ex.GetType().Name+". Das Fehlerlog wurde nach Möglichkeit kopiert.",
                 "OSRS Play",MessageBoxButtons.OK,MessageBoxIcon.Error);
             return 1;
         }
@@ -120,11 +130,11 @@ internal sealed class MainWindow : Form
     private string f2pSummary="F2P-Welt: noch nicht gemessen";
     private int? preferredWorld;
     private bool changePending=true;
-    private readonly object runtimeLogSync=new();
-    private readonly string logDirectory=Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "OSRSPlay","live-logs");
     private readonly string runtimeLogFile;
+    private readonly ClientFailureLog failureLog;
+    private long lastCheckedLogEvent;
+    private string lastExecutionState="";
+    private DateTimeOffset executionStateSince=DateTimeOffset.UtcNow;
 
     internal MainWindow(bool startAutomatically=true,bool observeOnly=false)
     {
@@ -132,8 +142,9 @@ internal sealed class MainWindow : Form
         visualStartup=new VisualStartup(log,liveObserver);
         visualStartup.ObserveOnly=observeOnly;
         visualStartup.VisuallyConfirmedSession=CloseLauncherAfterVisualSessionConfirmation;
-        runtimeLogFile=Path.Combine(logDirectory,
-            !startAutomatically?"ui-smoke-test.log":observeOnly?"observation-session.log":"last-session.log");
+        runtimeLogFile=ClientFailureLog.SessionPath(
+            !startAutomatically?"legacy-ui-test":observeOnly?"legacy-observe":"legacy");
+        failureLog=new ClientFailureLog(log,runtimeLogFile);
         Text=$"OSRS Play {Diagnostics.Version} – offizielles OSRS – {BuildIdentity.Display}";
         AutoScaleMode=AutoScaleMode.None;
         FormBorderStyle=FormBorderStyle.FixedSingle;MaximizeBox=false;
@@ -172,6 +183,7 @@ internal sealed class MainWindow : Form
                 changePending=false;
                 RefreshUI();
             }
+            CheckForExecutionFailures();
         };
         uiTimer.Start();
         liveObservationTimer.Tick+=async (_,_)=>
@@ -211,7 +223,6 @@ internal sealed class MainWindow : Form
                 $"working_set_mib={p.WorkingSet64/1024/1024} "+
                 $"uptime_s={uptime.Elapsed.TotalSeconds:0} capture={visualStartup.CaptureState} capture_alpha={visualStartup.CaptureAlpha} "+
                 $"authenticated=false_unverified agent_state={visualStartup.Gameplay.State}");
-            PersistLog();
         };
         diagnosticsTimer.Start();
         if(startAutomatically&&!observeOnly)
@@ -234,7 +245,7 @@ internal sealed class MainWindow : Form
             visualStartup.Dispose();windowHost.Dispose();liveObserver.Reset();
             log.Add(Severity.INFO,"CORE","SHUTDOWN",
                 "jagex_process_not_terminated=true");
-            PersistLog();
+            failureLog.Dispose();
             closing.Dispose();
         };
     }
@@ -351,18 +362,36 @@ internal sealed class MainWindow : Form
 
     private void CopyLog()
     {
-        try
+        copyLog.Text=failureLog.CopyToClipboard()?"Log kopiert":"Erneut kopieren";
+    }
+
+    private void CheckForExecutionFailures()
+    {
+        // The old visual execution backend logs individual blocked steps. Only
+        // terminal failures are escalated; normal waiting/user pause is not.
+        foreach(var ev in log.Snapshot().Where(e=>e.Id>lastCheckedLogEvent))
         {
-            // Snapshot the report independently of the visible 420-line preview.
-            Clipboard.SetDataObject(log.Report(),true,3,80);
-            log.Add(Severity.INFO,"UI","LOG_COPIED","sanitized_diagnostic_report=true");
-            copyLog.Text="Log kopiert";
+            lastCheckedLogEvent=ev.Id;
+            if(FailureLogPolicy.LegacyFailure(ev))
+                failureLog.ReportFailure(ev.Source,ev.Event,ev.Detail);
         }
-        catch(System.Runtime.InteropServices.ExternalException)
-        {
-            log.Add(Severity.WARN,"UI","LOG_COPY_FAILED","reason=CLIPBOARD_BUSY retry_available=true");
-            copyLog.Text="Erneut kopieren";
-        }
+        string execution=visualStartup.Gameplay.State;
+        if(execution!=lastExecutionState)
+        {lastExecutionState=execution;executionStateSince=DateTimeOffset.UtcNow;}
+        if(execution.StartsWith("BLOCKED_",StringComparison.OrdinalIgnoreCase))
+            failureLog.ReportFailure("LEGACY_EXECUTION",execution,
+                $"executor={execution} visual_state={visualStartup.State} action_not_executed=true");
+        else if(!visualStartup.ObserveOnly&&!visualStartup.Paused&&visualStartup.Game.Plan is not null&&
+            execution.StartsWith("WAITING",StringComparison.OrdinalIgnoreCase)&&
+            DateTimeOffset.UtcNow-executionStateSince>=TimeSpan.FromSeconds(30))
+            failureLog.ReportFailure("LEGACY_EXECUTION","NOT_EXECUTED_TIMEOUT",
+                $"executor={execution} visual_state={visualStartup.State} waiting_s=30 plan_present=true");
+    }
+
+    internal void ReportUnhandled(Exception ex)
+    {
+        failureLog.ReportFailure("LEGACY_UI","UNHANDLED_EXCEPTION",ExceptionDiagnostic.Describe(ex));
+        changePending=true;RefreshUI();
     }
 
     internal void VerifyDockedLayout()
@@ -731,6 +760,16 @@ internal sealed class MainWindow : Form
             visualStartup.ObserveOnly?"Nur Beobachtung: keine Mauseingaben. Zielvorschläge führen noch keine Spielaktionen aus.":
             "Visuelle Routinen: "+visualStartup.Gameplay.State+" | F8 pausiert. Live-Prüfung ausstehend.":
             "Jagex-Anmeldung erfolgt im Original-Launcher. OSRS Play fordert kein Passwort an.";
+        if(failureLog.HasFailure)
+        {
+            status.ForeColor=Color.DarkRed;
+            status.Text="VERBESSERUNG MUSS EINGEBAUT WERDEN · "+failureLog.LastFailureCode;
+            footer.ForeColor=Color.DarkRed;
+            footer.Text=failureLog.ClipboardStatus=="COPIED"?
+                "Fehler oder Ausführung blockiert – vollständiges Sitzungslog automatisch in die Zwischenablage kopiert.":
+                "Fehler oder Ausführung blockiert – Log-Kopie fehlgeschlagen. Bitte 'Log kopieren' drücken.";
+        }
+        else{status.ForeColor=Color.Black;footer.ForeColor=Color.Black;}
         if(!eventLog.Visible)return;
         var events=log.Snapshot().TakeLast(420);
         string display=string.Join(Environment.NewLine,events.Select(e=>e.Line));
@@ -782,23 +821,6 @@ internal sealed class MainWindow : Form
     [System.Runtime.InteropServices.DllImport("user32.dll",SetLastError=true)]
     private static extern bool UnregisterHotKey(IntPtr handle,int id);
 
-    private void PersistLog()
-    {
-        try
-        {
-            lock(runtimeLogSync)
-            {
-                Directory.CreateDirectory(logDirectory);
-                var temporary=runtimeLogFile+".tmp";
-                File.WriteAllText(temporary,log.Report(),new UTF8Encoding(false));
-                File.Move(temporary,runtimeLogFile,true);
-            }
-        }
-        catch(Exception)
-        {
-            // Diagnostic storage failure must not affect an official session.
-        }
-    }
 }
 
 internal static class SelfTest
@@ -822,6 +844,7 @@ internal static class SelfTest
             longLog.Add(Severity.ERROR,"REPORT","LATEST_ERROR","MOST_RECENT_DIAGNOSTIC");
             if(!longLog.Report().Contains("MOST_RECENT_DIAGNOSTIC"))
                 throw new Exception("Copied report must include newest errors beyond preview/export limits");
+            FailureLogPolicy.SelfTest();
             if(OfficialGameSessionGate.Readiness(null)!="OFFICIAL_PROTOCOL_ADAPTER_MISSING")
                 throw new Exception("Missing official game adapter must not allow bot");
             BuildIdentity.SelfTest();

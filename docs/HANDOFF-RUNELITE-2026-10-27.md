@@ -1,4 +1,25 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.1
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.2
+
+## Vollständige Sitzungslogs und automatische Fehlerkopie (1.8.2)
+
+Der standardmäßige RuneLite-Companion zeigt jetzt ein scrollbares Diagnoselog,
+eine rote Meldung `VERBESSERUNG MUSS EINGEBAUT WERDEN` und einen manuellen
+Kopierknopf. Die lokale Datei wird bei jedem Ereignis erweitert. Im OCR-Log
+stehen pro Bild alle angewendeten Verfahren und die tatsächlich gelesenen drei
+Grid-Zeilen, mit Prüfstatus. Capture-Zustand, Frame-Zähler, Frische,
+Fensteranzahl, Statuswechsel, Buildkennung, Ausnahmen und Sperrgründe folgen.
+
+`AUTOMATION_NOT_IMPLEMENTED` ist beim normalen Start ein echter Funktionsblock
+und löst eine einmalige automatische Kopie nach der ersten Probe aus.
+Persistierende Positionsprobleme werden nach vier Sekunden und schwere Fehler
+sofort gemeldet. Im Legacy-Modus lösen protokollierte Fehler und blockierte
+Ausführungen ebenfalls die Kopie aus. Für denselben Grund wird nicht bei jedem
+Timer-Tick die Zwischenablage erneut überschrieben; ein manueller Knopf kopiert
+den dann aktuellsten Stand. Keine Zugangsdaten, Screenshots oder Prozessdaten.
+
+[Technische Log-Dokumentation](LOGGING-1.8.2.md). Die Windows-CI prüft die
+Kopier-/Redaktionslogik mit einer simulierten Zwischenablage. Ein neuer Live-
+Test am Profil `auto` ist danach weiterhin notwendig.
 
 ## Weiterarbeit an der Overlay-OCR (1.8.1)
 
