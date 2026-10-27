@@ -6,15 +6,16 @@ namespace OSRSLiveDiagnostics;
 
 // Independent per-frame pixel verification for the narrowly configured World
 // Location / Consolas-12 overlay. The reference digits come from the SAME
-// captured bitmap's Chunk/Region fields, not from a stored screenshot, a
-// learned player position, or OCR guesses about commas and slashed zeroes.
+// captured bitmap's Chunk/Region fields, optionally corroborated by glyphs
+// from previously independently CONFIRMED frames in this same live session;
+// never from a stored screenshot, a learned position, or OCR punctuation guesses.
 // Any font, layout, or glyph ambiguity falls back to the normal fail-closed OCR.
 internal static class RuneLitePixelGridReader
 {
     private const int Pitch=7, Height=11, RowPitch=15, WhiteThreshold=195;
     private static readonly int[] TileDigits={4,5,6,7,10,11,12,13,16};
 
-    private readonly record struct Glyph(ulong Low,ulong High)
+    internal readonly record struct Glyph(ulong Low,ulong High)
     {
         internal int Ink=>BitOperations.PopCount(Low)+BitOperations.PopCount(High);
         internal int Distance(Glyph other)=>BitOperations.PopCount(Low^other.Low)+
@@ -24,6 +25,52 @@ internal static class RuneLitePixelGridReader
     internal readonly record struct Observation(string Chunk,string Region,int X,int Y);
     internal readonly record struct FieldQuorum(Observation Data,int XYVotes,int ChunkVotes,
         int RegionVotes,int OutlierFields);
+    internal sealed record GlyphSnapshot(IReadOnlyDictionary<char,Glyph> Digits);
+
+    // Strictly ephemeral, local to one RuneLitePositionSource/one HWND and
+    // framebuffer size. Each entry comes from an accepted PIXEL_GRID_VERIFIED
+    // frame only AFTER its independent second-frame confirmation. Individual
+    // digits must have two different confirmed capture timestamps before they
+    // can resolve an otherwise untrained singleton in a future frame.
+    internal sealed class ConfirmedGlyphHistory
+    {
+        private readonly List<(DateTimeOffset Captured,GlyphSnapshot Snapshot)> entries=new();
+        internal int Snapshots=>entries.Count;
+        internal int Frames=>entries.Select(e=>e.Captured).Distinct().Count();
+        internal void Clear()=>entries.Clear();
+        internal void Expire(DateTimeOffset now)=>entries.RemoveAll(e=>
+            e.Captured>now||now-e.Captured>TimeSpan.FromMinutes(5));
+        internal void Confirm(IReadOnlyList<GlyphSnapshot> snapshots,DateTimeOffset captured)
+        {
+            if(captured==default||entries.Any(e=>e.Captured==captured))return;
+            Expire(captured);
+            foreach(var snapshot in snapshots.Take(8))
+                entries.Add((captured,new GlyphSnapshot(new Dictionary<char,Glyph>(snapshot.Digits))));
+            // Bounded history; no image data or character position persisted.
+            while(entries.Count>96)entries.RemoveAt(0);
+        }
+        internal bool Matches(char digit,Glyph sample,IReadOnlyDictionary<char,Glyph> current,
+            out bool contradictory)
+        {
+            contradictory=false;
+            var compatible=entries.Where(e=>
+            {
+                var overlap=current.Keys.Where(k=>e.Snapshot.Digits.ContainsKey(k)).ToArray();
+                return overlap.Length>=5&&overlap.All(k=>
+                    current[k].Distance(e.Snapshot.Digits[k])<=2);
+            }).Where(e=>e.Snapshot.Digits.ContainsKey(digit)).ToArray();
+            if(compatible.Select(e=>e.Captured).Distinct().Count()<2)return false;
+            if(compatible.Any(e=>sample.Distance(e.Snapshot.Digits[digit])>2)||
+               current.Any(k=>k.Key!=digit&&sample.Distance(k.Value)<5))
+            {contradictory=true;return false;}
+            // Check separation from EVERY other labelled historical digit in
+            // the compatible snapshots, including those absent from this ID.
+            if(compatible.Any(e=>e.Snapshot.Digits.Any(k=>
+                k.Key!=digit&&sample.Distance(k.Value)<5)))
+            {contradictory=true;return false;}
+            return true;
+        }
+    }
 
     internal static Observation? ReadObservation(IEnumerable<string> lines)
     {
@@ -98,7 +145,8 @@ internal static class RuneLitePixelGridReader
     }
 
     internal static RuneLiteGridEvidence? Read(Bitmap bitmap,IReadOnlyList<Observation> observations,
-        out string diagnostic,FieldQuorum? fieldQuorum=null)
+        out string diagnostic,FieldQuorum? fieldQuorum=null,
+        ConfirmedGlyphHistory? history=null,Action<IReadOnlyList<GlyphSnapshot>>? onVerified=null)
     {
         var elapsed=Stopwatch.StartNew();
         var agreed=observations.GroupBy(o=>o).Where(g=>g.Count()>=2).Select(g=>g.Key).ToArray();
@@ -154,7 +202,9 @@ internal static class RuneLitePixelGridReader
         int visited=0,firstCommaShapes=0,matchingCommas=0,emptySeparators=0;
         int commaCandidates=0,idCandidates=0,matched=0;
         int unknownTileDigits=0,uniqueRepeatedDigitLayouts=0,unknownSingletonRejects=0;
+        int historicalGlyphMatches=0,historicalContradictions=0;
         var accepted=new HashSet<RuneLiteGridEvidence>();
+        var acceptedSnapshots=new List<GlyphSnapshot>();
         for(int oy=0;oy<=height-(2*RowPitch+Height);oy++)
         for(int ox=0;ox<=width-(16*Pitch+Pitch);ox++)
         {
@@ -199,6 +249,7 @@ internal static class RuneLitePixelGridReader
             // from all ID-trained glyphs. A singleton cannot be identified
             // from two OCR guesses alone and must remain blocked.
             var unknown=new Dictionary<char,(Glyph Raster,int Repetitions)>();
+            var historical=new HashSet<char>();
             bool digitsValid=true;
             for(int i=0;i<8;i++)
             {
@@ -207,6 +258,11 @@ internal static class RuneLitePixelGridReader
                 if(!reference.ContainsKey(expectedDigit))
                 {
                     if(sample.Ink is <5 or >44){digitsValid=false;break;}
+                    bool contradictory=false;
+                    if(history is not null&&history.Matches(expectedDigit,sample,reference,out contradictory))
+                    {historical.Add(expectedDigit);continue;}
+                    if(history is not null&&contradictory)
+                    {historicalContradictions++;digitsValid=false;break;}
                     if(unknown.TryGetValue(expectedDigit,out var previous))
                     {
                         if(previous.Raster.Distance(sample)>2){digitsValid=false;break;}
@@ -225,6 +281,7 @@ internal static class RuneLitePixelGridReader
                 if(best>2||second-best<5||digit!=expectedDigit){digitsValid=false;break;}
             }
             if(!digitsValid)continue;
+            if(historical.Count>0)historicalGlyphMatches+=historical.Count;
             if(unknown.Count>0)
             {
                 unknownTileDigits+=unknown.Count;
@@ -259,6 +316,8 @@ internal static class RuneLitePixelGridReader
                 $"Tile {x}, {y}, {plane}",$"Chunk ID {expected.Chunk}",$"Region ID {expected.Region}"});
             if(evidence is null)continue;
             matched++;accepted.Add(evidence);
+            if(acceptedSnapshots.Count<8)
+                acceptedSnapshots.Add(new GlyphSnapshot(new Dictionary<char,Glyph>(reference)));
         }
         diagnostic=$"attempted=true mode=MONO7X11 threshold={WhiteThreshold} "+
             $"roi={width}x{height} bright_pixels={brightPixels} "+
@@ -270,9 +329,13 @@ internal static class RuneLitePixelGridReader
             $"empty_separator_pairs={emptySeparators} comma_layouts={commaCandidates} "+
             $"digit_templates={idCandidates} unknown_tile_digits={unknownTileDigits} "+
             $"unknown_singleton_rejects={unknownSingletonRejects} repeated_unknown_layouts={uniqueRepeatedDigitLayouts} "+
+            $"historical_glyph_matches={historicalGlyphMatches} historical_contradictions={historicalContradictions} "+
+            $"trusted_history_frames={history?.Frames??0} trusted_history_snapshots={history?.Snapshots??0} "+
             $"full_matches={matched} distinct_positions={accepted.Count} "+
             $"elapsed_ms={elapsed.ElapsedMilliseconds} "+
             $"result={(accepted.Count==1?"PIXEL_GRID_VERIFIED":"NOT_RELEASED")}";
-        return accepted.Count==1?accepted.Single():null;
+        if(accepted.Count!=1)return null;
+        onVerified?.Invoke(acceptedSnapshots);
+        return accepted.Single();
     }
 }
