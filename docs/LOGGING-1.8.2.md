@@ -52,6 +52,8 @@
 | Zweite Releasequelle (ab 1.8.7) | `RELEASE_API_REQUEST`, `RELEASE_API_VERIFIED`, `RELEASE_AHEAD_OF_MANIFEST` bzw. `RELEASE_API_UNAVAILABLE` unterscheiden bestätigte Release-Assetdaten von einem möglicherweise alten Raw-Manifest. Konfliktierende SHA-256-Werte führen zu `CHECK_FAILED`. |
 | Bewegungsziffern (ab 1.8.7) | `unknown_tile_digits`, `unknown_singleton_rejects`, `repeated_unknown_layouts` zeigen, ob ID-Ziffern zur Lesung der neu erreichten Tile-Koordinaten fehlen. Einzelne unbekannte Glyphen bleiben blockiert. |
 | Feldweise OCR-Übereinstimmung (ab 1.8.8) | `stage=FIELD_QUORUM`, `xy_votes`, `chunk_votes`, `region_votes`, `rejected_field_outliers`, `CHECKSUM_VERIFIED` bzw. `NOT_READY` oder `CHECKSUM_REJECTED`. Im Bitmapprotokoll wird die Feldprovenienz und die tatsächliche Anzahl vollständiger OCR-Treffer separat erfasst. |
+| Sitzungsinterne Pixelvorlagen (ab 1.8.9) | `stage=GLYPH_HISTORY`, `trusted_history_frames`, `historical_glyph_matches`, `historical_contradictions` dokumentieren die Prüfung gegen unabhängig bestätigte ältere Glyphen ohne deren Rohdaten zu speichern. |
+| Lange Ereignisse (ab 1.8.10) | Vollständige Pixelprüfungen überschreiten die frühere pauschale 480-Zeichen-Grenze. Detailfelder behalten jetzt bis zu 16.384 bereinigte Zeichen inklusive `full_matches`, `distinct_positions`, `elapsed_ms` und `result`. Ausnahmsweise darüber hinaus gekürzte Einträge nennen die Anzahl ausgelassener Zeichen ausdrücklich. |
 | Altes Backend | Zusätzlich bestehende Render-, Login-, Welt-, Inventar-, Navigations-, Kampf- und Aktivitätsereignisse sowie blockierte Executor-Zustände |
 
 Die Datei speichert **keine Bildschirmbilder**, Prozessspeicher, Jagex-

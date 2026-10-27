@@ -133,12 +133,21 @@ internal static class FailureLogPolicy
         {
             using var report=new ClientFailureLog(d,file,value=>copied=value);
             d.Add(Severity.DEBUG,"RUNELITE_OCR","PASS","Tile 3142» 3212» o");
+            string fullPixelDetail="attempted=true "+new string('p',780)+
+                " full_matches=4 distinct_positions=1 elapsed_ms=12 result=PIXEL_GRID_VERIFIED";
+            d.Add(Severity.DEBUG,"RUNELITE_PIXEL","VERIFICATION",fullPixelDetail);
             d.Add(Severity.DEBUG,"PRIVACY","REDACTION","password=secret token=abcdef user=test@example.com");
             if(!report.ReportFailure("RUNELITE","GRID_INFO_NOT_READABLE","position_rejected=true"))
                 throw new Exception("First failure must trigger an automatic log copy");
             if(copied is null||copied!=File.ReadAllText(file,Encoding.UTF8)||!copied.Contains("Tile 3142» 3212» o")||
+               !copied.Contains(fullPixelDetail)||!copied.Contains("result=PIXEL_GRID_VERIFIED")||
                copied.Contains("password=secret")||copied.Contains("token=abcdef")||copied.Contains("test@example.com"))
                 throw new Exception("Clipboard must receive the complete real session log");
+            string deliberatelyHuge=new string('v',18_000);
+            d.Add(Severity.DEBUG,"DIAG","BOUND_CHECK",deliberatelyHuge);
+            var bounded=d.Snapshot().Last().Detail;
+            if(bounded.Length>=deliberatelyHuge.Length||!bounded.Contains("[gekürzt: 1616 Zeichen ausgelassen]"))
+                throw new Exception("Exceptional event detail must remain bounded with explicit omitted length");
             if(report.ReportFailure("RUNELITE","GRID_INFO_NOT_READABLE","same_block=true"))
                 throw new Exception("Persistent failures must not overwrite the clipboard repeatedly");
             d.Add(Severity.INFO,"RUNELITE","NEXT_SAMPLE","late_sample=true");

@@ -1,4 +1,20 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.9
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.10
+
+**1.8.10 – vollständige Fehlerereignisse statt 480-Zeichen-Abschneidung:**
+Das echte 1.8.9-Log belegt das automatische Update, die unabhängige
+Bestätigung von mindestens neun unterschiedlichen Positionen während
+manueller Bewegung und den wirksamen sitzungsinternen Ziffernspeicher,
+u. a. bei der früher gesperrten 3147/3208/0. Kaltstart ohne bereits
+gelernte Vorlagen bleibt fail-closed. Der eigentliche neue Befund
+ist ein Diagnoseverlust: 58 `RUNELITE_PIXEL`-Ereignisse schneiden
+ihre Schlussfelder mit `...[gekürzt]` ab, weil `Diagnostics.Add`
+den `Sanitize`-Standard von 480 Zeichen auch für ganze Detailtexte
+übernahm. 1.8.10 erhöht dieses Feldlimit gezielt auf 16.384 Zeichen,
+kennzeichnet seltene weitere Auslassungen samt Zeichenzahl und fügt
+einen Dateikopie-/Zwischenablage-Regressionsfall hinzu. Geheime Token
+und E-Mail-Adressen werden weiter herausgefiltert. Die GUI bleibt
+bei nicht implementierter Automation rot; kein Gameplay-Code wurde
+freigegeben. Die Behebung ist noch nicht live getestet.
 
 **1.8.9 – schon unabhängig bestätigte ID-Ziffern auch nach Bewegung nutzen:**
 Das echte 1.8.8-Live-Log bestätigt das Feldquorum und die Position

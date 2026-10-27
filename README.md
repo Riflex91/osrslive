@@ -1,4 +1,31 @@
-# OSRS Play 1.8.8 – RuneLite statt Atlas-Positionssuche
+# OSRS Play 1.8.10 – RuneLite-Companion mit vollständiger Pixel-Diagnose
+
+**Neu in 1.8.10 – vollständige statt abgeschnittene Diagnosezeilen:**
+Der echte 1.8.9-Live-Test hat die automatische Installation bestätigt und
+auf dem bewegten RuneLite-Charakter viele unabhängige Positionen gelesen,
+darunter 3147/3208, 3157/3198 und 3148/3199. Der neue, auf zuvor
+bestätigten Bildern beruhende Glyphenspeicher wurde wiederholt benutzt.
+Die eigentliche vollständige Datei-/Zwischenablagekopie funktionierte,
+aber ein allgemeines **480-Zeichen-Limit pro Logereignis** schnitt in 58
+Pixelzeilen gerade `full_matches`, `distinct_positions`, `elapsed_ms`
+und das Ergebnisfeld ab. 1.8.10 behält diese Felder jetzt vollständig;
+pro Ereignis gelten bis zu 16.384 bereinigte Zeichen. Ein noch längerer
+Eintrag markiert den absichtlich ausgelassenen Rest samt Zeichenzahl.
+Die Redigierung von Zugangsdaten bleibt erhalten. Der Windows-Selbsttest
+prüft die ausführliche Logdatei und identische Zwischenablagekopie.
+RuneLite-Spielaktionen sind weiterhin nicht implementiert.
+
+**Neu in 1.8.9 – bestätigte Pixelziffern sitzungsintern wiederverwenden:**
+Ziffern aus mindestens zwei früheren, erfolgreich bestätigten RuneLite-
+Bildaufnahmen können eine heute nur einmal sichtbare Ziffer belegen, wenn
+mindestens fünf gegenwärtige ID-Ziffern mit dem historischen Schriftbild
+übereinstimmen. Alter, Fensterbindung, Rasterabstände und Widersprüche
+bleiben konservativ geprüft. Das Live-Log von 1.8.9 bestätigt erstmals
+mehrere Bewegungspositionen mit `historical_glyph_matches>0` und
+`OVERLAY_CONFIRMED`; ein Kaltstart bei einem Ort ohne passende Vorlagen
+bleibt erwartungsgemäß noch gesperrt.
+
+Die folgenden Versionsabschnitte dokumentieren jeweils ihren damaligen Teststand.
 
 **Neu in 1.8.8 – unabhängig bestätigte OCR-Zahlenfelder:** Das echte
 1.8.7-Live-Log zeigt, dass bei der Bewegung die Region `12594` von

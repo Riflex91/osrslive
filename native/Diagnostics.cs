@@ -15,8 +15,12 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.8.9";
+    internal const string Version="1.8.10";
     private const int Capacity=10000;
+    // Full pixel-grid decisions exceed 480 chars. Do not discard the final
+    // full_matches/distinct_positions/result fields from the real file and
+    // automatic clipboard export. Keep an explicit large safety bound.
+    private const int MaxEventDetailChars=16_384;
     private readonly object sync=new();
     private readonly List<LogEvent> entries=new();
     private long id,dropped,errors,warnings;
@@ -38,7 +42,7 @@ internal sealed class Diagnostics
         result=Secret.Replace(result,"$1[REDACTED]");
         result=Email.Replace(result,"[REDACTED_EMAIL]");
         result=new string(result.Select(c=>char.IsControl(c)?'?':c).ToArray());
-        return result.Length>max?result[..max]+"...[gekürzt]":result;
+        return result.Length>max?result[..max]+$"...[gekürzt: {result.Length-max} Zeichen ausgelassen]":result;
     }
     internal void Add(Severity level,string source,string kind,string details)
     {
@@ -48,7 +52,7 @@ internal sealed class Diagnostics
             if(entries.Count>=Capacity){entries.RemoveAt(0);dropped++;}
             added=new LogEvent(++id,DateTimeOffset.Now,
                 Stopwatch.GetTimestamp(),level,Sanitize(source,32),
-                Sanitize(kind,55),Sanitize(details));
+                Sanitize(kind,55),Sanitize(details,MaxEventDetailChars));
             entries.Add(added);
             if(level==Severity.ERROR)errors++;
             if(level==Severity.WARN)warnings++;
