@@ -1,4 +1,47 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.6
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.7
+
+## Erste Bewegung, veränderte ID-Ziffern und weiterhin veraltetes Manifest (1.8.7)
+
+Das echte 1.8.6-Log vom 27.10. um 20:28–20:29 (Europe/Berlin) lief mit
+`build_channel=push` und korrekter Commit-/Buildidentität. WGC lieferte
+fortlaufend frische, opake 773×534-Clientbilder. Die erste Position
+war laut zwei identischen Nearest-OCR-Lesungen `Tile3144`/`3211` und
+`Chunk ID 805265`/`Region ID 12594`. Die Pixelprüfung testete 41.760
+Anker und fand echte Kommas sowie vier Layouts mit validen ID-Ziffern,
+aber keinen vollständigen Tile-Treffer. Anders als beim vorherigen
+Ort 3143/3210 enthalten die neuen ID-Ziffern **keine `3`**, obwohl
+dieses Zeichen in beiden Koordinaten steht. Der frühere Algorithmus
+verlangte selbst für zweimal pixelgleich sichtbare Tile-Ziffern eine
+Vorlage aus den ID-Zeilen. Späterer Bewegungs-OCR-Text deutet u. a. auf
+3147/3208, wo auch die nur einmal sichtbare Ziffer `7` in den IDs fehlt.
+Bis zur Klärung wurden alle Kandidaten korrekt abgelehnt. Fehlerlog-
+Kopie/roter Hinweis erfolgten; Gesundheitslog meldete `clipboard=COPIED`.
+
+1.8.7 lässt deshalb einen begrenzten zusätzlichen Rasterbeweis zu:
+Eine unbekannte X/Y-Ziffer muss in derselben Tile-Zeile **mindestens zweimal**
+vorkommen, ihre beiden wirklichen Pixelmuster dürfen um höchstens zwei
+Schwellenwertpixel abweichen und müssen von allen im selben Frame aus
+Chunk-/Region-IDs trainierten Ziffern klar unterscheidbar sein. Die
+beiden OCR-Varianten müssen weiterhin identische Zahlen/IDs liefern,
+die zwei sichtbaren Kommas, eine echte trainierte Ebenenziffer, Chunk-/
+Region-Checksummen und zwei frische Frames sind unverändert Pflicht.
+Eine nur einmal sichtbare, untrainierte `7` bleibt absichtlich blockiert;
+dafür gibt es die neuen Zähler `unknown_tile_digits`,
+`unknown_singleton_rejects` und `repeated_unknown_layouts`.
+Der neue Beweis ist schwächer als eine unabhängige Ziffernvorlage;
+er wird nur im weiterhin **rein lesenden Companion** eingesetzt.
+
+Das gleiche 1.8.6-Log zeigte trotz zufälliger Nonce und Cache-Headern
+`remote_version=1.8.5`, unmittelbar nach Veröffentlichung von 1.8.6.
+Das kann eine veraltete CDN-Antwort sein; die genaue Cacheinstanz ist
+nicht belegbar. 1.8.7 prüft zusätzlich über den offiziellen GitHub-REST-
+Endpunkt `releases/latest` ein stabiles Release und dessen veröffentlichten
+`sha256:`-Assetdigest. Bei neueren vollständigen Metadaten wird nur die
+streng validierte HTTPS-Assetadresse des korrekten Repos verwendet;
+bei gleicher Version aber abweichenden Hashes wird gestoppt. Bei API-
+Ausfall dient das alte validierte Raw-Manifest als Fallback. Windows-
+Offline-Tests simulieren diese Kombinationen. **Beide Live-Fixes sind
+bis zu einem neuen Benutzerlog noch nicht bestätigt.**
 
 ## Erstes erfolgreiches 1.8.5-WGC-Live-Protokoll und Update-Cache (1.8.6)
 

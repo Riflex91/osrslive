@@ -49,6 +49,8 @@
 | Fehler | Auslöser, Sperrgrund, Exception-Typ, HResult, bereinigte Nachricht, Methoden-/IL-Stack und Zustand der Log-Kopie |
 | Auto-Update (ab 1.8.3) | Prüfung beim GUI-Start, alle 30 Minuten und per Schaltfläche; Manifest-Version, Assetname, Downloadgröße, Dauer, SHA-256-Prüfergebnis, Helperstart, Ergebnis oder bereinigter Fehler. Bei Updatefehler automatische Log-Kopie mit roter Meldung. |
 | Cachefeste Manifestabfrage (ab 1.8.6) | `MANIFEST_REQUEST` nennt die frische URL-/Header-Richtlinie; `MANIFEST_BEHIND_LOCAL` meldet einen älteren remote Stand, ohne private URL-Kennung oder Daten preiszugeben. Eine Downgrade-Installation ist ausgeschlossen. |
+| Zweite Releasequelle (ab 1.8.7) | `RELEASE_API_REQUEST`, `RELEASE_API_VERIFIED`, `RELEASE_AHEAD_OF_MANIFEST` bzw. `RELEASE_API_UNAVAILABLE` unterscheiden bestätigte Release-Assetdaten von einem möglicherweise alten Raw-Manifest. Konfliktierende SHA-256-Werte führen zu `CHECK_FAILED`. |
+| Bewegungsziffern (ab 1.8.7) | `unknown_tile_digits`, `unknown_singleton_rejects`, `repeated_unknown_layouts` zeigen, ob ID-Ziffern zur Lesung der neu erreichten Tile-Koordinaten fehlen. Einzelne unbekannte Glyphen bleiben blockiert. |
 | Altes Backend | Zusätzlich bestehende Render-, Login-, Welt-, Inventar-, Navigations-, Kampf- und Aktivitätsereignisse sowie blockierte Executor-Zustände |
 
 Die Datei speichert **keine Bildschirmbilder**, Prozessspeicher, Jagex-

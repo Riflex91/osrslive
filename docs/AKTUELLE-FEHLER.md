@@ -1,4 +1,22 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.6
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.7
+
+**1.8.7 – neuer Live-Ort belegt fehlende Vorlagen:** Das echte 1.8.6-Log
+vom 27.10., 20:28–20:29 (Europe/Berlin) zeigte bereits in Probe 1
+`Tile3144`/`3211` mit übereinstimmenden Chunk `805265` und Region
+`12594` in zwei OCR-Varianten. Die Pixelsuche fand passende Kommas und
+ID-Ziffernvorlagen, aber `full_matches=0`: In diesen IDs fehlt die
+Ziffer `3` aus den Tile-Werten. Beim späteren Weg über z. B.
+`3147`/`3208` kommt außerdem die singuläre unbekannte `7` hinzu.
+1.8.7 erlaubt nur **in derselben Tile-Zeile mehrfach pixelgleich
+nachgewiesene** fehlende Ziffern; einzelne nicht trainierte Ziffern
+werden ausdrücklich mit `unknown_singleton_rejects` verweigert.
+Keine Position wurde im echten 1.8.6-Lauf fälschlich freigegeben;
+die rote GUI-Meldung und `clipboard=COPIED` sind im Log bestätigt.
+Das Update-Manifest wurde trotz 1.8.6-Cache-Headern kurz nach dem
+Release noch als 1.8.5 beantwortet. 1.8.7 prüft daher zusätzlich
+die aktuellste offizielle GitHub-Release-Asset-SHA-256 und nutzt bei
+älterem Raw-Manifest den neueren verifizierten Release-Datensatz.
+**Beide Änderungen benötigen neue Live-Bestätigung.**
 
 **1.8.6 – Updater-Cache und tatsächlicher Live-Durchbruch:** Das neue
 1.8.5-Sitzungslog vom 27.10. um 20:11 (Europe/Berlin) bestätigt bereits ab

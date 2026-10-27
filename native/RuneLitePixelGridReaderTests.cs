@@ -16,11 +16,12 @@ internal static class RuneLitePixelGridReaderTests
         ['9']=["11110","10001","10001","11111","00001","00001","00001"]
     };
 
-    private static Bitmap Fixture(int plane=0,int offsetX=0,int offsetY=0)
+    private static Bitmap Fixture(int plane=0,int offsetX=0,int offsetY=0,int tileX=3143,int tileY=3210)
     {
         var image=new Bitmap(145+offsetX,82+offsetY);
         using(var g=Graphics.FromImage(image))g.Clear(Color.FromArgb(21,26,32));
-        string[] lines={"Tile3143, 3210, "+plane,"Chunk ID   803217","Region ID   12594"};
+        int chunk=((tileX>>3)<<11)|(tileY>>3),region=((tileX>>6)<<8)|(tileY>>6);
+        string[] lines={$"Tile{tileX}, {tileY}, {plane}",$"Chunk ID   {chunk:D6}",$"Region ID   {region:D5}"};
         for(int row=0;row<lines.Length;row++)for(int col=0;col<lines[row].Length;col++)
         {
             int x0=7+offsetX+col*7,y0=13+offsetY+row*15;
@@ -92,6 +93,37 @@ internal static class RuneLitePixelGridReaderTests
                 new[]{observation!.Value,observation.Value},out string detail);
             Require(shifted?.Tile==new WorldTile(3143,3210,0)&&detail.Contains("PIXEL_GRID_VERIFIED"),
                 "a cropped screenshot origin must not be mistaken for the real RuneLite overlay offset");
+        var moved=RuneLitePixelGridReader.ReadObservation(new[]{
+            "Tile3144» 3211» o","Chunk ID 805265","Region ID 12594"});
+        Require(moved is {X:3144,Y:3211,Chunk:"805265",Region:"12594"},
+            "moved position must have an independent OCR hypothesis and both exact IDs");
+        using(var movedBitmap=Fixture(tileX:3144,tileY:3211))
+        {
+            var result=RuneLitePixelGridReader.Read(movedBitmap,
+                new[]{moved!.Value,moved.Value},out string movedDiagnostic);
+            Require(result?.Tile==new WorldTile(3144,3211,0)&&
+                    movedDiagnostic.Contains("repeated_unknown_layouts=")&&
+                    !movedDiagnostic.Contains("repeated_unknown_layouts=0 "),
+                "unknown ID digit 3 is allowed only when two Tile glyphs independently agree");
+            // Break the second '3' in the Tile line. OCR alone may continue
+            // claiming it, but two visibly different pixel shapes must fail.
+            for(int dy=0;dy<11;dy++)for(int dx=0;dx<7;dx++)
+                movedBitmap.SetPixel(7+10*7+dx,13+dy,Color.FromArgb(21,26,32));
+            Require(RuneLitePixelGridReader.Read(movedBitmap,
+                    new[]{moved.Value,moved.Value},out _) is null,
+                "OCR claims cannot override a missing repeated unknown Tile glyph");
+        }
+        var singleton=RuneLitePixelGridReader.ReadObservation(new[]{
+            "Tile3147» 3208» o","Chunk ID 805265","Region ID 12594"});
+        Require(singleton is not null,"new moved position must retain valid OCR IDs");
+        using(var bitmap=Fixture(tileX:3147,tileY:3208))
+        {
+            var result=RuneLitePixelGridReader.Read(bitmap,
+                new[]{singleton!.Value,singleton.Value},out string diagnostic);
+            Require(result is null&&diagnostic.Contains("unknown_singleton_rejects=")&&
+                    !diagnostic.Contains("unknown_singleton_rejects=0 "),
+                "a once-only unknown digit must remain blocked despite agreeing OCR passes");
+        }
         }
         using(var bitmap=Fixture())
         {
