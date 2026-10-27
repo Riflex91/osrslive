@@ -8,14 +8,15 @@ internal sealed class RuneLiteWindow:Form
     private readonly RuneLitePositionSource source=new();
     private readonly Diagnostics log=new();
     private readonly ClientFailureLog failureLog;
-    private readonly Label status=new(),position=new(),detail=new(),failureBanner=new();
+    private readonly Label status=new(),position=new(),detail=new(),failureBanner=new(),updateStatus=new();
     private readonly TextBox logPreview=new();
-    private readonly Button copyLog=new();
+    private readonly Button copyLog=new(),checkUpdate=new();
     private readonly System.Windows.Forms.Timer timer=new(){Interval=800};
     private readonly System.Windows.Forms.Timer healthTimer=new(){Interval=10000};
+    private readonly System.Windows.Forms.Timer updateTimer=new(){Interval=30*60*1000};
     private readonly Stopwatch uptime=Stopwatch.StartNew();
     private readonly CancellationTokenSource closing=new();
-    private bool paused,busy;
+    private bool paused,busy,updateRunning,updatePendingRestart;
     private long generation,samples;
     private string? lastStatus;
     private DateTimeOffset blockedSince;
@@ -32,7 +33,7 @@ internal sealed class RuneLiteWindow:Form
         panel.RowStyles.Add(new(SizeType.Absolute,42));panel.RowStyles.Add(new(SizeType.Absolute,42));
         panel.RowStyles.Add(new(SizeType.Absolute,60));panel.RowStyles.Add(new(SizeType.Absolute,85));
         panel.RowStyles.Add(new(SizeType.Absolute,76));panel.RowStyles.Add(new(SizeType.Percent,100));
-        panel.RowStyles.Add(new(SizeType.Absolute,44));panel.RowStyles.Add(new(SizeType.Absolute,28));
+        panel.RowStyles.Add(new(SizeType.Absolute,76));panel.RowStyles.Add(new(SizeType.Absolute,42));
         panel.Controls.Add(new Label{Text="OSRS PLAY · RUNELITE · DIAGNOSE",Dock=DockStyle.Fill,
             Font=new("Segoe UI",16,FontStyle.Bold)},0,0);
         status.Dock=position.Dock=detail.Dock=failureBanner.Dock=DockStyle.Fill;
@@ -76,12 +77,16 @@ internal sealed class RuneLiteWindow:Form
         };
         copyLog.Text="Gesamte Logdatei kopieren";copyLog.AutoSize=true;
         copyLog.Click+=(_,_)=>{failureLog.CopyToClipboard();UpdateFailureBanner();RefreshLogPreview();};
+        checkUpdate.Text="Jetzt Updates prüfen";checkUpdate.AutoSize=true;
+        checkUpdate.Click+=async(_,_)=>await CheckForUpdatesAsync("MANUAL");
         buttons.Controls.Add(launcher);buttons.Controls.Add(pause);buttons.Controls.Add(copyLog);
+        buttons.Controls.Add(checkUpdate);
         panel.Controls.Add(buttons,0,6);
-        panel.Controls.Add(new Label{
-            Text="Lokales Sitzungslog: "+Path.GetFileName(failureLog.FilePath)+" · keine Screenshots · keine Spielaktionen",
-            Dock=DockStyle.Fill,ForeColor=Color.LightGray,Font=new("Segoe UI",9)
-        },0,7);
+        updateStatus.Text="Automatische Updateprüfung beim Start und alle 30 Minuten · RuneLite bleibt geöffnet.\n"+
+            "Sitzungslog: "+Path.GetFileName(failureLog.FilePath);
+        updateStatus.Dock=DockStyle.Fill;updateStatus.ForeColor=Color.LightGray;
+        updateStatus.Font=new("Segoe UI",9);
+        panel.Controls.Add(updateStatus,0,7);
         Controls.Add(panel);
 
         log.Add(Severity.INFO,"CORE","STARTED",
@@ -91,6 +96,10 @@ internal sealed class RuneLiteWindow:Form
             "fresh_frames_required=2 no_memory_access=true no_screenshots_written=true");
         log.Add(Severity.INFO,"CORE","PRIVACY",
             "credentials_and_authentication_handled_by_jagex=true local_log_only=true clipboard_on_failure=true");
+        if(Updater.TakeLastOutcome() is string previousUpdate)
+            log.Add(Severity.INFO,"UPDATER","PREVIOUS_UPDATE",previousUpdate);
+        log.Add(Severity.INFO,"UPDATER","CHECK_SCHEDULED",
+            "startup=true interval_minutes=30 manual_button=true runeLite_process_untouched=true");
 
         timer.Tick+=async(_,_)=>await RefreshPosition();timer.Start();
         healthTimer.Tick+=(_,_)=>
@@ -103,6 +112,9 @@ internal sealed class RuneLiteWindow:Form
             RefreshLogPreview();
         };
         healthTimer.Start();
+        updateTimer.Tick+=async(_,_)=>await CheckForUpdatesAsync("PERIODIC");
+        updateTimer.Start();
+        Shown+=async(_,_)=>await CheckForUpdatesAsync("STARTUP");
         Shown+=async(_,_)=>
         {
             await RefreshPosition();
@@ -111,6 +123,55 @@ internal sealed class RuneLiteWindow:Form
                 "official_client_read_only=true automatic_tasks_not_executed=true");
             UpdateFailureBanner();RefreshLogPreview();
         };
+    }
+
+    private async Task CheckForUpdatesAsync(string trigger)
+    {
+        if(updateRunning||updatePendingRestart||closing.IsCancellationRequested||IsDisposed)return;
+        updateRunning=true;checkUpdate.Enabled=false;
+        log.Add(Severity.INFO,"UPDATER","CHECK_START",
+            $"trigger={trigger} current_version={Diagnostics.Version} verified_release_only=true independent_of_runelite=true");
+        try
+        {
+            bool restart=await Updater.CheckAndUpdateAsync(message=>
+            {
+                log.Add(Severity.INFO,"UPDATER","STATUS",message);
+                if(!IsDisposed)updateStatus.Text=message+"\nSitzungslog: "+Path.GetFileName(failureLog.FilePath);
+                if(!IsDisposed)RefreshLogPreview();
+            },closing.Token,(phase,details)=>
+            {
+                log.Add(phase=="CHECK_FAILED"?Severity.ERROR:Severity.INFO,"UPDATER",phase,details);
+            },error=>
+            {
+                if(IsDisposed)return;
+                failureLog.ReportFailure("UPDATER","UPDATE_CHECK_FAILED",ExceptionDiagnostic.Describe(error));
+                UpdateFailureBanner();RefreshLogPreview();
+            });
+            if(closing.IsCancellationRequested||IsDisposed)return;
+            if(restart)
+            {
+                updatePendingRestart=true;
+                log.Add(Severity.INFO,"UPDATER","RESTART_REQUESTED",
+                    $"trigger={trigger} reason=VERIFIED_NEW_VERSION runeLite_process_untouched=true");
+                Close(); // The verified helper replaces only this EXE after it exits.
+                return;
+            }
+            log.Add(Severity.INFO,"UPDATER","CHECK_FINISHED",$"trigger={trigger} restart_required=false");
+        }
+        catch(OperationCanceledException) when(closing.IsCancellationRequested){}
+        catch(Exception ex)
+        {
+            if(!IsDisposed&&!closing.IsCancellationRequested)
+            {
+                failureLog.ReportFailure("UPDATER","UPDATE_UI_FAILED",ExceptionDiagnostic.Describe(ex));
+                UpdateFailureBanner();RefreshLogPreview();
+            }
+        }
+        finally
+        {
+            updateRunning=false;
+            if(!IsDisposed)checkUpdate.Enabled=true;
+        }
     }
 
     private async Task RefreshPosition()
@@ -214,15 +275,17 @@ internal sealed class RuneLiteWindow:Form
     {
         if(!failureBanner.Text.Contains("VERBESSERUNG MUSS EINGEBAUT WERDEN")||
            failureBanner.ForeColor!=Color.FromArgb(255,105,105)||
-           !logPreview.ReadOnly||!logPreview.Multiline||copyLog.Text.Length==0)
-            throw new Exception("RuneLite diagnostic GUI does not show a red improvement banner and read-only log");
+           !logPreview.ReadOnly||!logPreview.Multiline||copyLog.Text.Length==0||
+           checkUpdate.Text.Length==0||!updateTimer.Enabled||updateTimer.Interval!=30*60*1000||
+           !updateStatus.Text.Contains("Updateprüfung"))
+            throw new Exception("RuneLite GUI lacks diagnostics or automatic/manual updater controls");
     }
 
     protected override void Dispose(bool disposing)
     {
         if(disposing)
         {
-            closing.Cancel();timer.Dispose();healthTimer.Dispose();
+            closing.Cancel();timer.Dispose();healthTimer.Dispose();updateTimer.Dispose();
             log.Add(Severity.INFO,"CORE","SHUTDOWN","no_game_process_terminated=true");
             failureLog.Dispose();source.Dispose();closing.Dispose();
         }

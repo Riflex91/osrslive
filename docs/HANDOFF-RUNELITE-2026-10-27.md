@@ -1,4 +1,26 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.2
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.3
+
+## Update-Fix aus echtem Sitzungslog (1.8.3)
+
+Der Benutzer meldete, dass der alte Client nicht automatisch auf 1.8.2
+aktualisiert wurde. Sein vollständiges 1.8.2-Log zeigte keine `UPDATER`-Events,
+weil nur das alte `MainWindow` die `Updater.CheckAndUpdateAsync`-Funktion
+aufrief; das reguläre `RuneLiteWindow` tat es nicht. Seit 1.8.3 überprüft
+das Standardfenster sofort beim Anzeigen, alle 30 Minuten sowie manuell über
+`Jetzt Updates prüfen` das verifizierte GitHub-Release. Check, Manifest,
+Download, SHA-256, Helperstart und Fehler werden im vollständigen Sitzungslog
+erfasst; Updatefehler zeigen die rote Fehlerkennung und kopieren das Log.
+Nur die OSRS-Play-EXE wird neu gestartet; RuneLite selbst wird nicht beendet.
+1.8.2 und ältere Companion-Versionen können diesen neuen Aufruf nicht
+nachträglich erhalten: **Einmaliger manueller Download von 1.8.3 nötig.**
+
+Dasselbe echte 1.8.2-Sitzungslog lieferte über 70 OCR-Proben: Der
+RuneLite-Prozess und frische Hintergrundbilder waren verfügbar,
+Chunk-/Region-Zeilen häufig lesbar, Tile-Koordinaten und Ebene hingegen
+mit fehlinterpretierten Trennzeichen (`»`) und Null-Ziffern (`o`, `ø`).
+Alle Kandidaten wurden korrekt als unbestätigt abgelehnt; es gibt
+weiterhin keine sichere Ebene-0-Erkennung und keinen
+RuneLite-Spielautomationspfad. Das Update-Problem ist davon unabhängig.
 
 ## Vollständige Sitzungslogs und automatische Fehlerkopie (1.8.2)
 

@@ -45,6 +45,7 @@
 | Position | Chunk-/Region-Prüfung, Anzahl der gültigen OCR-Durchläufe, Zweibildbestätigung, eindeutige Koordinaten bei bestätigter Position |
 | Ablauf | Statuswechsel, Pause/Fortsetzen, Launcher-Anforderung, abgelehnte oder veraltete Ergebnisse, 10-Sekunden-Gesundheitsdaten |
 | Fehler | Auslöser, Sperrgrund, Exception-Typ, HResult, bereinigte Nachricht, Methoden-/IL-Stack und Zustand der Log-Kopie |
+| Auto-Update (ab 1.8.3) | Prüfung beim GUI-Start, alle 30 Minuten und per Schaltfläche; Manifest-Version, Assetname, Downloadgröße, Dauer, SHA-256-Prüfergebnis, Helperstart, Ergebnis oder bereinigter Fehler. Bei Updatefehler automatische Log-Kopie mit roter Meldung. |
 | Altes Backend | Zusätzlich bestehende Render-, Login-, Welt-, Inventar-, Navigations-, Kampf- und Aktivitätsereignisse sowie blockierte Executor-Zustände |
 
 Die Datei speichert **keine Bildschirmbilder**, Prozessspeicher, Jagex-
@@ -66,3 +67,8 @@ und Windows-Build-Prüfungen bleiben erforderlich.
 Das Logging schafft Belege für einen gezielten Fix, behebt aber nicht von sich
 aus die bekannte unlesbare Ebene-0-World-Location-OCR. Ein echter Lauf des
 neuen Clients mit dem regulären RuneLite-Profil `auto` bleibt notwendig.
+
+**Update-Hinweis 1.8.3:** Der 1.8.2-RuneLite-Companion rief die vorhandene
+Updatefunktion gar nicht auf. Deshalb muss 1.8.3 einmalig manuell installiert
+werden; danach laufen die automatischen Prüfungen auch im RuneLite-Modus.
+Bei einer neuen verifizierten Version startet nur OSRS Play neu, nicht RuneLite.

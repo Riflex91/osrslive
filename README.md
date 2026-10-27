@@ -1,4 +1,15 @@
-# OSRS Play 1.8.2 – RuneLite statt Atlas-Positionssuche
+# OSRS Play 1.8.3 – RuneLite statt Atlas-Positionssuche
+
+**Neu in 1.8.3 – Auto-Update des RuneLite-Companions:** Der Standardclient
+prüft beim Start, alle 30 Minuten und auf Knopfdruck das Release-Manifest
+(SHA-256-Dateiintegrität) und installiert neue verifizierte EXE-Releases.
+Nur OSRS Play wird dafür beendet und neu gestartet; RuneLite bleibt offen.
+Jeder Update-Schritt und jede Fehlermeldung landet im Sitzungslog; ein
+Updatefehler löst die automatische Log-Kopie und rote Verbesserungsmeldung aus.
+**Wichtig:** Ältere RuneLite-Standardclients (einschließlich 1.8.2) haben den
+Update-Check noch nicht und benötigen einmalig die manuelle 1.8.3-Installation.
+Die SHA-256-Prüfung schützt gegen Übertragungsfehler, ist keine unabhängige
+kryptografische Signatur des Herausgebers.
 
 **Neu in 1.8.2 – ausführliche Fehlerprotokolle:** Jeder Start erzeugt ein
 fortlaufendes lokales Sitzungslog mit Buildkennung, Zeitstempeln, OCR-/Capture-

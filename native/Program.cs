@@ -879,6 +879,8 @@ internal static class SelfTest
                 "exeSha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             if(Updater.ParseManifest(manifest).Version.ToString()!="0.9.1")
                 throw new Exception("Updater parser failed");
+            Updater.SelfTestAsync().GetAwaiter().GetResult();
+            Console.WriteLine("UPDATER OFFLINE PASS: startup manifest check, current version, invalid manifest, error callback, trusted release host");
             Console.WriteLine("AUTO LIVE ONLY PASS: pixel render detection, login ownership, F2P scan, verified bot start gate, diagnostics controls, privacy");
             return 0;
         }
