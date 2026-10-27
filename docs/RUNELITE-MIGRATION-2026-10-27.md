@@ -4,7 +4,7 @@ RuneLite muss auf ausdrücklichen Benutzerwunsch über den offiziellen Jagex Lau
 
 ## Aktueller Ansatz
 
-Der Standardstart von OSRS Play 1.8.0 ist ein nur lesender RuneLite-Companion. Das reguläre Hub-Plugin **World Location** zeichnet bei aktivem **Grid Info** die X/Y-/Ebenenposition des eigenen Spielers aus der RuneLite-API sowie Chunk- und Region-ID. Das ist vom Maus-Hover-Tooltip für fremde Kacheln verschieden. Grid Info Type muss **Unique ID** sein; das Panel muss oben links lesbar sein.
+Der Standardstart von OSRS Play 1.8.1 ist ein nur lesender RuneLite-Companion. Das reguläre Hub-Plugin **World Location** zeichnet bei aktivem **Grid Info** die X/Y-/Ebenenposition des eigenen Spielers aus der RuneLite-API sowie Chunk- und Region-ID. Das ist vom Maus-Hover-Tooltip für fremde Kacheln verschieden. Grid Info Type muss **Unique ID** sein; das Panel muss oben links lesbar sein.
 
 OSRS Play liest diese Zahlen über Windows OCR aus frischen, nur im Arbeitsspeicher gehaltenen Fensteraufnahmen. Es prüft die aus X/Y berechneten Chunk-/Region-IDs und verlangt zwei unabhängige frische Aufnahmen derselben Position. Fensterwechsel, fehlende Anzeige und alte Frames verwerfen die Bestätigung. Das ist **keine strukturierte direkte API-Verbindung zwischen den Prozessen** und noch kein Ersatz für Zustandsdaten wie Welt, Login, Instanzen oder Charakteridentität. Instanz-/Template-Koordinaten benötigen eine eigene Prüfung vor Navigation.
 
