@@ -1,0 +1,138 @@
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.0
+
+## Zuerst lesen
+
+**Kein autonomer RuneLite-Bot ist fertig.** Der neue Standardstart ist ein
+nur lesender Companion. Die alten Trainings-/Reise-/Bankroutinen sind noch
+an das bisherige C++-Client-Backend gebunden und dürfen nicht einfach mit
+RuneLite-Koordinaten gespeist werden. Dieses Backend ist ausdrücklich über
+`--legacy-official` erreichbar; bei fehlender RuneLite-Position gibt es keinen
+automatischen Rückfall.
+
+Der Benutzer verlangt reguläres RuneLite **über den offiziellen Jagex
+Launcher**. Ein separater Entwicklungsclient ist ausdrücklich verworfen.
+Keine Authentifizierungsdateien, Zugangsdaten oder Prozessspeicher auslesen;
+keine Launcher-Version umgehen. Der Benutzer übernimmt die Anmeldung selbst.
+
+## Lokales Profil, tatsächlich über die UI eingerichtet
+
+Das neue Profil **auto** wurde angelegt und aktiviert. Es begann mit RuneLites
+normalen Standardplugins, nicht als Kopie des abgeschalteten Profils default.
+Das alte Profil default wurde nicht überschrieben. Diese Benutzereinstellungen
+liegen lokal in RuneLite, **nicht automatisch im Git-Checkout**. Keine
+Authentifizierungs-/Profilrohdateien wurden ins Repo übernommen.
+
+Über den offiziellen Hub installiert (Installation vom Benutzer bestätigt):
+
+| Plugin | Angezeigter Stand | Einrichtung / Grenze |
+|---|---|---|
+| World Location | 1.6 | Aktiv. Tile Location aus; alle Gitterlinien aus; Grid Info an; Grid Info Type **Unique ID**; Instance Info Type **Copy**. |
+| Shortest Path | 1.22.1 | Installiert/gestartet mit Standardkonfiguration; Transport-/Teleporteinstellungen und F2P-Wege noch nicht live geprüft. |
+| Quest Helper | 4.18.0 | Installiert/gestartet; keine Quest gestartet. Shortest-Path-Integration noch nicht explizit eingeschaltet/geprüft. |
+| Not Enough Runes | 1.10 | Installiert/gestartet mit Standardkonfiguration. |
+| Inventory Setups | v1.26.0 | Installiert/gestartet; noch keine Tätigkeitszusammenstellung angelegt. |
+
+Eingebaute Plugins:
+
+- **Low Detail an**; Low detail an, Hide lower planes aus.
+- **FPS Control an**; globale Begrenzung an / **30 FPS**, Hintergrundbegrenzung
+  an / **15 FPS**. Beide Bildraten wurden im Spiel angezeigt.
+- **Tile Indicators an**; Zielkachel an, tatsächliche Spielerkachel an,
+  Hover-Kachel aus. Cyanfarbene eigene Kachel im Spiel sichtbar.
+- **Menu Entry Swapper aus**, in der Liste ausdrücklich geprüft.
+- Animation Smoothing war aus. Weitere eingebaute Standardplugins wurden nicht
+  pauschal abgeschaltet oder einzeln verifiziert. Insbesondere XP Tracker,
+  Idle Notifier, Clue Scroll und GPU sind vor weiterer Nutzung einzeln zu prüfen.
+- RuneLite → Overlay settings → **Interface font = Consolas, Größe 12**,
+  ohne Bold/Italic. Größere getestete Schrift (16/18) brach die Tile-Zeile im
+  schmalen Panel um. Schriftänderung löst das OCR-Problem bisher nicht.
+
+## Live-Befund am 27.10.2026
+
+Reguläres `RuneLite.exe` wurde über den Jagex Launcher gestartet. Der Benutzer
+meldete den Charakter selbst an. Im Spiel wurden im Grid-Info-Panel visuell
+**X=3142, Y=3212, Ebene=0**, **Chunk ID=803217**, **Region ID=12594** gelesen.
+Dies war ein Beobachtungsbefund, kein vom Bot erfolgreich übernommener Standort.
+
+Der neue CLI-Test `--runelite-position-probe` nahm jeweils zwölf frische
+Fensterbilder auf und gab ausschließlich die drei Plugin-Zeilen und den
+Prüfstatus aus. Keine Spielaktionen, keine gespeicherten Screenshots.
+
+- RuneScape-Schrift: unter anderem `Tile 311+2, 3212, o`.
+- Consolas 12: wiederholt `Tile3142» 3212» o`, trotz richtiger Chunk-/Region-ID.
+- Ergebnis: **GRID_INFO_NOT_READABLE**, keine bestätigte Position, Probe-Exit 2.
+- Eine erste breite OCR-Region konnte HUD-Zahlen auf dieselbe Textzeile gruppieren.
+  Der Ausschnitt ist deshalb auf links oben 350×220 begrenzt. Das allein löst
+  die falsche Ziffern-/Interpunktionslesung nicht.
+
+**Nicht** `o` durch `0` oder `»` durch Komma ersetzen, um einen grünen Test zu
+erzwingen. Die Redundanz der Chunk-/Region-ID prüft nicht Ebene oder jede
+einzelne Kachel innerhalb eines Chunks. Zwei Bilder mit demselben OCR-Fehler
+sind kein unabhängiger Beweis für die Richtigkeit der Ziffern.
+
+## Implementierung und Prüfungen
+
+- `native/RuneLitePositionSource.cs`: normales installiertes RuneLite.exe als
+  Quelle; WGC im RAM; Grid-Info-Zeilen statt Hover-Tooltip; exakte Zahlen,
+  Chunk-/Region-Abgleich; zwei frische Bilder; ungültige/alte/fehlende Bilder
+  verwerfen die Position. Kein Login-/Charakter-/Instanznachweis implementiert.
+- `native/RuneLiteWindow.cs`: neuer Standardstart, nur lesend, Pause/Fortsetzen
+  und Jagex-Launcher-Schaltfläche. Keine RuneLite-Eingaberoutine.
+- `native/RuneLitePositionTests.cs`: reine Parser-/Frischetests plus Windows-
+  OCR-Fixtures. Eine unzweideutige **Ebene-2**-Fixture muss exakt gelesen werden.
+  Die bekannte Ebene-0-Fixture darf nur exakt richtig oder abgelehnt werden;
+  Ablehnung wird ausdrücklich als **ZERO-PLANE LIMITATION** ausgegeben. Das ist
+  eine dokumentierte fehlende Fähigkeit, keine erfolgreiche Live-Integration.
+- `--runelite-position-probe`: lesender zwölfteiliger Live-Test, Exit 0 bei
+  mindestens einer bestätigten Position, sonst 2. Keine Bereitschaftsprüfung
+  für autonomes Training; noch keine Bewegungs-/Logout-Gesamtprüfung.
+- Build: 0 Warnungen/Fehler. Reiner RuneLite-Selbsttest und Windows-OCR-Fixtures
+  lokal erfolgreich; tatsächliche Positionsprobe fehlgeschlagen wie oben.
+  Vollständige Regression und CI-Ergebnis im zugehörigen Merge/PR prüfen.
+
+Windows/.NET-10-Befehle aus dem Repo:
+
+```powershell
+dotnet build native/OSRSLiveDiagnostics.csproj -c Release
+dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --self-test
+dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --ocr-self-test
+dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --runelite-position-probe
+dotnet run --project native/OSRSLiveDiagnostics.csproj -c Release --no-build -- --navigation-self-test
+```
+
+Auf diesem Rechner liegt das SDK zusätzlich als `../dotnet/dotnet.exe` relativ
+zum Repo. Das Repository selbst liegt lokal in `work/osrslive` unter dem
+Workspace vom 25.10.; Build-Ausgaben in `native/bin` sind ignoriert.
+
+## Nächster sinnvoller Schritt
+
+Zuerst die **Positionsquelle** abschließen, bevor weitere Bot-Aktionen portiert
+werden. Prüfen, ob eine regulär verfügbare strukturierte Quelle besser geeignet
+ist als erneut mehr OCR-Heuristik. Der reguläre Launcher lädt private Plugins
+nicht einfach durch `--developer-mode`; dieses Experiment nicht wiederholen.
+HTTP API wurde bereits geprüft: `/stats`, `/inv`, `/equip`, keine Position.
+Alte Hinweise auf Morg HTTP Client belegen keine aktuelle Hub-Verfügbarkeit.
+
+Wenn die Overlay-Quelle fortgesetzt wird: eine lesbare, stabile Panelgeometrie
+herstellen und echte Ziffern einschließlich Ebene unabhängig verifizieren.
+Danach Stillstand, manuelle Bewegung, Ebenenwechsel, Logout, Fensterwechsel,
+Instanzen und widersprüchliche Daten testen. Anschließend Charakter/Welt/F2P-
+Zustand sowie Projektions- und Eingabegeometrie an dieselbe RuneLite-Sitzung
+binden. Erst danach einen einzelnen bounded Trainingsauftrag testen.
+
+## Weitere Unterlagen
+
+- [Plugin-Prüfung](RUNELITE-PLUGIN-PRUEFUNG-2026-10-27.md): 2.810 Hub-Einträge
+  und 131 eingebaute Plugins, Metadaten-Screening mit näher geprüfter Auswahl.
+  Keine Behauptung einer vollständigen manuellen Quellcodeprüfung aller Plugins.
+- [Migration](RUNELITE-MIGRATION-2026-10-27.md), [offene Fehler](AKTUELLE-FEHLER.md).
+- Suchbare HTML-/CSV-Kataloge in `docs/plugin-review/`; reproduzierbar durch
+  `python tools/review_runelite_catalog.py`.
+- Der verworfene private Java-/Entwicklungsprototyp liegt nur lokal außerhalb
+  des Repos in `work/runelite-development-prototype-archived`. Er ist keine
+  Laufzeitabhängigkeit und darf nicht als aktuelle Lösung ausgeliefert werden.
+
+Windows-Bedienung über den verfügbaren Computer-Use-Skill; frische Fenster-
+beobachtung vor Aktionen, bei Benutzereingaben neu erfassen. Den Skill vor
+Fortsetzung lesen. Nie Authentifizierung selbst bedienen oder Screenshots/
+Zugangsdaten zur Übergabe ins Repo schreiben.

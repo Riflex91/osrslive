@@ -949,6 +949,7 @@ internal sealed class VisualStartup:IDisposable
                 return 2;
             }
             await WorldMapTests.OcrFixture(engine);
+            await RuneLitePositionTests.OcrFixture(engine);
             await WorldGridOcr.OcrFixture(engine);
             using var bitmap=new Bitmap(1000,400);
             using(var g=Graphics.FromImage(bitmap))
