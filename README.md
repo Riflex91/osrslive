@@ -1,4 +1,19 @@
-# OSRS Play 1.8.10 – RuneLite-Companion mit vollständiger Pixel-Diagnose
+# OSRS Play 1.8.11 – RuneLite-Companion mit abgesicherten OCR-Feldern
+
+**Neu in 1.8.11 – HUD-/Tooltiptext neben Chunk- und Region-IDs:**
+Der 1.8.10-Live-Test bestätigt die automatische Installation und die
+**vollständigen** Pixelprotokolle einschließlich Ergebnisfeldern.
+Neue OCR-Proben zeigen aber, dass Tooltiptexte wie `Pot (GE: 12 gp)`
+manchmal in dieselbe Zeile wie `Region ID 12593` oder `Chunk ID 807311`
+geraten. Der Feldquorum-Parser akzeptiert nun die feste, exakt sechs-
+bzw. fünfstellige ID auch mit **durch Leerraum getrenntem Suffix**;
+aneinanderhängende weitere Ziffern, widersprüchliche ID-Quoren,
+falsche Chunk-/Region-Checksummen und nicht bestätigte Pixel werden
+weiterhin abgelehnt. Separate Diagnosezähler
+`chunk_ignored_suffixes`/`region_ignored_suffixes` dokumentieren
+jede solche Toleranz. Ein neuer synthetischer Test reproduziert die
+echte Probe 3152/3197 und prüft widersprüchliche Präfixe.
+Automatische RuneLite-Spielaktionen bleiben gesperrt.
 
 **Neu in 1.8.10 – vollständige statt abgeschnittene Diagnosezeilen:**
 Der echte 1.8.9-Live-Test hat die automatische Installation bestätigt und

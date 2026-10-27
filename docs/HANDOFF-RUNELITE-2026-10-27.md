@@ -1,4 +1,44 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.10
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.11
+
+## Neue OCR-Zeilenverschmelzung durch andere HUD-Texte (1.8.11)
+
+Das neue 1.8.10-Live-Protokoll vom 27.10.2026, 21:45–21:46
+(Europe/Berlin) zeigt den erfolgreich automatisch installierten
+`build_channel=push`-Build `40580390362` mit Version 1.8.10.
+Die Manifest- und Release-API melden 1.8.10/`ALREADY_CURRENT`.
+**Keine** `RUNELITE_PIXEL`-Zeile ist mehr nach 480 Zeichen abgeschnitten:
+Beispielsweise Probe 1 enthält nun `full_matches=0`,
+`distinct_positions=0`, `elapsed_ms=41`, `result=NOT_RELEASED`.
+Unabhängig bestätigte Positionen bei manueller Bewegung waren
+3151/3198, 3153/3197, 3158/3202, 3155/3198 und 3144/3195,
+jeweils Ebene 0. Einmalig sichtbare unbekannte Startglyphen und
+unlesbare `315Ø` statt `3150` bleiben vorsichtig gesperrt.
+
+**Neues konkretes Problem bei Probe 43/44:** Zusätzliches
+RuneLite-Spiel-/Tooltip-OCR `Pot (GE: 12 gp)` liegt in derselben
+OCR-Zeile wie die Grid-Info-Felder. Es entstanden u. a.
+`Region ID 12593 12`, `Region ID 12593 Pot (GE: 12 gp)`
+und später `Chunk ID 805263 12`. Die bestehenden
+`^Region ID (\\d{5})$`-/`^Chunk ID (\\d{6})$`-Feldregexe
+verwerfen solche Zeilen vollständig; obwohl das X/Y-Feld und
+die unveränderte echte ID mehrfach stimmen, ergibt
+`FIELD_QUORUM result=NOT_READY` mit `region_readings=0` oder
+`chunk_readings=0`. Das ist ein Verlust von Prüfmaterial,
+**kein Nachweis einer falschen Position**.
+
+1.8.11 erlaubt deshalb **ausschließlich im Feldquorum**, nach genau
+sechs Chunk- bzw. fünf Region-Ziffern einen durch Whitespace klar
+abgesetzten fremden OCR-Suffix. Direkt nachfolgende zusätzliche Ziffern
+(`1259312` statt `12593 12`) bleiben ungültig. Die beiden ID-Felder
+müssen weiter je mindestens zwei passende OCR-Stimmen haben,
+rechnerisch zu X/Y passen und gegen reale Glyphen, Kommas und
+Ebene derselben Aufnahme sowie eine zweite unabhängige Aufnahme
+bestätigt werden. Konkurrierende Quoren oder fehlende Pixelsicht
+blockieren weiterhin. Die neue Diagnose protokolliert
+`chunk_ignored_suffixes`/`region_ignored_suffixes`, und synthetische
+Regressionen reproduzieren Tooltip-Suffixe, prüfsummengeprüften
+Rasterbeweis, ungetrennte Extraziffern und widersprüchliche IDs.
+**Noch kein echter 1.8.11-Live-Test.**
 
 ## Live-Bewegung bestätigt; Pixel-Diagnose nach 480 Zeichen gekappt (1.8.10)
 

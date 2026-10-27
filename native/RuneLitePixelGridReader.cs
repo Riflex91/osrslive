@@ -98,21 +98,30 @@ internal static class RuneLitePixelGridReader
     {
         var xy=new List<(int X,int Y)>();var chunks=new List<string>();
         var regions=new List<string>();
+        int chunkSuffixes=0,regionSuffixes=0;
         foreach(var pass in passes)
         {
             var rows=pass.Select(s=>s.Trim()).ToArray();
             var tile=rows.Select(s=>Regex.Match(s,
                 @"^Tile\s*:?\s*(\d{4})\D{1,4}(\d{4})(?:\D.*)?$",RegexOptions.IgnoreCase))
                 .Where(m=>m.Success).ToArray();
+            // RuneLite occasionally places a separate game tooltip to the
+            // right of a Grid Info row. Windows OCR joins them into one text
+            // line: "Region ID 12593 Pot (GE: 12 gp)" or even "... 12".
+            // Extract ONLY the fixed-width printed ID when any suffix is
+            // separated by whitespace. Never shorten an adjacent longer ID
+            // ("1259312"), repair glyphs, or skip the checksum/pixel gates.
             var chunk=rows.Select(s=>Regex.Match(s,
-                @"^Chunk\s+ID\s*:?\s*(\d{6})$",RegexOptions.IgnoreCase))
+                @"^Chunk\s+ID\s*:?\s*(\d{6})(?<suffix>\s+\S.*)?$",RegexOptions.IgnoreCase))
                 .Where(m=>m.Success).ToArray();
             var region=rows.Select(s=>Regex.Match(s,
-                @"^Region\s+ID\s*:?\s*(\d{5})$",RegexOptions.IgnoreCase))
+                @"^Region\s+ID\s*:?\s*(\d{5})(?<suffix>\s+\S.*)?$",RegexOptions.IgnoreCase))
                 .Where(m=>m.Success).ToArray();
             if(tile.Length==1)xy.Add((int.Parse(tile[0].Groups[1].Value),int.Parse(tile[0].Groups[2].Value)));
-            if(chunk.Length==1)chunks.Add(chunk[0].Groups[1].Value);
-            if(region.Length==1)regions.Add(region[0].Groups[1].Value);
+            if(chunk.Length==1)
+            {chunks.Add(chunk[0].Groups[1].Value);if(chunk[0].Groups["suffix"].Success)chunkSuffixes++;}
+            if(region.Length==1)
+            {regions.Add(region[0].Groups[1].Value);if(region[0].Groups["suffix"].Success)regionSuffixes++;}
         }
         var xyGroups=xy.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
         var chunkGroups=chunks.GroupBy(v=>v).Where(g=>g.Count()>=2).ToArray();
@@ -121,6 +130,7 @@ internal static class RuneLitePixelGridReader
         {
             diagnostic=$"stage=FIELD_QUORUM result=NOT_READY passes={passes.Count} "+
                 $"xy_readings={xy.Count} chunk_readings={chunks.Count} region_readings={regions.Count} "+
+                $"chunk_ignored_suffixes={chunkSuffixes} region_ignored_suffixes={regionSuffixes} "+
                 $"xy_quorums={xyGroups.Length} chunk_quorums={chunkGroups.Length} region_quorums={regionGroups.Length}";
             return null;
         }
@@ -131,7 +141,8 @@ internal static class RuneLitePixelGridReader
         {
             diagnostic=$"stage=FIELD_QUORUM result=CHECKSUM_REJECTED passes={passes.Count} "+
                 $"xy_votes={xyGroups[0].Count()} chunk_votes={chunkGroups[0].Count()} "+
-                $"region_votes={regionGroups[0].Count()}";
+                $"region_votes={regionGroups[0].Count()} "+
+                $"chunk_ignored_suffixes={chunkSuffixes} region_ignored_suffixes={regionSuffixes}";
             return null;
         }
         int outliers=xy.Count-xyGroups[0].Count()+chunks.Count-chunkGroups[0].Count()+
@@ -140,7 +151,8 @@ internal static class RuneLitePixelGridReader
             xyGroups[0].Count(),chunkGroups[0].Count(),regionGroups[0].Count(),outliers);
         diagnostic=$"stage=FIELD_QUORUM result=CHECKSUM_VERIFIED passes={passes.Count} "+
             $"xy_votes={result.XYVotes} chunk_votes={result.ChunkVotes} "+
-            $"region_votes={result.RegionVotes} rejected_field_outliers={outliers}";
+            $"region_votes={result.RegionVotes} rejected_field_outliers={outliers} "+
+            $"chunk_ignored_suffixes={chunkSuffixes} region_ignored_suffixes={regionSuffixes}";
         return result;
     }
 
