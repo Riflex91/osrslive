@@ -474,6 +474,88 @@ internal static class RuneLitePixelGridReaderTests
         Require(RuneLitePixelGridReader.ReadIdQuorum(wrongChunkMultiXY,out string wrongChunkDiag) is null&&
                 wrongChunkDiag.Contains("SINGLE_XY_CHECKSUM_REJECTED"),
             "same-region but wrong Chunk may not be rescued by repeated XY OCR guesses");
+        // The real 1.8.16 live log (samples 32-62) loses position around
+        // 3155/3186. All four Tile OCR passes and both numeric Chunk passes
+        // agree, but the ID lines do not contain digit '6'. Before an
+        // independently exported client position exists, the unknown
+        // singleton must remain rejected; a corroborated official-client
+        // position may identify the *visible* '6' glyph without guessing it.
+        string[][] exportedPasses=
+        [
+            ["Tile3155» 3186» o","Chunk ID 807310","Region ID 12593"],
+            ["Tile3155» 3186» o","Chunk ID 807310","Region ID 12593"],
+            ["Tile3155, 3186, Ø","Chunk ID 8ø731ø","Region ID 12593"],
+            ["Tile3155, 3186, Ø","Chunk ID 8ø731ø","Region ID 12593"]
+        ];
+        var exportedTile=RuneLiteGridReader.Parse(new[]{
+            "Tile 3155, 3186, 0","Chunk ID 807310","Region ID 12593"});
+        string corroboration="export candidate not available";
+        Require(exportedTile is not null&&
+                RuneLitePixelGridReader.CorroborateClientExport(exportedPasses,
+                    exportedTile,out corroboration)&&
+                corroboration.Contains("xy_votes=4")&&
+                corroboration.Contains("region_votes=4"),
+            "the already-approved RuneLite Plugin Hub coordinate must match independent live screen text: "+corroboration);
+        using(var stoppedBitmap=Fixture(tileX:3155,tileY:3186))
+        {
+            var usual=RuneLitePixelGridReader.ReadFieldQuorum(exportedPasses,out _);
+            string usualDiagnostic="field quorum not available";
+            Require(usual is not null&&RuneLitePixelGridReader.Read(stoppedBitmap,
+                Array.Empty<RuneLitePixelGridReader.Observation>(),out usualDiagnostic,
+                fieldQuorum:usual) is null&&
+                usualDiagnostic.Contains("unknown_singleton_rejects=")&&
+                !usualDiagnostic.Contains("unknown_singleton_rejects=0 "),
+                "without an independently exported value, digit 6 remains unlabelled: "+usualDiagnostic);
+            IReadOnlyList<RuneLitePixelGridReader.GlyphSnapshot>? trained=null;
+            var fromExport=RuneLitePixelGridReader.Read(stoppedBitmap,
+                Array.Empty<RuneLitePixelGridReader.Observation>(),out string exportPixelDiagnostic,
+                onVerified:snapshots=>trained=snapshots,clientExport:exportedTile);
+            Require(fromExport==exportedTile&&
+                    exportPixelDiagnostic.Contains("CLIENT_EXPORT_PLUS_SCREEN_PIXELS")&&
+                    exportPixelDiagnostic.Contains("client_export_labelled_glyphs=")&&
+                    !exportPixelDiagnostic.Contains("client_export_labelled_glyphs=0 ")&&
+                    exportPixelDiagnostic.Contains("PIXEL_GRID_VERIFIED")&&
+                    trained is {Count:>0},
+                "the client-provided coordinate labels a real unique pixel glyph while proving all ID digits: "+exportPixelDiagnostic);
+            bool wrongXY=RuneLitePixelGridReader.CorroborateClientExport(
+                exportedPasses.Select((p,i)=>i==3?
+                    new[]{"Tile3156, 3186, Ø",p[1],p[2]}:p).ToArray(),
+                exportedTile,out string wrongXYDiag);
+            Require(!wrongXY&&wrongXYDiag.Contains("NOT_CORROBORATED"),
+                "even one conflicting numeric XY reading must veto old exported positions");
+            var wrongRegion=exportedPasses.Select(p=>p.ToArray()).ToArray();
+            wrongRegion[3][2]="Region ID 12594";
+            Require(!RuneLitePixelGridReader.CorroborateClientExport(wrongRegion,
+                    exportedTile,out _),
+                "even one conflicting Region ID must veto the old client coordinate");
+            var wrongChunk=exportedPasses.Select(p=>p.ToArray()).ToArray();
+            wrongChunk[2][1]="Chunk ID 807311";
+            Require(!RuneLitePixelGridReader.CorroborateClientExport(wrongChunk,
+                    exportedTile,out _),
+                "a full mismatching Chunk ID must veto the export even if other Chunk rows are damaged");
+            var wrongPlane=exportedTile with{Tile=new WorldTile(3155,3186,2)};
+            Require(RuneLitePixelGridReader.Read(stoppedBitmap,
+                    Array.Empty<RuneLitePixelGridReader.Observation>(),out _,
+                    clientExport:wrongPlane) is null,
+                "the export may never invent a different floor without same-frame floor pixels");
+            var storedHistory=new RuneLitePixelGridReader.ConfirmedGlyphHistory();
+            var at=new DateTimeOffset(2026,10,28,14,0,0,TimeSpan.Zero);
+            storedHistory.Confirm(trained!,at);
+            storedHistory.Confirm(trained!,at.AddSeconds(1));
+            var twoReadings=new[]{new RuneLitePixelGridReader.Observation("807310","12593",3155,3186),
+                new RuneLitePixelGridReader.Observation("807310","12593",3155,3186)};
+            Require(RuneLitePixelGridReader.Read(stoppedBitmap,twoReadings,
+                    out string afterTraining,history:storedHistory)==exportedTile&&
+                    afterTraining.Contains("historical_glyph_matches=")&&
+                    !afterTraining.Contains("historical_glyph_matches=0 "),
+                "a twice confirmed client-labelled glyph can aid future OCR-only frames: "+afterTraining);
+            for(int dy=0;dy<11;dy++)for(int dx=0;dx<7;dx++)
+                stoppedBitmap.SetPixel(7+14*7+dx,13+dy,Color.FromArgb(21,26,32));
+            Require(RuneLitePixelGridReader.Read(stoppedBitmap,
+                    Array.Empty<RuneLitePixelGridReader.Observation>(),out _,
+                    clientExport:exportedTile) is null,
+                "even a direct RuneLite coordinate cannot excuse a missing real comma on the screen");
+        }
         var incorrectIds=damagedXY.Select(a=>a.ToArray()).ToArray();
         foreach(var pass in incorrectIds)pass[2]="Region ID 12594";
         Require(RuneLitePixelGridReader.ReadIdQuorum(incorrectIds,out string wrongIdDiagnostic) is null&&

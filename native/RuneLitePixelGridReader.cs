@@ -250,16 +250,63 @@ internal static class RuneLitePixelGridReader
             xyReadings.Count);
     }
 
+    // A previously exported RuneLite-client coordinate is not inferred from
+    // OCR. When its change-only JSON file is old, however, require live
+    // independent screen corroboration BEFORE consulting bitmap glyphs.
+    // Incomplete numeric Chunk OCR is allowed, but any conflicting complete
+    // field vetoes the export. The plane is verified from a real pixel glyph.
+    internal static bool CorroborateClientExport(IReadOnlyList<string[]> passes,
+        RuneLiteGridEvidence exported,out string diagnostic)
+    {
+        int tileLabels=0;
+        var xy=new List<(int X,int Y)>();
+        var chunks=new List<int>();var regions=new List<int>();
+        foreach(var pass in passes)
+        {
+            var rows=pass.Select(s=>s.Trim()).ToArray();
+            if(rows.Any(s=>Regex.IsMatch(s,@"^Tile\s*:?\s*",RegexOptions.IgnoreCase)))tileLabels++;
+            var t=rows.Select(s=>Regex.Match(s,
+                @"^Tile\s*:?\s*(\d{4})\D{1,4}(\d{4})(?:\D.*)?$",RegexOptions.IgnoreCase))
+                .Where(m=>m.Success).ToArray();
+            var c=rows.Select(s=>Regex.Match(s,
+                @"^Chunk\s+ID\s*:?\s*(\d{6})(?:\s+\S.*)?$",RegexOptions.IgnoreCase))
+                .Where(m=>m.Success).ToArray();
+            var r=rows.Select(s=>Regex.Match(s,
+                @"^Region\s+ID\s*:?\s*(\d{5})(?:\s+\S.*)?$",RegexOptions.IgnoreCase))
+                .Where(m=>m.Success).ToArray();
+            if(t.Length==1)xy.Add((int.Parse(t[0].Groups[1].Value),
+                int.Parse(t[0].Groups[2].Value)));
+            if(c.Length==1)chunks.Add(int.Parse(c[0].Groups[1].Value));
+            if(r.Length==1)regions.Add(int.Parse(r[0].Groups[1].Value));
+        }
+        bool valid=passes.Count>=3&&tileLabels>=3&&xy.Count>=3&&regions.Count>=3&&
+            xy.All(p=>p==(exported.Tile.X,exported.Tile.Y))&&
+            chunks.All(id=>id==exported.ChunkId)&&regions.All(id=>id==exported.RegionId);
+        diagnostic=$"stage=POSITION_EXPORT_SCREEN_CROSSCHECK result={(valid?"OCR_CORROBORATED":"NOT_CORROBORATED")} "+
+            $"passes={passes.Count} tile_labels={tileLabels} xy_votes={xy.Count} "+
+            $"chunk_votes={chunks.Count} region_votes={regions.Count} "+
+            $"distinct_xy={xy.Distinct().Count()} distinct_chunk_ids={chunks.Distinct().Count()} "+
+            $"distinct_region_ids={regions.Distinct().Count()} all_numeric_fields_match_export={valid} "+
+            "source=OFFICIAL_PLUGIN_HUB_POSITION_JSON no_coordinate_guessing=true";
+        return valid;
+    }
+
     internal static RuneLiteGridEvidence? Read(Bitmap bitmap,IReadOnlyList<Observation> observations,
         out string diagnostic,FieldQuorum? fieldQuorum=null,
         ConfirmedGlyphHistory? history=null,Action<IReadOnlyList<GlyphSnapshot>>? onVerified=null,
-        IdQuorum? idQuorum=null)
+        IdQuorum? idQuorum=null,RuneLiteGridEvidence? clientExport=null)
     {
         var elapsed=Stopwatch.StartNew();
         var agreed=observations.GroupBy(o=>o).Where(g=>g.Count()>=2).Select(g=>g.Key).ToArray();
         Observation expected;
         (int X,int Y)[] tileCandidates;
-        if(fieldQuorum is FieldQuorum quorum)
+        if(clientExport is RuneLiteGridEvidence external)
+        {
+            expected=new Observation(external.ChunkId.ToString("D6"),
+                external.RegionId.ToString("D5"),external.Tile.X,external.Tile.Y);
+            tileCandidates=[(expected.X,expected.Y)];
+        }
+        else if(fieldQuorum is FieldQuorum quorum)
         {
             expected=quorum.Data;
             // A conflicting complete, mathematically valid observation is
@@ -321,7 +368,7 @@ internal static class RuneLitePixelGridReader
         int commaCandidates=0,idCandidates=0,matched=0;
         int unknownTileDigits=0,uniqueRepeatedDigitLayouts=0,unknownSingletonRejects=0;
         int historicalGlyphMatches=0,historicalContradictions=0;
-        int idOnlyUnlabelledRejects=0;
+        int idOnlyUnlabelledRejects=0,clientExportLabelledGlyphs=0;
         var accepted=new HashSet<RuneLiteGridEvidence>();
         var acceptedSnapshots=new List<GlyphSnapshot>();
         for(int oy=0;oy<=height-(2*RowPitch+Height);oy++)
@@ -410,7 +457,11 @@ internal static class RuneLitePixelGridReader
             if(unknown.Count>0)
             {
                 unknownTileDigits+=unknown.Count;
-                if(unknown.Values.Any(v=>v.Repetitions<2))
+                // For the ordinary OCR route, an unlabelled singleton is a
+                // guess and MUST stay rejected. An exact independently
+                // exported RuneLite API coordinate labels that glyph, but
+                // it must still be genuinely present and distinct in pixels.
+                if(clientExport is null&&unknown.Values.Any(v=>v.Repetitions<2))
                 {unknownSingletonRejects++;continue;}
                 var unique=unknown.ToArray();
                 for(int i=0;i<unique.Length&&digitsValid;i++)
@@ -420,8 +471,13 @@ internal static class RuneLitePixelGridReader
                     for(int j=i+1;j<unique.Length;j++)
                         if(unique[i].Value.Raster.Distance(unique[j].Value.Raster)<5)digitsValid=false;
                 }
-                if(!digitsValid)continue;
+            if(!digitsValid)continue;
                 uniqueRepeatedDigitLayouts++;
+            if(clientExport is not null)
+            {
+                clientExportLabelledGlyphs+=unknown.Count;
+                foreach(var pair in unknown)reference[pair.Key]=pair.Value.Raster;
+            }
             }
             // The floor is never inferred from the OCR's 'o'/'Ø'. It still
             // requires an actual same-frame digit template from an ID line.
@@ -436,6 +492,9 @@ internal static class RuneLitePixelGridReader
             }
             int plane=floorDigit-'0';
             if(floorBest>2||floorSecond-floorBest<5||plane is <0 or >3)continue;
+            // The JSON export also labels the plane. An old export may be
+            // correct for X/Y but belong to a different floor; reject it.
+            if(clientExport is not null&&plane!=clientExport.Tile.Plane)continue;
             int x=tileX,y=tileY;
             var evidence=RuneLiteGridReader.Parse(new[]{
                 $"Tile {x}, {y}, {plane}",$"Chunk ID {expected.Chunk}",$"Region ID {expected.Region}"});
@@ -461,7 +520,7 @@ internal static class RuneLitePixelGridReader
         diagnostic=$"attempted=true mode=MONO7X11 threshold={WhiteThreshold} "+
             $"roi={width}x{height} bright_pixels={brightPixels} "+
             $"ocr_agreements={ocrAgreements} "+
-            $"evidence_source={(idQuorum is not null?"ID_ONLY_PIXEL_ENUMERATION":fieldQuorum is null?"FULL_OBSERVATIONS":"FIELD_QUORUM")} "+
+            $"evidence_source={(clientExport is not null?"CLIENT_EXPORT_PLUS_SCREEN_PIXELS":idQuorum is not null?"ID_ONLY_PIXEL_ENUMERATION":fieldQuorum is null?"FULL_OBSERVATIONS":"FIELD_QUORUM")} "+
             $"tile_candidates={tileCandidates.Length} "+
             $"id_xy_votes={idQuorum?.XYVotes??0} "+
             $"field_xy_votes={fieldQuorum?.XYVotes??0} field_chunk_votes={fieldQuorum?.ChunkVotes??0} "+
@@ -470,6 +529,7 @@ internal static class RuneLitePixelGridReader
             $"empty_separator_pairs={emptySeparators} comma_layouts={commaCandidates} "+
             $"digit_templates={idCandidates} unknown_tile_digits={unknownTileDigits} "+
             $"unknown_singleton_rejects={unknownSingletonRejects} repeated_unknown_layouts={uniqueRepeatedDigitLayouts} "+
+            $"client_export_labelled_glyphs={clientExportLabelledGlyphs} "+
             $"id_only_unlabelled_rejects={idOnlyUnlabelledRejects} "+
             $"single_xy_matches_pixels={loneXYMatchesPixels} "+
             $"historical_glyph_matches={historicalGlyphMatches} historical_contradictions={historicalContradictions} "+

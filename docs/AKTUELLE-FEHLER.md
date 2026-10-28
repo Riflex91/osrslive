@@ -1,4 +1,34 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.16
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.17
+
+**1.8.17 – bestätigter OCR-Ausfall trotz erfolgreichem 1.8.16-Fix:**
+Das echte 1.8.16-Live-Protokoll bestätigt siebenmal die neue
+Ein-Chunk-Route, acht erfolgreiche ID-Pixelprüfungen und 13
+zweifach bestätigte Positionsaufnahmen. Danach bleibt die Position
+ab Probe 26 unzuverlässig: Einmal sind sämtliche Chunk-OCR-Werte
+unvollständig, danach fehlt am Ort 3155/3186/0 eine unabhängige
+Pixelvorlage für die nur einmal vorkommende Ziffer `6`. Weder
+vier X/Y- noch vier Region-Stimmen reichen bisher allein aus.
+Die beabsichtigten roten Warnungen und Clipboard-Kopien
+funktionieren auch bei `POSITION_NOT_CONFIRMED_TIMEOUT`.
+
+Ein offizieller RuneLite-Plugin-Hub-Export ist gefunden:
+`Gorsokk/position-exporter` schreibt beim Tilewechsel einen
+`position.json`-Snapshot aus der **echten RuneLite-API** lokal,
+ohne eigenen Client oder Netzwerkübertragung. 1.8.17 ergänzt
+eine optionale lesende Schnittstelle; bei frischem Export wird
+die Position mit Original-Checksummen, genauem Window-Title-Match
+und zwei WGC-Bildern bestätigt. Ältere Exporte benötigen aktuelle
+eindeutig passende OCR und reale Pixelmuster, darunter Ebene und
+Kommas. Erst damit darf der vom Client benannte Glyph `6` als
+echte historische Ziffernvorgabe gelernt werden. Andere
+Accountdateien, veraltete Werte ohne live sichtbare Bestätigung,
+falsche Checksummen und fehlende Fensterbilder werden abgelehnt.
+
+**Noch offen:** Ein bestätigter echter Live-Test mit installiertem
+`OSRS Toolkit Exporter`; das Plugin muss der Benutzer im offiziellen
+RuneLite Plugin Hub installieren und alle unnötigen Exporte
+deaktivieren. Ohne Plugin bleibt das bisherige vorsichtige OCR.
+Auf Spielautomation wird weiterhin ausdrücklich verzichtet.
 
 **1.8.16 – mehrfach erkannte X/Y-Werte bei einzelner Chunk-ID:**
 Das echte 1.8.15-Protokoll (27.10.2026, 23:11–23:12 Uhr)
