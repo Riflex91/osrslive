@@ -32,6 +32,12 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   1.8.28 erlaubt bis zu zwei eng begrenzte Vorwärtsabweichungen von
   einer Kachel vom genauen A*-Prefix, nur nach früherem Plugin-
   Fortschritt und mit erneuter Kollisionsplanung. Die strikte
+  neue 1.8.28-Liveprobe zeigte jedoch bis zu vier Kacheln pro
+  API-Beobachtung und mehrere falsche Off-Path-Stopps; 1.8.29
+  beobachtet einen maximal zwei Kacheln breiten und nur näher zum
+  Wegpunkt führenden Korridor, ohne bei jedem Zwischenereignis
+  erneut zu klicken. Es protokolliert jedes Klick-Prefix.
+  Die strikte
   `RUNELITE_FOREGROUND_LOST`-Sperre bleibt bestehen. Alle Schritte
   und Grenzen stehen
   in der Übergabe; keine automatische Konto-/Loginbedienung.

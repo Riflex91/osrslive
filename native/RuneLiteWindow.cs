@@ -518,7 +518,11 @@ internal sealed class RuneLiteWindow:Form
                     "north_up_confirmed_by_user=true minimap_reset_rightclick_dispatched=true "+
                     "first_calibrated_click_last_known_api_max_age_s=60 first_click_window_s=12 "+
                     "later_clicks_require_event_age_s_at_most=3 "+
-                    "click_limit=40 corridor_replan_limit=2 runtime_limit_s=300 verify_each_waypoint=true "+
+                    $"click_limit=40 corridor_replan_limit={RuneLiteAutoWalk.MaxCorridorReplans} "+
+                    $"corridor_samples_per_click={RuneLiteAutoWalk.MaxCorridorSamplesPerClick} "+
+                    $"api_tile_jump_limit={RuneLiteAutoWalk.MaxObservedTileJump} "+
+                    $"corridor_distance_limit={RuneLiteAutoWalk.MaxCorridorDistance} "+
+                    "runtime_limit_s=300 verify_each_waypoint=true "+
                     $"marker_selection_method={setup.SelectionSource} expected_minimap_scale=4 "+
                     "foreground_mouse_consent=true sendinput_not_postmessage=true "+
                     "source=PLUGIN_API no_screenshot_saved=true");
@@ -592,6 +596,7 @@ internal sealed class RuneLiteWindow:Form
             $"command={autoWalk.Clicks} target={goal.Id.Replace(' ','_')} "+
             $"from={tile.X},{tile.Y},{tile.Plane} waypoint={plan.Waypoint.X},{plan.Waypoint.Y},{plan.Waypoint.Plane} "+
             $"waypoint_index={plan.WaypointIndex} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
+            $"collision_prefix={string.Join(";",plan.PathPrefix.Select(p=>$"{p.X},{p.Y},{p.Plane}"))} "+
             $"api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"manually_calibrated_first_click={manuallyAttestedFirstClick.ToString().ToLowerInvariant()} "+
             "transport=SENDINPUT_FOREGROUND_ONLY input_not_yet_verified=true screenshot_position_estimation=false");
@@ -643,7 +648,8 @@ internal sealed class RuneLiteWindow:Form
         log.Add(failed?Severity.WARN:Severity.INFO,"RUNELITE_AUTOWALK",
             failed?"SAFETY_STOP":"STOPPED",diagnostic);
         if(failed)
-            failureLog.ReportFailure("RUNELITE_AUTOWALK",reason,diagnostic);
+            failureLog.ReportFailure("RUNELITE_AUTOWALK",reason,diagnostic,
+                independentUserAttempt:true);
         UpdateDetailText();UpdateFailureBanner();RefreshLogPreview();
     }
 

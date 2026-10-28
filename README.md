@@ -1,4 +1,56 @@
-# OSRS Play 1.8.28 – Sichere Neuplanung bei kleiner RuneLite-Routenabweichung
+# OSRS Play 1.8.29 – Echte Plugin-Bewegung im sicheren Minimap-Korridor verfolgen
+
+## 1.8.29: Große API-Abtastschritte und seitliche Wegabweichungen
+
+Ein neuer, 553 Zeilen langer Live-Test mit OSRS Play 1.8.28 vom
+28.10.2026 (20:50–20:52 Uhr) bestätigt die automatische
+Kalibrierung des weißen Minimap-Spielerpunkts bei **(645,111)**,
+den Minimap-Rechtsklick zum Zoom-Reset und zahlreiche echte
+Positionen nach `SendInput`-Klicks aus dem RuneLite-Plugin.
+Ein Lauf bestätigte drei automatische Klicks und mindestens zwei
+erreichte Wegpunkte; beim dritten Klick bestätigte das Plugin
+`(3241,3197)`, dann `(3240,3198)` als kurze Abweichung.
+Die neue `WAYPOINT_CORRIDOR_REPLAN`-Logik startete sofort einen
+weiteren Klick und stoppte bei `(3239,3200)` erneut, obwohl die
+Figur dem Ziel weiter näher kam. Andere Klicks wurden zu Unrecht
+schon bei der **ersten** neuen Plugin-Kachel angehalten: bis zu
+**vier Kacheln** zwischen zwei Positionsereignissen sind real.
+
+1.8.29 verfolgt deshalb den laufenden Klick, solange alle folgenden
+Kontrollen erfüllt bleiben:
+
+- Eine **neue, zeitlich nach dem Klick** vom Plugin gelieferte
+  Weltposition ist höchstens vier Kacheln von der letzten
+  bestätigten Position entfernt.
+- Jede seitlich vom exakten A*-Prefix abweichende Position liegt
+  höchstens zwei Kacheln vom bevorstehenden Prefix und kommt dem
+  angeklickten Wegpunkt **strikt näher**; Ebene und erlaubte
+  Bewegungsachsen bleiben konsistent.
+- Bis zu vier aufeinanderfolgende Korridorereignisse bestätigen
+  Fortschritt, **ohne** einen zusätzlichen Klick zu senden. Erst
+  der Wegpunkt bzw. maximal fünf solcher Ereignisse erlaubt die
+  nächste *frisch berechnete* Kollisionsroute. Maximal zwei
+  vorzeitige Neuplanungen je bewusster Sitzung.
+- Ein Sprung über vier Kacheln, Rückschritt, entfernte Abweichung,
+  veraltete Pluginmeldung, Focusverlust oder nicht erlaubtes
+  Eingabefenster stoppt die Automatik weiterhin.
+
+Wichtig für die Fehleranalyse: **Jeder gesondert gestartete und
+fehlgeschlagene Autowalk-Versuch** kopiert nun die bis dahin
+vollständige, fortgeschriebene Logdatei erneut, auch wenn
+bereits ein früherer Versuch mit demselben Fehlercode gestoppt
+hat. Unverändert wird eine dauerhaft wiederholte allgemeine
+Fehlermeldung nur einmal kopiert, damit sie die Zwischenablage
+nicht ständig überschreibt.
+
+Die Diagnose protokolliert jetzt für jeden Klick auch alle
+Kollision-Prefix-Kacheln sowie für echte Korridorschritte
+`tile_jump`, `closest_prefix_distance`, Wegpunktabstand,
+Zeitabstände und Zähler. Das Log wird bei Fehlern automatisch
+kopiert und die GUI bleibt rot. **Ein vollständiger Durchlauf
+bis Lumbridge ist weiter nicht live bestätigt.**
+
+## Vorherige Version: 1.8.28 – Enger Korridor mit sofortiger Neuplanung
 
 ## 1.8.28: Echtes Gehen bestätigt, streng begrenzte Korridor-Neuplanung
 
