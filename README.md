@@ -1,4 +1,62 @@
-# OSRS Play 1.8.20 – RuneLite-API-Ereignisse und im Spiel prüfbare Routen
+# OSRS Play 1.8.21 – Live-Routenverlauf, Abweichungen und korrekte Diagonalen
+
+## Neu in 1.8.21: Echte Live-Routen bestätigt, Bewegungsdiagnose präzisiert
+
+Der zweite Nutzer-Live-Lauf von 1.8.20 am 28.10.2026,
+18:20–18:21 Uhr Europe/Berlin bestätigt **zehn** erfolgreiche
+Neuberechnungen einer kollisionsbasierten Lumbridge-Route
+**während** der RuneLite-Charakter tatsächlich lief. Die
+Routenlänge fiel von **92 auf 73** verbleibende Schritte.
+Die Spielposition kam aus dem offiziellen API-Exporter,
+ohne Screenshot-OCR und ohne neue Positionsfehler.
+Die einzige rote Meldung `AUTOMATION_NOT_IMPLEMENTED`
+bezeichnet weiterhin bewusst nicht vorhandene automatische
+Spiel-Eingaben; der Client blieb rein lesend.
+
+Kleine, aber wichtige Diagnosekorrektur: OSRS erlaubt
+**acht benachbarte Felder**, auch diagonale. Ein Wechsel
+`dx=1,dy=-1` wurde bisher wegen der Manhattan-Distanz
+von zwei fälschlich als nicht benachbart protokolliert.
+Ab 1.8.21 verwendet `non_adjacent_observation` die
+**Chebyshev-Distanz** (größere absolute Achsänderung)
+plus Ebenenwechsel. `manhattan_tiles` bleibt als eigene
+Messgröße im Log, neu kommt `chebyshev_tiles` hinzu.
+Der Zeitabstand zwischen echten RuneLite-Exportereignissen
+heißt nun exakt `event_gap_ms` statt irreführend
+`capture_gap_ms`. Regressionstests prüfen eine
+einzelne Diagonale gegen einen echten Zwei-Tile-Sprung.
+
+Die API-Ereignisquelle und die live bestätigte,
+lesende Kollisionsnavigation aus 1.8.20 bleiben unverändert.
+
+**Direkt im Spiel prüfbarer nächster Schritt:** Die GUI führt
+jetzt ein eigenes, pro gewähltem Ziel zurücksetzbares
+`Routenverlauf`-Protokoll. Beim ersten A*-Pfad entsteht ein
+Startpunkt. Bei jedem weiteren **neuen API-Tile-Ereignis**
+vergleicht der Client die gemeldete aktuelle Kachel mit
+der **vorherigen vollständigen Route** und berechnet
+die neue Reststrecke. Er zeigt und protokolliert:
+
+- `ON_PREVIOUS_ROUTE`: Spieler gelangte auf ein Feld des
+  zuvor berechneten Wegs;
+- `OFF_PREVIOUS_ROUTE`: Spieler steht außerhalb des
+  alten Wegs; eine neue Route wird berechnet;
+- Restschritte-Veränderung (näher, weiter oder gleich);
+- `ARRIVED` erst bei einem API-Stand innerhalb des
+  eingestellten Zielradius mit leerer A*-Route;
+- `LEFT_GOAL`, wenn der Charakter das erreichte
+  Ziel wieder verlässt.
+
+Wegen asynchroner Plugin-Ereignisse wird **nie** behauptet,
+dass alle Kacheln zwischen zwei Stichproben durchlaufen
+wurden. Beim Zielwechsel, Pause oder Quellenverlust
+beginnt ein neuer unabhängiger Vergleich. Ein kontrollierter
+Test: Ziel Lumbridge wählen, zunächst auf dem angezeigten
+Weg laufen, dann kurz abweichen, Restschritte und
+`RUNELITE_ROUTE PROGRESS` prüfen. Automatische Spiel-
+Eingaben sind weiterhin nicht aktiviert.
+
+## Vorherige Version: 1.8.20 – API-Ereignisse und Kollisionsroute
 
 ## Neu in 1.8.20: Keine Bildschirmprüfung mehr für RuneLite-Positionen
 

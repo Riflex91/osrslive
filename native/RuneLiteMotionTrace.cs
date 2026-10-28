@@ -48,14 +48,17 @@ internal sealed class RuneLiteMotionTrace
         changes++;
         int dx=tile.X-old.X,dy=tile.Y-old.Y;
         int manhattan=Math.Abs(dx)+Math.Abs(dy);
+        int chebyshev=Math.Max(Math.Abs(dx),Math.Abs(dy));
         int planeDelta=tile.Plane-old.Plane;
-        bool nonAdjacentChange=manhattan>1||planeDelta!=0;
+        // OSRS tiles have eight neighbours. A single diagonal step has
+        // Manhattan distance 2 but Chebyshev distance 1: it is adjacent.
+        bool nonAdjacentChange=chebyshev>1||planeDelta!=0;
         if(nonAdjacentChange)nonAdjacent++;
         return $"result=CHANGED sample={sample} previous_sample={oldSample} "+
             $"from={old.X},{old.Y},{old.Plane} "+
             $"to={tile.X},{tile.Y},{tile.Plane} dx={dx} dy={dy} "+
-            $"plane_delta={planeDelta} manhattan_tiles={manhattan} "+
-            $"sample_gap={sample-oldSample} capture_gap_ms={(capturedAt-oldFrame).TotalMilliseconds:0} "+
+            $"plane_delta={planeDelta} manhattan_tiles={manhattan} chebyshev_tiles={chebyshev} "+
+            $"sample_gap={sample-oldSample} event_gap_ms={(capturedAt-oldFrame).TotalMilliseconds:0} "+
             $"non_adjacent_observation={nonAdjacentChange.ToString().ToLowerInvariant()} "+
             "route_between_samples_unknown=true autonomous_input=false";
     }

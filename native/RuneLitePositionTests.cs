@@ -47,9 +47,22 @@ internal static class RuneLitePositionTests
         var movedMotion=motion.Observe(new WorldTile(3142,3212,0),now.AddSeconds(2),6);
         Require(movedMotion is not null&&movedMotion.Contains("dx=1 dy=0")&&
                 movedMotion.Contains("sample_gap=3")&&
-                movedMotion.Contains("capture_gap_ms=1000")&&
+                movedMotion.Contains("event_gap_ms=1000")&&
                 movedMotion.Contains("non_adjacent_observation=false"),
             "adjacent verified movement includes direction and observation latency");
+        var diagonals=new RuneLiteMotionTrace();
+        diagonals.Observe(new(3193,3196,0),now,1);
+        var diagonal=diagonals.Observe(new(3194,3195,0),now.AddMilliseconds(600),2);
+        Require(diagonal is not null&&diagonal.Contains("dx=1 dy=-1")&&
+                diagonal.Contains("manhattan_tiles=2 chebyshev_tiles=1")&&
+                diagonal.Contains("non_adjacent_observation=false")&&
+                diagonals.Statistics==(2,0,1,0),
+            "one diagonal RuneLite API tile change is an adjacent move, not a skipped tile");
+        var diagonalJump=diagonals.Observe(new(3196,3193,0),now.AddMilliseconds(1200),3);
+        Require(diagonalJump is not null&&diagonalJump.Contains("chebyshev_tiles=2")&&
+                diagonalJump.Contains("non_adjacent_observation=true")&&
+                diagonals.Statistics==(3,0,2,1),
+            "a real multi-tile diagonal jump is still reported as non-adjacent");
         var skippedMotion=motion.Observe(new WorldTile(3158,3204,0),now.AddSeconds(3),9);
         Require(skippedMotion is not null&&skippedMotion.Contains("non_adjacent_observation=true")&&
                 skippedMotion.Contains("route_between_samples_unknown=true"),
@@ -71,6 +84,7 @@ internal static class RuneLitePositionTests
         RuneLiteExportSummarySourceTests.Run();
         RuneLiteNavigationAdvisorTests.Run();
         RuneLiteRouteCoachTests.Run();
+        RuneLiteRouteProgressTests.Run();
         Console.WriteLine("RUNELITE GRID PASS: player panel only, chunk/region checks, fresh independent frames, window changes, missing/stale rejection; no game input");
     }
     internal static async Task OcrFixture(OcrEngine engine)
