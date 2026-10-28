@@ -45,7 +45,10 @@ ausgelöst werden. Regressionsprüfungen decken 33s-
 Last-Known-Start, 61s-Ablehnung, abgelaufene 12s-
 Kalibrierung sowie das fortbestehende Verbot weiterer
 Altevent-Klicks ab. Der echte Klick/RuneLite-Java-
-Inputtransport ist weiterhin ungetestet.
+Inputtransport ist weiterhin ungetestet. Ein neuer
+`CLICK_DEFERRED`-Eintrag mit Eventalter und Warte-
+bedingungen macht künftige ausbleibende Eingaben
+im Log ohne Rückschluss aus Eventlücken nachvollziehbar.
 
 ## 1.8.22 – Erster expliziter RuneLite-Bewegungstest
 

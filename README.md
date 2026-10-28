@@ -46,7 +46,10 @@ markieren und zügig bestätigen. Nun sollte ein
 `WINDOW_MESSAGES_POSTED` erscheinen. Erst wenn RuneLite
 wirklich läuft, folgt `PROGRESS_CONFIRMED` beziehungsweise
 `WAYPOINT_CONFIRMED`. Ist keine neue Bewegung sichtbar,
-bitte die kopierte Logdatei schicken. Die Annahme von
+bitte die kopierte Logdatei schicken. Falls der Erstklick
+noch nicht freigegeben werden darf, protokolliert
+`RUNELITE_AUTOWALK CLICK_DEFERRED` explizit das
+Eventalter und die Blockierbedingungen. Die Annahme von
 Fensternachrichten im offiziellen RuneLite ist **noch
 nicht live bestätigt**.
 

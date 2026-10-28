@@ -512,7 +512,18 @@ internal sealed class RuneLiteWindow:Form
             return;
         }
         var now=DateTimeOffset.UtcNow;
-        if(!autoWalk.CanDispatch(now,eventAt))return;
+        if(!autoWalk.CanDispatch(now,eventAt))
+        {
+            var age=eventAt==default?(double?)null:(now-eventAt).TotalMilliseconds;
+            log.Add(Severity.INFO,"RUNELITE_AUTOWALK","CLICK_DEFERRED",
+                $"target={goal.Id.Replace(' ','_')} "+
+                $"api_event_age_ms={(age is null?"none":age.Value.ToString("F0",System.Globalization.CultureInfo.InvariantCulture))} "+
+                $"clicks={autoWalk.Clicks} waiting_for_waypoint={autoWalk.WaitingForMovement} "+
+                "initial_click_calibration_override_max_age_s=60 first_click_window_s=12 "+
+                "later_clicks_require_fresh_api_event_s=3 no_input_sent=true");
+            autoWalkDescription="Automatik: wartet auf freigegebenes Plugin-Ereignis; ggf. eine Kachel bewegen.";
+            return;
+        }
         var geometry=autoWalk.Geometry!;
         if(source.TrustedWindowHandle!=geometry.Window||
             autoWalkWindowTitle!=source.TrustedWindowTitle||
