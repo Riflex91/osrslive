@@ -1,4 +1,37 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.19
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.20
+
+**1.8.20 – neue Architektur nach 1.8.19-Live-Test:**
+1.8.19 wurde am 28.10.2026, 17:56–17:58 Uhr live mit bereits
+installiertem Toolkit Exporter getestet. 44 direkte API-Auswertungen
+und der aktuelle Updater waren gut; aber 89 als `STALE` bezeichnete
+eigentlich normale Positionsereignisse erzeugten 91 OCR-Runden,
+46 nicht lesbare Positionen und zusätzliche Fehlerprotokolle.
+Der Pixel-Fingerprint konnte das nicht zuverlässig abfangen.
+
+**Korrektur:** In der regulären RuneLite-GUI und im Probe-Modus
+werden Koordinaten nur noch aus den verifizierten lokalen
+RuneLite-API-Ereignissen gelesen. Kein WGC/OCR/Pixel-Gate für
+Positionen. Aktuelle Änderungen werden einmalig als Bewegung
+übernommen, ein unveränderter Wert ausdrücklich als
+`API_POSITION_LAST_KNOWN` angezeigt. Ein altes Exportereignis
+beim ersten Programmstart belegt keinen aktuellen Login:
+`API_WAITING_FOR_NEW_EVENT` bittet um einen echten Kachelwechsel.
+Fehlendes Plugin, fremdes Profil, Rückwärts-Zeitstempel und
+inkonsistente Region-Koordinaten bleiben blockiert.
+
+**Offene Grenze:** Der unveränderte offizielle Plugin-Hub-Exporter
+schreibt bei einem Kachelwechsel. Er bietet keinen periodischen
+Liveness-Heartbeat; der letzte Stand allein kann deshalb keine
+fortbestehende Verbindung garantieren. Eine entsprechende Änderung
+des Drittanbieter-Plugins ist nicht durch ein OSRS-Play-EXE-Update
+installierbar.
+
+**Nächster testbarer Schritt:** Aus dem API-Ort und einem frei
+wählbaren F2P-Ziel wird eine Kollisionsroute aus gepinnten
+Skretzo-Daten berechnet. OSRS Play zeigt nächsten Schritt,
+Restlänge, Zielradius bzw. sauber benannte Ablehnungen. Die
+Routenführung ist rein lesend; manuelles Gehen und Nutzer-Live-Test
+stehen noch aus.
 
 **1.8.19 – bekannter Stillstandsfehler des 1.8.18-Live-Tests:**
 Das echte Nutzerprotokoll vom 28.10.2026, 17:33:17–17:34:26 Uhr

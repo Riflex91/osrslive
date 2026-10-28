@@ -1,4 +1,48 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.19
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.20
+
+## 1.8.20 – RuneLite-Eventstream statt OCR und erste Live-Kollisionsroute
+
+Die 1.8.19-Sitzung vom 28.10.2026, 17:56–17:58 Uhr
+bestätigt Version/Updater, 44 direkte API-Positionen, aber
+89 wegen Eventalter falsch als nicht aktuell behandelte
+`position.json`-Lesungen, 91 Vierfach-OCR und
+46 `GRID_INFO_NOT_READABLE`-Positionen. Es wurden nur
+zwei Pixelabdruck-Referenzen angelernt; die neue Methode
+löste den Kernfehler nicht. Ursache laut offiziellem
+Plugin-Quellcode: `onGameTick` exportiert Positionen
+nur bei einem Kachelwechsel (`pos.equals(lastWritten)`).
+
+Ab 1.8.20 benutzt die **normale RuneLite-GUI** ausschließlich
+`RuneLiteApiPositionSource`, auch `--position-probe` hat
+keinen Screenshotzugriff mehr. Die alte OCR-Bibliothek kann
+für isolierte Regressionen verbleiben, ist aber im Companion
+kein Positions-Gate. Der Event-Tracker setzt sich bei
+Fenster-/Titelwechsel, Pause, Profilverlust oder ungültigen
+Zeitstempeln zurück. Beim Start wird ein altes Event aus
+einer möglichen früheren Sitzung nicht als live behandelt,
+sondern ein echter Kachelwechsel verlangt. Ein einmal
+empfangenes Ereignis darf innerhalb der Dateisicherheitsgrenze (24 h) als
+**letzter bekannter API-Stand** gezeigt werden, nie als
+bestätigter Heartbeat. Bewegungslog enthält nur neue
+API-Ereignisse, keine künstlichen wiederholten Frames.
+
+An die Zielauswahl wird `WorldMapData.LoadRoutingOnly` +
+`FindPath` angebunden: nur öffentliches, an konkrete
+Commits gebundenes Kollisions-/Transportmaterial, keine
+Kartenbilder. Die GUI berechnet im Hintergrund pro neuem
+Kachelereignis einen Weg und zeigt die nächste
+begehbare Kachel/Restschritte/Zielradius. Kein Spielinput.
+Test: über den Jagex Launcher RuneLite Profil `auto`
+öffnen, Toolkit Exporter aktiv lassen, OSRS Play starten,
+ggf. ein Feld gehen für frisches Event, Ziel auswählen,
+mehrere Schritte manuell gehen, Restlänge und
+`RUNELITE_ROUTE ROUTE_RECALCULATED` prüfen.
+
+**Noch extern offen:** Ein verlässlicher Heartbeat zur
+Unterscheidung zwischen Stillstand/Plugin-Ausfall oder
+Logout erfordert ein Upgrade des Drittanbieter-Plugins.
+Ein Client-Update allein kann diese Information nicht
+erzeugen. Der echte 1.8.20-Live-Test steht noch aus.
 
 ## 1.8.18 bestätigt – stationäre Positions-Pixel neu sichern (1.8.19)
 

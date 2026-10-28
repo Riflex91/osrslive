@@ -68,8 +68,8 @@ internal static class RuneLitePositionExportSourceTests
             var (old,oldDiagnostic)=RuneLitePositionExportSource.Read(now,
                 "RuneLite – FixtureCharacter",root);
             Require(old is {Fresh:false,Position:{Tile:{X:3155,Y:3186,Plane:0}}}&&
-                    oldDiagnostic.Contains("STALE_REQUIRES_LIVE_SCREEN_CROSSCHECK"),
-                "exporters write only on tile changes: a stationary export needs new visual corroboration");
+                    oldDiagnostic.Contains("LAST_RECORDED_POSITION_EVENT"),
+                "event-based exporter retains its last exact tile without triggering screen OCR");
             File.WriteAllText(path,Json(now.AddDays(-3)));
             File.SetLastWriteTimeUtc(path,now.AddDays(-3).UtcDateTime);
             Require(RuneLitePositionExportSource.Read(now,"RuneLite – FixtureCharacter",root)

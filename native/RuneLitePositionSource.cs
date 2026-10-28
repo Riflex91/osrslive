@@ -325,22 +325,17 @@ internal static class RuneLitePositionProbe
 {
     internal static async Task<int> Run()
     {
-        using var source=new RuneLitePositionSource();
+        using var source=new RuneLiteApiPositionSource();
         bool confirmed=false;
         for(int i=0;i<12;i++)
         {
-            var state=await source.ReadAsync(diagnostic:rows=>
-            {
-                // Only the three plugin labels; never dump arbitrary OCR text.
-                foreach(string row in rows.Where(r=>Regex.IsMatch(r,@"^(Tile|Chunk\s+ID\s|Region\s+ID\s)",RegexOptions.IgnoreCase)))
-                    Console.WriteLine("GRID_OCR "+row);
-            });
+            var state=await source.ReadAsync();
             Console.WriteLine($"RUNELITE_PROBE {i+1} {state.Status}"+
                 (state.Tile is WorldTile t?$" x={t.X} y={t.Y} plane={t.Plane}":""));
             confirmed|=state.Tile is not null;
             await Task.Delay(800);
         }
-        Console.WriteLine("RUNELITE_PROBE no game input; no screenshots persisted");
+        Console.WriteLine("RUNELITE_PROBE plugin API events only; no captures, OCR or game input");
         return confirmed?0:2;
     }
 }
