@@ -489,17 +489,19 @@ internal static class RuneLitePixelGridReaderTests
         ];
         var exportedTile=RuneLiteGridReader.Parse(new[]{
             "Tile 3155, 3186, 0","Chunk ID 807310","Region ID 12593"});
+        string corroboration="export candidate not available";
         Require(exportedTile is not null&&
                 RuneLitePixelGridReader.CorroborateClientExport(exportedPasses,
-                    exportedTile,out string corroboration)&&
+                    exportedTile,out corroboration)&&
                 corroboration.Contains("xy_votes=4")&&
                 corroboration.Contains("region_votes=4"),
             "the already-approved RuneLite Plugin Hub coordinate must match independent live screen text: "+corroboration);
         using(var stoppedBitmap=Fixture(tileX:3155,tileY:3186))
         {
             var usual=RuneLitePixelGridReader.ReadFieldQuorum(exportedPasses,out _);
+            string usualDiagnostic="field quorum not available";
             Require(usual is not null&&RuneLitePixelGridReader.Read(stoppedBitmap,
-                Array.Empty<RuneLitePixelGridReader.Observation>(),out string usualDiagnostic,
+                Array.Empty<RuneLitePixelGridReader.Observation>(),out usualDiagnostic,
                 fieldQuorum:usual) is null&&
                 usualDiagnostic.Contains("unknown_singleton_rejects=")&&
                 !usualDiagnostic.Contains("unknown_singleton_rejects=0 "),
