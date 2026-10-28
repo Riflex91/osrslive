@@ -21,6 +21,10 @@ Neuplanung erlaubt weitere Eingaben. Alle Achsen-,
 Ebenen-, Rückwärts-, Timeout- und Vordergrundstopps bleiben.
 Exakte `collision_prefix`-Koordinaten, Korridorabstand,
 Zeitintervalle und Sprungweite stehen im neuen Log.
+Zusätzlich wird ein **neuer gescheiterter Gehversuch** bei
+gleichem Fehlercode nicht mehr vom Clipboard-Deduplikator
+unterdrückt; jedes erneute Nutzer-Armieren kann genau einen
+aktuellen vollständigen Log-Kopiervorgang erzeugen.
 **Der Live-Test von 1.8.29 und das Erreichen von Lumbridge
 sind noch offen.**
 

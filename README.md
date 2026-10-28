@@ -35,6 +35,14 @@ Kontrollen erfüllt bleiben:
   veraltete Pluginmeldung, Focusverlust oder nicht erlaubtes
   Eingabefenster stoppt die Automatik weiterhin.
 
+Wichtig für die Fehleranalyse: **Jeder gesondert gestartete und
+fehlgeschlagene Autowalk-Versuch** kopiert nun die bis dahin
+vollständige, fortgeschriebene Logdatei erneut, auch wenn
+bereits ein früherer Versuch mit demselben Fehlercode gestoppt
+hat. Unverändert wird eine dauerhaft wiederholte allgemeine
+Fehlermeldung nur einmal kopiert, damit sie die Zwischenablage
+nicht ständig überschreibt.
+
 Die Diagnose protokolliert jetzt für jeden Klick auch alle
 Kollision-Prefix-Kacheln sowie für echte Korridorschritte
 `tile_jump`, `closest_prefix_distance`, Wegpunktabstand,

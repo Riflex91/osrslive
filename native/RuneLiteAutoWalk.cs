@@ -149,9 +149,17 @@ internal sealed class RuneLiteAutoWalk
                 int distance=tile.Distance(p.Plan.PathPrefix[i]);
                 if(distance<closestDistance){closestDistance=distance;closestIndex=i+1;}
             }
+            // An equal start/end axis does NOT imply a straight path: the
+            // actual pinned A* prefix may first detour around an obstacle.
+            // Allow only axis values already spanned by the verified prefix
+            // for that case, never a new excursion beyond its bounding box.
             bool axisConsistent=
-                (p.Plan.From.X!=p.Plan.Waypoint.X||tile.X==p.Plan.From.X)&&
-                (p.Plan.From.Y!=p.Plan.Waypoint.Y||tile.Y==p.Plan.From.Y);
+                (p.Plan.From.X!=p.Plan.Waypoint.X||
+                    tile.X>=Math.Min(p.Plan.From.X,p.Plan.PathPrefix.Min(t=>t.X))&&
+                    tile.X<=Math.Max(p.Plan.From.X,p.Plan.PathPrefix.Max(t=>t.X)))&&
+                (p.Plan.From.Y!=p.Plan.Waypoint.Y||
+                    tile.Y>=Math.Min(p.Plan.From.Y,p.Plan.PathPrefix.Min(t=>t.Y))&&
+                    tile.Y<=Math.Max(p.Plan.From.Y,p.Plan.PathPrefix.Max(t=>t.Y)));
             bool safeCorridor=tile.Plane==p.Plan.Waypoint.Plane&&
                 jump is >=1 and <=MaxObservedTileJump&&after<before&&
                 closestDistance<=MaxCorridorDistance&&axisConsistent&&

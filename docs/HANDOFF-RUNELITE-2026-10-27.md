@@ -47,6 +47,16 @@ werden. Ein weiterer Spielklick wird dadurch **nicht**
 freigegeben; erst der bestätigte oder nahe Wegpunkt, bzw. nach
 fünf solchen echten Zwischenereignissen maximal zweimal
 eine neue Kollision-Routenplanung vom letzten Plugin-Tile.
+Der v1.8.28-Log enthält bei drei separaten gleichnamigen
+`UNEXPECTED_API_TILE`-Stopps nur für den ersten Versuch
+`CLIPBOARD COPY_REQUEST origin=AUTO_FAILURE` (der Nutzer
+kopierte am Ende zusätzlich manuell). `ClientFailureLog`
+unterdrückte nämlich Wiederholungen nach `source/code` selbst
+über neue Nutzer-Kalibrierungen hinweg. `StopAutoWalk` gibt nun
+für jeden eigenständig begonnenen Gehversuch genau einen
+erneuten Voll-Log-Kopiervorgang frei, auch bei wiederholtem
+Fehlercode. Dauerhaft wiederholte, nicht interaktiv
+gestartete Fehler bleiben dedupliziert; Selbsttest ergänzt.
 Sprung >4, Rückschritt, gleich bleibende/steigende Entfernung,
 falsche Ebene, fremdes Vordergrundfenster, altes Event bleiben
 harte Stopps. `CLICK_INTENT` loggt nun den **gesamten

@@ -648,7 +648,8 @@ internal sealed class RuneLiteWindow:Form
         log.Add(failed?Severity.WARN:Severity.INFO,"RUNELITE_AUTOWALK",
             failed?"SAFETY_STOP":"STOPPED",diagnostic);
         if(failed)
-            failureLog.ReportFailure("RUNELITE_AUTOWALK",reason,diagnostic);
+            failureLog.ReportFailure("RUNELITE_AUTOWALK",reason,diagnostic,
+                independentUserAttempt:true);
         UpdateDetailText();UpdateFailureBanner();RefreshLogPreview();
     }
 

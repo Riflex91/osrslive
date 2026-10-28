@@ -61,12 +61,15 @@ internal sealed class ClientFailureLog : IDisposable
         catch(Exception ex) when(IsStorageError(ex)){StorageStatus="ERROR_"+ex.GetType().Name;}
     }
 
-    internal bool ReportFailure(string source,string code,string details)
+    internal bool ReportFailure(string source,string code,string details,
+        bool independentUserAttempt=false)
     {
         // A persistent BLOCKED state may be seen thousands of times per hour.
-        // Each distinct cause gets one automatic copy, not clipboard thrashing.
+        // Each distinct recurring cause gets one copy, not clipboard thrashing.
+        // A user-rearmed autowalk is a NEW attempted action; if it fails too,
+        // the accumulated, up-to-date full log must reach the clipboard again.
         string key=Diagnostics.Sanitize(source,32)+"/"+Diagnostics.Sanitize(code,55);
-        if(!reported.Add(key))return false;
+        if(!reported.Add(key)&&!independentUserAttempt)return false;
         LastFailureCode=key;
         diagnostics.Add(Severity.ERROR,"FAILURE_REPORT","IMPROVEMENT_REQUIRED",
             $"source={source} cause={code} details={details} action=NOT_EXECUTED");
@@ -155,6 +158,11 @@ internal static class FailureLogPolicy
             if(!report.CopyToClipboard()||copied is null||copied!=File.ReadAllText(file,Encoding.UTF8)||
                 !copied.Contains("late_sample=true"))
                 throw new Exception("Manual recopy must include the latest appended events");
+            if(!report.ReportFailure("RUNELITE","GRID_INFO_NOT_READABLE",
+                    "another_user_initiated_attempt=true",independentUserAttempt:true)||
+               copied is null||copied!=File.ReadAllText(file,Encoding.UTF8)||
+               !copied.Contains("another_user_initiated_attempt=true"))
+                throw new Exception("Each separate failed user-armed attempt recopies the latest complete log");
         }
         finally{if(File.Exists(file))File.Delete(file);}
         string failedFile=Path.Combine(Path.GetTempPath(),"osrs-clipboard-selftest-"+Guid.NewGuid().ToString("N")+".log");
