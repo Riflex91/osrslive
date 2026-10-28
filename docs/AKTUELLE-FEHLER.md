@@ -1,4 +1,38 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.18
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.19
+
+**1.8.19 – bekannter Stillstandsfehler des 1.8.18-Live-Tests:**
+Das echte Nutzerprotokoll vom 28.10.2026, 17:33:17–17:34:26 Uhr
+Europe/Berlin belegt `version=1.8.18`, `PREVIOUS_UPDATE`,
+`ALREADY_CURRENT`, 40 bestätigte Positionen und 31 direkte
+API-Aufnahmen sowie sechs sichere `WAITING_FOR_EXPORT_FRAME`.
+Das neue Navigationsziel „Lumbridge“ erzeugt bestätigte
+Luftlinienhinweise; acht Zusatzexport-Kategorien sind lesbar,
+ein optionaler Snapshot fehlt, **null** wurden verworfen.
+
+Verbleibende Positionserkennungs-Blockade: `3176,3198,0` wurde
+in drei aufeinander folgenden **frischen API-Frames** bestätigt,
+aber nach Ablauf des drei Sekunden alten Positionsexports
+verhindern unbekannte Einzelglyphen `6`/`7` eine weitere
+Pixel-Freigabe (`client_export_labelled_glyphs=8`,
+`full_matches=0`). Später wurden `3202,3193,0` in mindestens
+zwei API-Frames bestätigt, doch die OCR liest `32Ø2` ohne
+vollständiges X/Y, deshalb `ID_ONLY_PIXEL_ENUMERATION`
+und `NOT_CORROBORATED`. Es folgten 21 vorübergehend
+`GRID_INFO_NOT_READABLE` und echte rote Warnungen inklusive
+`POSITION_NOT_CONFIRMED_TIMEOUT` mit Clipboard-Kopie.
+
+1.8.19 setzt an der tatsächlichen Fehlerquelle an:
+Ein kurzlebiger, nur im Arbeitsspeicher gehaltener Pixelabdruck
+aller Ziffern des **bereits zweifach bestätigten API-Orts** wird
+erst nach zwei eigenen unabhängigen, zeitlich getrennten
+erfolgreichen API-Frames vertraut. Ein späteres aktuelles Bild
+des alten JSON-Ortes muss den gesamten Abdruck exakt zeigen,
+einschließlich Ebene, beider Kommas und aller Chunk/Region-/X/Y-
+Ziffern. Zwei unabhängige aktuelle Frames bleiben für die
+Freigabe nötig. Widerspruch, ein geänderter Tile im selben Chunk,
+eine andere Ebene, verändertes Layout oder ein anderes Fenster
+werden abgelehnt. Keine gespeicherten Screenshots, kein
+Positionsraten. Der Windows- und erste neue Live-Test stehen aus.
 
 **1.8.18 – 1.8.17-RuneLite-Plugin-Hub-Integration live bestätigt:**
 Das echte Nutzerprotokoll vom 28.10.2026 um 17:12:48–17:13:29 Uhr

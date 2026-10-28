@@ -556,6 +556,45 @@ internal static class RuneLitePixelGridReaderTests
                     clientExport:exportedTile) is null,
                 "even a direct RuneLite coordinate cannot excuse a missing real comma on the screen");
         }
+        // On the real 1.8.18 run the user stopped on 3176/3198, where the
+        // Chunk/Region IDs have no labelled '7' or '6' glyph. The JSON then
+        // aged out and both ordinary and client-export-assisted pixel OCR
+        // declined the same actual tile. Only a previously confirmed exact
+        // whole-grid raster may preserve that stationary position, never a
+        // merely similar digit or a guessed in-chunk tile.
+        using(var known=Fixture(tileX:3176,tileY:3198))
+        using(var changed=Fixture(tileX:3177,tileY:3198))
+        using(var changedFloor=Fixture(tileX:3176,tileY:3198,plane:1))
+        using(var damagedComma=Fixture(tileX:3176,tileY:3198))
+        {
+            var stable=new RuneLiteGridFingerprint();
+            var place=new WorldTile(3176,3198,0);
+            var t0=new DateTimeOffset(2026,10,28,16,35,0,TimeSpan.Zero);
+            string first=stable.ObserveConfirmedFresh(place,known,t0);
+            Require(first.Contains("AWAITING_SECOND_MATCH")&&
+                    !stable.MatchesStaleExport(place,known,t0.AddMilliseconds(200),out _),
+                "one API-confirmed frame must never trust a stored grid bitmap");
+            string second=stable.ObserveConfirmedFresh(place,known,t0.AddMilliseconds(800));
+            Require(second.Contains("TRUSTED_AFTER_TWO_CONFIRMED_FRAMES")&&
+                    stable.MatchesStaleExport(place,known,t0.AddSeconds(7),out string sameDiagnostic)&&
+                    sameDiagnostic.Contains("EXACT_CURRENT_PANEL_MATCH"),
+                "two independently confirmed API frames may identify the exact, unchanged old tile: "+second);
+            Require(!stable.MatchesStaleExport(place,changed,t0.AddSeconds(8),out string different)&&
+                    different.Contains("CURRENT_PANEL_DIFFERENT"),
+                "a different tile within the same Chunk may not reuse the old API coordinate");
+            Require(!stable.MatchesStaleExport(place,changedFloor,t0.AddSeconds(9),out _),
+                "the floor glyph is part of the exact raster identity");
+            for(int dy=0;dy<11;dy++)for(int dx=0;dx<7;dx++)
+                damagedComma.SetPixel(7+8*7+dx,13+dy,Color.FromArgb(21,26,32));
+            Require(!stable.MatchesStaleExport(place,damagedComma,t0.AddSeconds(10),out _),
+                "a missing real comma cannot match the old coordinate's whole-grid signature");
+            stable.ObserveConfirmedFresh(new WorldTile(3177,3198),changed,t0.AddSeconds(11));
+            Require(!stable.MatchesStaleExport(place,known,t0.AddSeconds(12),out _),
+                "a newer API tile invalidates every old trusted signature");
+            stable.Clear();
+            Require(!stable.MatchesStaleExport(place,known,t0.AddSeconds(13),out _),
+                "process changes or pauses clear all historic grid identities");
+        }
         var incorrectIds=damagedXY.Select(a=>a.ToArray()).ToArray();
         foreach(var pass in incorrectIds)pass[2]="Region ID 12594";
         Require(RuneLitePixelGridReader.ReadIdQuorum(incorrectIds,out string wrongIdDiagnostic) is null&&

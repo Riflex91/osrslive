@@ -1,4 +1,39 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.18
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.19
+
+## 1.8.18 bestätigt – stationäre Positions-Pixel neu sichern (1.8.19)
+
+Die echte Sitzung vom 28.10.2026, 17:33–17:34 Uhr Europe/Berlin
+belegt automatisches Update auf 1.8.18, den erfolgreichen
+v1.8.18-Manifestcheck, 40 bestätigte Positionen, 31 direkte
+API-Auswertungen, sechs korrekt abgefangene vorzeitige
+Grafikframes und lokale Summary-Scans mit acht vorhandenen,
+null verworfenen, einer fehlenden JSON-Kategorie. Lumbridge
+als Read-only-Ziel wurde ausgewählt und protokolliert.
+
+Neue Blockade: Das Plugin schreibt `position.json` nur bei
+Tilewechseln. `3176/3198/0` war in Proben 45/46/47
+direkt über die API bestätigt, aber nach drei Sekunden
+fehlen im selben Bild die unabhängig gelernten Glyphen
+`6` und `7` (`CLIENT_EXPORT_PLUS_SCREEN_PIXELS full_matches=0`).
+Für `3202/3193/0` gab es Proben 72/73 als direkte
+API-Bestätigung; später enthält das OCR-X/Y `32Ø2` und
+liefert nur IDs ohne eine X/Y-Zahlenzeile. Es folgten
+21 verfehlte Proben und berechtigte Fehler-Clipboard-Kopien.
+
+1.8.19: `RuneLiteGridFingerprint` arbeitet ausschließlich
+auf aktuellen WGC-Bildern, rastert die 20 numerischen Zellen
+des World-Location-Overlays und prüft echte Kommas und
+Trennräume. Es speichert nur SHA-256-Identitäten **im RAM**.
+Erst zwei zeitlich getrennte, vorher bereits zweifach
+API-bestätigte Frames desselben Ortes autorisieren einen
+referenzierten Rasterabdruck. Derselbe alte JSON-Ort darf
+nur mit einer neuen *exakt identischen* aktuellen Raster-
+Signatur und erneutem normalen Zweibildbeweis bestätigt
+werden. Änderungen der X/Y-Ziffern (auch im selben Chunk),
+Ebene, Kommas, HWND, Fenstergeometrie oder neuem API-Ort
+sperren. Keine Rohpixel, Fingerprintwerte oder Accountdaten
+im Log oder Datenträger. Synthetische Positiv- und
+Negativtests werden hinzugefügt; Windows-/Live-Test ausstehend.
 
 ## Live-Bestätigung von 1.8.17 und nächster lesender Ausbau (1.8.18)
 

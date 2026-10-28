@@ -161,6 +161,7 @@ internal sealed class RuneLitePositionSource:IDisposable
     private readonly BackgroundWindowCapture capture=new();
     private readonly RuneLiteOverlayConfirmation confirmation=new();
     private readonly RuneLitePixelGridReader.ConfirmedGlyphHistory history=new();
+    private readonly RuneLiteGridFingerprint fingerprint=new();
     private IntPtr historyWindow;
     private Size historySize;
     private DateTimeOffset lastExportScanUtc;
@@ -170,7 +171,8 @@ internal sealed class RuneLitePositionSource:IDisposable
     internal DateTimeOffset LastExportScanUtc=>lastExportScanUtc;
     internal void Reset()
     {
-        confirmation.Reset();history.Clear();historyWindow=default;historySize=default;
+        confirmation.Reset();history.Clear();fingerprint.Clear();
+        historyWindow=default;historySize=default;
         lastExportScanUtc=default;lastExportTitle=null;
         AdditionalExports=new([],"stage=ADDITIONAL_EXPORTS result=RESET redacted=true");
     }
@@ -206,7 +208,8 @@ internal sealed class RuneLitePositionSource:IDisposable
                 Diagnostic:windowDiagnostic+" "+CaptureDiagnostic);}
             if(historyWindow!=windows[0].Handle||historySize!=frame.Image.Size)
             {
-                history.Clear();historyWindow=windows[0].Handle;historySize=frame.Image.Size;
+                history.Clear();fingerprint.Clear();
+                historyWindow=windows[0].Handle;historySize=frame.Image.Size;
             }
             history.Expire(frame.CapturedUtc);
             // Only the exact same trusted HWND/title used for positioning may
@@ -214,6 +217,7 @@ internal sealed class RuneLitePositionSource:IDisposable
             // more than every 10 seconds, never log their raw contents.
             if(lastExportTitle!=windows[0].Title)
             {
+                confirmation.Reset();fingerprint.Clear();
                 lastExportTitle=windows[0].Title;
                 lastExportScanUtc=default;
                 AdditionalExports=new([],"stage=ADDITIONAL_EXPORTS result=PROFILE_CHANGED redacted=true");
@@ -251,6 +255,9 @@ internal sealed class RuneLitePositionSource:IDisposable
                 var nowDirect=DateTimeOffset.UtcNow;
                 var direct=confirmation.Observe(windows[0].Handle,frame.Image.Size,
                     frame.CapturedUtc,nowDirect,recentReady.Position);
+                if(direct.Tile is WorldTile current)
+                    pixelDiagnostic?.Invoke(fingerprint.ObserveConfirmedFresh(current,
+                        frame.Image,frame.CapturedUtc));
                 pixelDiagnostic?.Invoke("stage=POSITION_EXPORT result=DIRECT_CLIENT_API "+
                     $"export_age_ms={recentReady.AgeMs:0} source=PLUGIN_HUB_EXPORT "+
                     "render_ocr_bypassed=true independent_capture_gate=true");
@@ -260,6 +267,27 @@ internal sealed class RuneLitePositionSource:IDisposable
                     "source=PLUGIN_HUB_EXPORT ocr_passes=0 valid_passes=0 label_rows=0 "+
                     $"candidate_consistent=true frame_confirmed={direct.Tile is not null}"};
             }
+            // The Plugin Hub exporter writes only when the tile changes.
+            // At a stationary location a previously confirmed exact grid
+            // raster is safer than guessing one missing OCR digit. The live
+            // frame must visibly match all X/Y, plane and Chunk/Region glyphs
+            // of TWO older independently API-confirmed captures.
+            string fingerprintDiagnostic="stage=GRID_FINGERPRINT result=NOT_ATTEMPTED";
+            if(export is {Fresh:false} prior&&fingerprint.MatchesStaleExport(
+                prior.Position.Tile,frame.Image,frame.CapturedUtc,out fingerprintDiagnostic))
+            {
+                pixelDiagnostic?.Invoke(fingerprintDiagnostic);
+                var nowStable=DateTimeOffset.UtcNow;
+                var matched=confirmation.Observe(windows[0].Handle,frame.Image.Size,
+                    frame.CapturedUtc,nowStable,prior.Position);
+                return matched with{Diagnostic=windowDiagnostic+" "+CaptureDiagnostic+
+                    $" client={frame.Image.Width}x{frame.Image.Height} "+
+                    $"age_ms={(nowStable-frame.CapturedUtc).TotalMilliseconds:0} "+
+                    "source=TRUSTED_GRID_FINGERPRINT independent_capture_gate=true "+
+                    $"candidate_consistent=true frame_confirmed={matched.Tile is not null}"};
+            }
+            else if(export is {Fresh:false})
+                pixelDiagnostic?.Invoke(fingerprintDiagnostic);
             if(engine is null)return new("OCR_LANGUAGE_UNAVAILABLE",
                 Diagnostic:"language=en-US/fallback unavailable; plugin_export_not_fresh=true");
             int passes=0,validPasses=0,labelRows=0;
