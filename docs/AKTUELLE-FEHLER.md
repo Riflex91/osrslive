@@ -1,4 +1,37 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.24
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.25
+
+**1.8.25 – neue Echtdaten aus 1.8.24:** RuneLite reagiert
+jetzt nachweislich auf die gezielte Vordergrund-Mauseingabe:
+Echte Plugin-Kachelfolgen auf dem A*-Pfad und ein
+`WAYPOINT_CONFIRMED` folgen dem `FOREGROUND_INPUT_INSERTED`.
+Die zwei Fehler, die den Lauf bislang vorzeitig stoppten:
+`API_POSITION_UPDATED` wiederholt eine bereits gelesene
+Position mit identischer Exportzeitmarke (`new_event=false`)
+und wurde trotzdem an `Observe` weitergegeben; sowie
+eine echte Kachel **einen Schritt** neben einem fast
+erreichten Wegpunkt nach ausreichend früherem Pfad-
+Fortschritt. 1.8.25 ignoriert alte API-Events und
+unveränderte Tiles; eine eng begrenzte, gleich ebene,
+vorwärts abgesicherte 1-Tile-Endpunkttoleranz löst
+Neuberechnung aus, statt fälschlich zu scheitern.
+
+**Neuer Mini-Map-/Zoom-Test:** Ein Screenshot mit
+rot markiertem Spielerpunkt zeigt ein charakteristisches
+15px-Kreiszeichen (clientbezogen etwa x666/y111) –
+die manuellen Punkte x643–645 lagen daneben.
+Ein eindeutiger dunkler Ring mit hellem Zentrum
+wird jetzt automatisch im WGC-RAM-Bild gesucht;
+keine automatische Bestätigung, solange mehrere
+Kandidaten erkannt werden. Das Bild dient **nicht**
+zur WorldTile-Lokalisierung, nur zur Klickgeometrie.
+Die manuelle Korrektur bleibt möglich. Ein auswählbarer
+3D-Kamera-Zoom wird mit bewusster Vordergrundfreigabe
+per Mausrad in relative Presets gefahren. **Exakte
+Kamera-/Minimap-Zoomwerte kann der aktuelle Exporter
+nicht bestätigen**; der getrennte Minimap-Zoom muss
+weiterhin auf den RuneLite-Standard 4px/Tile eingestellt
+sein. Nächster Live-Test soll die tatsächliche Ring-
+Erkennung und Zoomänderung belegen.
 
 **1.8.24 – PostMessage erzeugt weiterhin keine bestätigte
 automatische RuneLite-Bewegung:** Drei `CLICK_INTENT`-

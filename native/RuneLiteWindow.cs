@@ -286,7 +286,8 @@ internal sealed class RuneLiteWindow:Form
             else if(state.Status is "RUNELITE_NOT_RUNNING" or "MULTIPLE_RUNELITE_CLIENTS" or
                 "PLUGIN_EXPORT_UNAVAILABLE" or "PLUGIN_EXPORT_INVALID" or "INTERNAL_ERROR")
                 StopAutoWalk("API_SOURCE_LOST",true,$"sample={sequence} state={state.Status}");
-            else if(state.Status=="API_POSITION_UPDATED"&&state.Tile is WorldTile walked)
+            else if(state.Status=="API_POSITION_UPDATED"&&
+                state.ObservedUtc>lastMotionEventUtc&&state.Tile is WorldTile walked)
             {
                 var feedback=autoWalk.Observe(walked,state.ObservedUtc,DateTimeOffset.UtcNow);
                 if(feedback.Status=="OFF_PATH")
@@ -294,7 +295,7 @@ internal sealed class RuneLiteWindow:Form
                 else if(feedback.Status!="IGNORED")
                 {
                     log.Add(Severity.INFO,"RUNELITE_AUTOWALK",feedback.Status,feedback.Diagnostic);
-                    autoWalkDescription=feedback.Status=="WAYPOINT_CONFIRMED"?
+                    autoWalkDescription=feedback.Status is "WAYPOINT_CONFIRMED" or "WAYPOINT_NEAR_CONFIRMED"?
                         "Automatik: Wegpunkt per RuneLite-API bestätigt · plane nächsten Klick.":
                         "Automatik: echte Kachelbewegung bestätigt · warte auf Wegpunkt.";
                 }
@@ -321,7 +322,9 @@ internal sealed class RuneLiteWindow:Form
                 lastMotionEventUtc=state.ObservedUtc;
             }
             if(observation is not null)
-                log.Add(Severity.INFO,"RUNELITE_MOTION","OBSERVATION",observation);
+                log.Add(Severity.INFO,"RUNELITE_MOTION","OBSERVATION",observation+
+                    $" autowalk_active={autoWalk.Active.ToString().ToLowerInvariant()} "+
+                    $"autowalk_pending_click={autoWalk.WaitingForMovement.ToString().ToLowerInvariant()}");
             var guidance=RuneLiteNavigationAdvisor.FromConfirmed(confirmedTile,SelectedDestination());
             if(guidance is not null&&observation is not null)
                 log.Add(Severity.INFO,"RUNELITE_NAV","API_EVENT_GUIDANCE",
@@ -430,7 +433,8 @@ internal sealed class RuneLiteWindow:Form
         {
             log.Add(Severity.INFO,"RUNELITE_AUTOWALK","CALIBRATION_REQUEST",
                 $"target={goal.Id.Replace(' ','_')} client_width={size.Width} client_height={size.Height} "+
-                "position_source=PLUGIN_API screenshot_for_click_geometry_only=true screenshot_stored=false");
+                "position_source=PLUGIN_API auto_marker_detection=true "+
+                "camera_zoom_user_preset=true screenshot_for_click_geometry_only=true screenshot_stored=false");
             // The game image is displayed temporarily for the user's choice
             // of the actual minimap centre. No file, screenshot or pixels are
             // added to the diagnostic log or saved to disk.
@@ -473,6 +477,34 @@ internal sealed class RuneLiteWindow:Form
                         "window_destination_or_pause_changed=true no_input_sent=true");
                     UpdateFailureBanner();return;
                 }
+                log.Add(Severity.INFO,"RUNELITE_AUTOWALK","MINIMAP_MARKER_CALIBRATED",
+                    $"method={setup.SelectionSource} center_x={center.X} center_y={center.Y} "+
+                    $"auto_detector={setup.MarkerDiagnostic} "+
+                    "user_reviewed_preview=true screenshot_stored=false "+
+                    "no_world_position_from_pixels=true world_tile_source=PLUGIN_API");
+                log.Add(Severity.INFO,"RUNELITE_CAMERA","ZOOM_REQUEST",
+                    $"preset={setup.CameraZoom} user_approved_foreground_mouse=true "+
+                    "world_viewport_only=true minimap_zoom_unchanged=true "+
+                    "camera_scale_not_exported=true requested_absolute_level_unverified=true");
+                string? calibratedWindowTitle=source.TrustedWindowTitle;
+                var zoom=await BackgroundWindowInput.SetRuneLiteCameraZoomAsync(window,size,
+                    setup.CameraZoom,
+                    ()=>paused||closing.IsCancellationRequested||
+                        source.TrustedWindowHandle!=window||
+                        source.TrustedWindowTitle!=calibratedWindowTitle||
+                        SelectedDestination()?.Id!=goal.Id,
+                    closing.Token);
+                if(!zoom.Inserted)
+                {
+                    failureLog.ReportFailure("RUNELITE_CAMERA","CAMERA_ZOOM_NOT_COMPLETED",
+                        $"preset={setup.CameraZoom} reason={zoom.Reason} "+
+                        $"input_events={zoom.InputEvents} no_autowalk_click_sent=true");
+                    UpdateFailureBanner();return;
+                }
+                log.Add(Severity.INFO,"RUNELITE_CAMERA","ZOOM_INPUT_SENT",
+                    $"preset={setup.CameraZoom} result={zoom.Reason} "+
+                    $"input_events={zoom.InputEvents} foreground_runelite_only=true "+
+                    "actual_camera_zoom_unverified_without_plugin_export=true");
                 var geometry=new RuneLiteAutoWalk.Calibration(window,size,center,setup.PixelsPerTile);
                 autoWalk.Start(goal,geometry,DateTimeOffset.UtcNow);
                 autoWalkWindowTitle=source.TrustedWindowTitle;
@@ -485,6 +517,7 @@ internal sealed class RuneLiteWindow:Form
                     "first_calibrated_click_last_known_api_max_age_s=60 first_click_window_s=12 "+
                     "later_clicks_require_event_age_s_at_most=3 "+
                     "click_limit=40 runtime_limit_s=300 verify_each_waypoint=true "+
+                    $"marker_selection_method={setup.SelectionSource} camera_zoom_preset={setup.CameraZoom} "+
                     "foreground_mouse_consent=true sendinput_not_postmessage=true "+
                     "source=PLUGIN_API no_screenshot_saved=true");
                 _=RefreshRouteAsync();

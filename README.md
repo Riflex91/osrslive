@@ -1,4 +1,60 @@
-# OSRS Play 1.8.24 – Erster echter Windows-Mausklick in RuneLite
+# OSRS Play 1.8.25 – Automatischer Minimap-Spielerpunkt und Kamera-Zoom
+
+## Neu in 1.8.25: Erstes echtes Gehen bestätigt und Setup vereinfacht
+
+Das neue 1.8.24-Live-Log belegt erstmals tatsächliche
+automatische Schritte im regulären RuneLite:
+`FOREGROUND_INPUT_INSERTED` → `PROGRESS_CONFIRMED` →
+`WAYPOINT_CONFIRMED`. Der Spieler bewegte sich auf dem
+geprüften Weg, die RuneLite-API dokumentierte die
+Kacheln. Der gesamte Weg bis zum Ziel ist damit noch
+nicht verifiziert.
+
+Zwei vorzeitige Sicherheitsstopps sind repariert:
+
+- Ein unveränderter Plugin-Export wird nicht erneut
+  als neue Wegbewegung ausgewertet. Wiederholtes
+  Melden derselben Kachel führt nicht zu `OFF_PATH`.
+- Wenn nach mehreren echten Wegschritten eine Kachel
+  direkt neben dem angeklickten Wegpunkt erreicht wird,
+  kann die Route einmalig von dort neu berechnet werden.
+  Unbegründete Seitensprünge bleiben streng gesperrt.
+
+Auf deinem markierten Screenshot sitzt der kleine
+runde Spielerindikator etwa bei **x666/y137 im Fenster**
+und ungefähr **x666/y111 im Clientbild**. Die bisher
+manuell gewählten x643–645 lagen deutlich daneben.
+1.8.25 findet dieses **15-Pixel-Ringmuster automatisch**
+auf einer frischen, nur im RAM angezeigten Aufnahme.
+Der gelbe Kreis wird zur Kontrolle gezeigt. Erkennt
+die Suche nichts Eindeutiges, kannst du weiterhin
+manuell markieren. Aus Bildern werden niemals
+Spiel-Weltkoordinaten berechnet.
+
+Im gleichen Fenster wählst du den gewünschten
+**3D-Kamera-Zoom**: „Weit heraus“ (Vorgabe), „Mittel“,
+„Nah“ oder „Unverändert“. Das Programm stellt die
+relative Kameraansicht mittels begrenzter, sichtbarer
+Mausrad-Schritte im geprüften RuneLite-Vordergrund ein.
+Der tatsächlich erreichte numerische Kamera-Zoom
+bleibt ohne Export dieses Plugin-Werts **nicht messbar**.
+Das ist von der **Minimap-Skalierung** getrennt, für
+welche wir momentan RuneLites Standard **4 px/Tile**
+verwenden. Minimap-Norden oben und Standard-Zoom
+müssen weiterhin bestätigt werden.
+
+**Nächster Spieltest:** OSRS Play auf 1.8.25
+aktualisieren, RuneLite im Profil `auto` geöffnet lassen,
+einmal eine Kachel bewegen, Lumbridge auswählen,
+„Automatisch gehen (Test)“ starten. Prüfe den automatisch
+vorgeschlagenen gelben Spielerpunkt, wähle deinen
+Kamera-Zoom, bestätige Minimap-Ausrichtung und Maus-
+Einwilligung. Das neue Protokoll enthält
+`MINIMAP_MARKER_CALIBRATED`, `ZOOM_INPUT_SENT`,
+`FOREGROUND_INPUT_INSERTED`, bestätigte Wegschritte
+und nötigenfalls automatische Clipboard-Fehlerlogs.
+
+## Vorherige Version: 1.8.24
 
 ## Neu in 1.8.24: Vordergrund-Eingabe nur mit Einwilligung
 

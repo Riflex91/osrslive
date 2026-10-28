@@ -37,7 +37,7 @@ internal sealed class RuneLiteMotionTrace
         if(old is null)
             return $"result=FIRST_CONFIRMED sample={sample} "+
                 $"x={tile.X} y={tile.Y} plane={tile.Plane} "+
-                "source=RUNELITE_PLUGIN_API_EVENT autonomous_input=false";
+                "source=RUNELITE_PLUGIN_API_EVENT input_initiator=UNATTRIBUTED_BY_OBSERVER";
 
         if(old==tile)
         {
@@ -60,6 +60,6 @@ internal sealed class RuneLiteMotionTrace
             $"plane_delta={planeDelta} manhattan_tiles={manhattan} chebyshev_tiles={chebyshev} "+
             $"sample_gap={sample-oldSample} event_gap_ms={(capturedAt-oldFrame).TotalMilliseconds:0} "+
             $"non_adjacent_observation={nonAdjacentChange.ToString().ToLowerInvariant()} "+
-            "route_between_samples_unknown=true autonomous_input=false";
+            "route_between_samples_unknown=true input_initiator=UNATTRIBUTED_BY_OBSERVER";
     }
 }
