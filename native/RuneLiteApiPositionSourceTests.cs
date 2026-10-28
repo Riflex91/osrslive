@@ -18,10 +18,15 @@ internal static class RuneLiteApiPositionSourceTests
         var old=Snapshot(starting,now.AddMinutes(-5));
         Require(tracker.Observe(old,now,"fixture").Status=="API_WAITING_FOR_NEW_EVENT",
             "an old position from a previous login is never treated as a new live event");
+        Require(tracker.HistoricalPreview is {Tile:{X:3176,Y:3198,Plane:0}}&&
+                tracker.Observe(old,now,"fixture").Tile is null,
+            "stale export may be displayed as historical preview but never released as an active tile");
         var recent=Snapshot(starting,now.AddSeconds(-1));
         Require(tracker.Observe(recent,now,"fixture") is
             {Status:"API_POSITION_UPDATED",Tile:{X:3176,Y:3198,Plane:0}},
             "a recent checksum-verified client API event enters the current session");
+        Require(tracker.HistoricalPreview is null,
+            "a fresh plugin event clears the unverified startup preview");
         Require(tracker.Observe(recent,now.AddMilliseconds(800),"fixture").Diagnostic
                 .Contains("new_event=false"),
             "polling the same event must not claim another real player movement");

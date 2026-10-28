@@ -21,6 +21,7 @@ internal sealed class RuneLiteAutoWalk
 
     private Pending? pending;
     private DateTimeOffset started;
+    private DateTimeOffset quietReplanRequestedAt;
     private int clicks,corridorReplans;
     internal bool Active{get;private set;}
     internal NavigationDestination? Destination{get;private set;}
@@ -34,6 +35,7 @@ internal sealed class RuneLiteAutoWalk
     internal const int MaxCorridorSamplesPerClick=5;
     internal const int MaxObservedTileJump=4;
     internal const int MaxCorridorDistance=2;
+    internal static readonly TimeSpan NearWaypointStallDelay=TimeSpan.FromMilliseconds(1600);
 
     internal void Start(NavigationDestination destination,Calibration geometry,DateTimeOffset now)
     {
@@ -45,7 +47,7 @@ internal sealed class RuneLiteAutoWalk
     internal void Stop()
     {
         Active=false;pending=null;Destination=null;Geometry=null;
-        started=default;clicks=0;corridorReplans=0;
+        started=default;quietReplanRequestedAt=default;clicks=0;corridorReplans=0;
     }
 
     internal static bool ValidGeometry(Calibration c)=>
@@ -102,7 +104,8 @@ internal sealed class RuneLiteAutoWalk
     internal void Sent(ClickPlan plan,DateTimeOffset eventAt,DateTimeOffset now)
     {
         if(!CanDispatch(now,eventAt))throw new InvalidOperationException("Stale or busy movement dispatch");
-        pending=new(plan,eventAt,now,0,now,plan.From,eventAt,0);clicks++;
+        pending=new(plan,eventAt,now,0,now,plan.From,eventAt,0);
+        quietReplanRequestedAt=default;clicks++;
     }
 
     internal Feedback Observe(WorldTile tile,DateTimeOffset eventAt,DateTimeOffset now)
@@ -226,11 +229,55 @@ internal sealed class RuneLiteAutoWalk
             $"waypoint_index={p.Plan.WaypointIndex} confirmed_by=NEW_PLUGIN_API_EVENT",true);
     }
 
+    // The RuneLite position exporter emits position CHANGES, not a standing
+    // heartbeat. Two real 1.8.29 runs stopped receiving events exactly two
+    // tiles before the clicked waypoint. One narrowly bounded recovery is
+    // permitted after several independently observed post-click steps and
+    // a quiet period: replan from the LAST verified plugin tile while that
+    // event is still <=3s old, before the normal 9s hard timeout. This is
+    // not proof of idleness; the log explicitly preserves that distinction.
+    // No position is inferred from the minimap or a screenshot.
+    internal Feedback? RecoverNearWaypointAfterQuietPeriod(WorldTile tile,
+        DateTimeOffset eventAt,DateTimeOffset now)
+    {
+        if(!Active||pending is null)return null;
+        var p=pending;
+        if(tile!=p.LastObserved||eventAt!=p.LastObservedEventAt||
+           p.LastObserved.Distance(p.Plan.Waypoint)!=2||
+           (p.LastIndex<2&&p.CorridorSamples<2)||
+           now-p.LastProgressAt<NearWaypointStallDelay||
+           now-p.LastProgressAt>EventTimeout||
+           now-p.SentAt<TimeSpan.FromSeconds(3)||
+           now-eventAt<TimeSpan.Zero||now-eventAt>TimeSpan.FromSeconds(3))
+            return null;
+        string diagnostic=$"last_confirmed={tile.X},{tile.Y},{tile.Plane} "+
+            $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
+            $"waypoint_distance=2 last_exact_prefix_index={p.LastIndex} "+
+            $"corridor_samples={p.CorridorSamples} "+
+            $"quiet_ms={(now-p.LastProgressAt).TotalMilliseconds:0} "+
+            $"last_api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
+            $"time_since_click_ms={(now-p.SentAt).TotalMilliseconds:0} "+
+            $"recovery_attempts={corridorReplans}/{MaxCorridorReplans} "+
+            "no_new_position_event_since_last_observation=true "+
+            "stationary_not_independently_proven=true "+
+            "source=RECENT_PLUGIN_API_TILE screenshot_position_estimation=false ";
+        if(corridorReplans>=MaxCorridorReplans)
+            return new("RECOVERY_LIMIT_REACHED",diagnostic+
+                "no_additional_input_permitted=true",false);
+        corridorReplans++;pending=null;quietReplanRequestedAt=now;
+        return new("WAYPOINT_QUIET_REPLAN",diagnostic+
+            $"recovery_attempts_after={corridorReplans}/{MaxCorridorReplans} "+
+            "next_click_requires_verified_collision_route_and_foreground=true",true);
+    }
+
     internal string? Timeout(DateTimeOffset now)
     {
         if(!Active)return null;
         if(clicks>=MaxClicks&&pending is null)return "CLICK_LIMIT_REACHED";
         if(now-started>TimeSpan.FromMinutes(5))return "RUN_LIMIT_REACHED";
+        if(quietReplanRequestedAt!=default&&pending is null&&
+           now-quietReplanRequestedAt>TimeSpan.FromSeconds(3))
+            return "QUIET_REPLAN_EXPIRED";
         if(pending is not null&&now-pending.LastProgressAt>EventTimeout)
             return "POSITION_EVENT_TIMEOUT";
         if(clicks==0&&now-started>TimeSpan.FromSeconds(20))
@@ -261,6 +308,7 @@ internal static class RuneLiteAutoWalkTests
             "unverified jumping edges cannot be clicked");
         Require(BackgroundWindowInput.MouseInputStructSize()==(IntPtr.Size==8?40:28),
             "SendInput MOUSEINPUT and INPUT must match the native architecture layout");
+        RuneLiteInputShield.SelfTest();
         Require(BackgroundWindowInput.MinimapResetPoint(new(645,111))==new Point(625,95),
             "zoom-reset click is inside the minimap, not the 3D world viewport");
         Require(BackgroundWindowInput.TryNormalizeAbsolute(-1920,0,-1920,-100,3840,2160,
@@ -426,6 +474,60 @@ internal static class RuneLiteAutoWalkTests
                 Require(result.Status==expected,
                     "bounded forward API corridor allows at most two deferred collision replans per arm");
             }
+        }
+        // Exact v1.8.29 live stop: from (3233,3177) toward (3237,3183),
+        // three valid Plugin Hub events reached (3235,3182), then no newer
+        // tile for >5s. A retry is legal ONLY during a short fresh-event
+        // window and after several independently confirmed movements.
+        var quietStart=new WorldTile(3233,3177);
+        WorldTile[] quietPath=[new(3234,3178),new(3234,3179),
+            new(3235,3180),new(3236,3181),new(3237,3182),new(3237,3183)];
+        var quietPlan=RuneLiteAutoWalk.Project(quietStart,
+            quietPath.Select(t=>new PathStep(t)).ToArray(),geom)!;
+        Require(quietPlan.Waypoint==new WorldTile(3237,3183),
+            "reconstructed stalled waypoint comes from adjacent collision steps");
+        walk.Stop();walk.Start(goal,geom,now);walk.Sent(quietPlan,now,now);
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(quietStart,now,now.AddSeconds(4)) is null,
+            "a stationary starting point with no post-click API feedback never authorizes retry");
+        walk.Observe(new(3233,3179),now.AddSeconds(.6),now.AddSeconds(.8));
+        walk.Observe(new(3234,3181),now.AddSeconds(1.3),now.AddSeconds(1.6));
+        walk.Observe(new(3235,3182),now.AddSeconds(2),now.AddSeconds(2.3));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3182),now.AddSeconds(2),
+                    now.AddSeconds(3.5)) is null&&walk.WaitingForMovement,
+            "no recovery while the post-click event has only briefly gone quiet");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3182),now.AddSeconds(1.3),
+                    now.AddSeconds(4.2)) is null,
+            "an outdated or different event timestamp cannot impersonate the final verified tile");
+        var quietRetry=walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3182),
+            now.AddSeconds(2),now.AddSeconds(4.2));
+        Require(quietRetry?.Status=="WAYPOINT_QUIET_REPLAN"&&quietRetry.Continue&&
+                !walk.WaitingForMovement&&walk.CorridorReplans==1&&
+                walk.CanDispatch(now.AddSeconds(4.2),now.AddSeconds(2)),
+            "two-tile near-waypoint pause may replan once using a still-recent post-click API tile");
+        Require(walk.Timeout(now.AddSeconds(7.3))=="QUIET_REPLAN_EXPIRED",
+            "a pending quiet replan that cannot dispatch a fresh safe click hard-stops within three seconds");
+        walk.Stop();walk.Start(goal,geom,now);walk.Sent(quietPlan,now,now);
+        walk.Observe(new(3233,3179),now.AddSeconds(.6),now.AddSeconds(.8));
+        walk.Observe(new(3234,3181),now.AddSeconds(1.3),now.AddSeconds(1.6));
+        walk.Observe(new(3235,3182),now.AddSeconds(2),now.AddSeconds(2.3));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3182),now.AddSeconds(2),
+                    now.AddSeconds(5.1)) is null&&walk.WaitingForMovement,
+            "an API tile older than three seconds never authorizes an automatic retry");
+        Require(walk.Timeout(now.AddSeconds(12))=="POSITION_EVENT_TIMEOUT",
+            "a stale near-waypoint observation must still lead to the existing safety timeout");
+        walk.Stop();walk.Start(goal,geom,now);
+        for(int i=0;i<=RuneLiteAutoWalk.MaxCorridorReplans;i++)
+        {
+            var sentAt=now.AddSeconds(i*6);
+            walk.Sent(quietPlan,sentAt,sentAt);
+            walk.Observe(new(3233,3179),sentAt.AddSeconds(.6),sentAt.AddSeconds(.8));
+            walk.Observe(new(3234,3181),sentAt.AddSeconds(1.3),sentAt.AddSeconds(1.6));
+            walk.Observe(new(3235,3182),sentAt.AddSeconds(2),sentAt.AddSeconds(2.3));
+            var result=walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3182),
+                sentAt.AddSeconds(2),sentAt.AddSeconds(4.2));
+            Require(result?.Status==(i<RuneLiteAutoWalk.MaxCorridorReplans?
+                    "WAYPOINT_QUIET_REPLAN":"RECOVERY_LIMIT_REACHED"),
+                "after two bounded pauses the third near-waypoint recovery is a hard stop");
         }
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
