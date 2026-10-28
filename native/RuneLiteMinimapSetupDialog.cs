@@ -1,5 +1,7 @@
 namespace OSRSLiveDiagnostics;
 
+internal enum RuneLiteCameraZoomPreset { Far, Medium, Near, Unchanged }
+
 // One-time, user-supervised calibration of RuneLite's minimap on a volatile
 // compositor frame. No captured pixels or account information are persisted.
 internal sealed class RuneLiteMinimapSetupDialog:Form
@@ -10,11 +12,18 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
     private readonly NumericUpDown pixelsPerTile=new();
     private readonly CheckBox north=new();
     private readonly CheckBox foregroundConsent=new();
+    private readonly ComboBox cameraZoom=new();
     private readonly Button accept=new();
     private Point? selected;
+    private bool selectedAutomatically;
+    private readonly string markerDiagnostic;
 
     internal Point? PlayerCenter=>DialogResult==DialogResult.OK?selected:null;
     internal double PixelsPerTile=>(double)pixelsPerTile.Value;
+    internal RuneLiteCameraZoomPreset CameraZoom=>
+        (RuneLiteCameraZoomPreset)Math.Max(0,cameraZoom.SelectedIndex);
+    internal string SelectionSource=>selectedAutomatically?"AUTO_RING_MARKER":"USER_SELECTED";
+    internal string MarkerDiagnostic=>markerDiagnostic;
 
     internal RuneLiteMinimapSetupDialog(Bitmap currentWindow)
     {
@@ -24,13 +33,14 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
         ClientSize=new(980,760);MinimumSize=new(790,610);
         BackColor=Color.FromArgb(18,25,38);ForeColor=Color.WhiteSmoke;
         var layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new(14),ColumnCount=1,RowCount=4};
-        layout.RowStyles.Add(new(SizeType.Absolute,102));
+        layout.RowStyles.Add(new(SizeType.Absolute,111));
         layout.RowStyles.Add(new(SizeType.Percent,100));
-        layout.RowStyles.Add(new(SizeType.Absolute,121));
+        layout.RowStyles.Add(new(SizeType.Absolute,145));
         layout.RowStyles.Add(new(SizeType.Absolute,50));
         layout.Controls.Add(new Label{Dock=DockStyle.Fill,AutoSize=false,
-            Text="Bitte auf den WEISSEN SPIELERPUNKT in der RuneLite-Minimap klicken. " +
-                 "RuneLite muss im Spiel sein; Minimap-Norden oben und Zoom ganz heraus einstellen. " +
+            Text="Der Spielerpunkt wird automatisch gesucht. Bitte die gelbe Markierung überprüfen; " +
+                 "nur bei falscher Erkennung den Punkt manuell anklicken. " +
+                 "RuneLite muss im Spiel sein; Minimap-Norden oben, Minimap-Zoom auf Standard (4 px/Tile). " +
                  "Das Bild dient nur zur Eingabegeometrie, nicht zur Positionserkennung. " +
                  "Nach Bestätigung wird RuneLite in den Vordergrund geholt und die echte Windows-Maus " +
                  "für kurze, einzeln überwachte Spielklicks bewegt. Andere Programme dürfen den Fokus " +
@@ -47,7 +57,8 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
             double top=(preview.ClientSize.Height-screenshot.Height*scale)/2;
             int x=(int)Math.Floor((e.X-left)/scale),y=(int)Math.Floor((e.Y-top)/scale);
             if(x<0||y<0||x>=screenshot.Width||y>=screenshot.Height)return;
-            selected=new(x,y);hint.Text=$"Ausgewählter Mittelpunkt: x={x}, y={y} · " +
+            selected=new(x,y);selectedAutomatically=false;
+            hint.Text=$"Manuell gewählt: x={x}, y={y} · " +
                 (IsWhitePlayerMark(screenshot,selected.Value)?"weiße Spielermarkierung sichtbar":
                     "keine weiße Spielermarkierung erkannt – bitte genauer klicken");
             accept.Enabled=CanAccept();preview.Invalidate();
@@ -65,7 +76,12 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
             e.Graphics.DrawLine(pen,x+5,y,x+13,y);
         };
         layout.Controls.Add(preview,0,1);
-        hint.AutoSize=true;hint.Text="Bitte weißen Spielerpunkt anklicken.";
+        bool foundAutomatically=RuneLiteMinimapMarker.TryLocate(screenshot,out var found,out var detected);
+        markerDiagnostic=detected;
+        if(foundAutomatically){selected=found;selectedAutomatically=true;}
+        hint.AutoSize=true;hint.Text=foundAutomatically?
+            $"Spielerpunkt automatisch erkannt: x={found.X}, y={found.Y} · gelben Kreis prüfen.":
+            "Keine eindeutige Erkennung – bitte den echten Spielerpunkt im Bild anklicken.";
         hint.ForeColor=Color.LightYellow;
         var hintRow=new FlowLayoutPanel{Dock=DockStyle.Top,Height=28};hintRow.Controls.Add(hint);
         var controls=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=true};
@@ -74,10 +90,15 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
         pixelsPerTile.Minimum=3;pixelsPerTile.Maximum=16;pixelsPerTile.DecimalPlaces=1;
         pixelsPerTile.Increment=.5m;pixelsPerTile.Value=4;
         controls.Controls.Add(pixelsPerTile);
-        north.Text="Minimap zeigt Norden oben, vollständig herausgezoomt";
+        controls.Controls.Add(new Label{Text="3D-Kamera-Zoom:",AutoSize=true,Margin=new(8,8,5,0)});
+        cameraZoom.DropDownStyle=ComboBoxStyle.DropDownList;cameraZoom.Width=174;
+        cameraZoom.Items.AddRange(["Weit heraus", "Mittel", "Nah", "Unverändert"]);
+        cameraZoom.SelectedIndex=0;
+        controls.Controls.Add(cameraZoom);
+        north.Text="Minimap zeigt Norden oben, Standard-Zoom (4 Pixel/Tile)";
         north.AutoSize=true;north.CheckedChanged+=(_,_)=>accept.Enabled=CanAccept();
         controls.Controls.Add(north);
-        foregroundConsent.Text="Ich erlaube ausschließlich für diesen Test echte Mausbewegungen und Klicks im Vordergrund-RuneLite.";
+        foregroundConsent.Text="Ich erlaube für diesen Test Kamera-Scrollen sowie echte Mausbewegungen und Klicks im Vordergrund-RuneLite.";
         foregroundConsent.AutoSize=true;
         foregroundConsent.CheckedChanged+=(_,_)=>accept.Enabled=CanAccept();
         controls.Controls.Add(foregroundConsent);

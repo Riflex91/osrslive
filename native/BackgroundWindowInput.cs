@@ -5,6 +5,74 @@ namespace OSRSLiveDiagnostics;
 internal static class BackgroundWindowInput
 {
     internal sealed record ForegroundClickResult(bool Inserted,string Reason,int InputEvents);
+    internal sealed record CameraZoomResult(bool Inserted,string Reason,int InputEvents);
+
+    internal static (int Outward,int Inward) CameraWheelPlan(RuneLiteCameraZoomPreset preset)=>
+        preset switch
+        {
+            RuneLiteCameraZoomPreset.Unchanged=>(0,0),
+            RuneLiteCameraZoomPreset.Medium=>(72,14),
+            RuneLiteCameraZoomPreset.Near=>(72,28),
+            _=>(72,0)
+        };
+
+    internal static async Task<CameraZoomResult> SetRuneLiteCameraZoomAsync(
+        IntPtr window,Size expectedSize,RuneLiteCameraZoomPreset preset,
+        Func<bool> shouldStop,CancellationToken ct)
+    {
+        if(preset==RuneLiteCameraZoomPreset.Unchanged)
+            return new(true,"USER_REQUESTED_UNCHANGED",0);
+        if(shouldStop()||!TryClientSize(window,out var size)||size!=expectedSize)
+            return new(false,"ZOOM_WINDOW_OR_GEOMETRY_CHANGED",0);
+        GetWindowThreadProcessId(window,out uint expectedPid);
+        if(expectedPid==0)return new(false,"ZOOM_WINDOW_PID_UNAVAILABLE",0);
+        if(!SameForegroundRoot(window))
+        {
+            if(!SetForegroundWindow(window))return new(false,"ZOOM_FOREGROUND_ACTIVATION_DENIED",0);
+            await Task.Delay(120,ct);
+        }
+        if(shouldStop()||!SameForegroundRoot(window))
+            return new(false,"ZOOM_RUNELITE_NOT_FOREGROUND",0);
+        // World viewport, away from the minimap and interactive UI panels.
+        var screen=new POINT{X=size.Width/3,Y=size.Height/3};
+        if(!ClientToScreen(window,ref screen)||
+            !HitBelongsToExpectedWindow(window,expectedPid,screen))
+            return new(false,"ZOOM_VIEWPORT_COVERED",0);
+        if((GetAsyncKeyState(0x01)&0x8000)!=0||
+           (GetAsyncKeyState(0x02)&0x8000)!=0)
+            return new(false,"ZOOM_PHYSICAL_BUTTON_HELD",0);
+        if(!TryNormalizeAbsolute(screen.X,screen.Y,GetSystemMetrics(76),GetSystemMetrics(77),
+            GetSystemMetrics(78),GetSystemMetrics(79),out int px,out int py))
+            return new(false,"ZOOM_SCREEN_MAPPING_INVALID",0);
+        if(SendInput(1,[Mouse(px,py,0x0001|0x8000|0x4000)],Marshal.SizeOf<INPUT>())!=1)
+            return new(false,"ZOOM_CURSOR_MOVE_FAILED",0);
+        if(!GetCursorPos(out var actual)||Math.Abs(actual.X-screen.X)>1||
+           Math.Abs(actual.Y-screen.Y)>1)
+            return new(false,"ZOOM_CURSOR_UNVERIFIED",1);
+        // A bounded wheel sequence first reaches the outer limit and then
+        // applies a user-selected *relative* offset. RuneLite's Camera plugin
+        // config may override wheel speed/limits; the exported plugin does
+        // not provide the camera scale, so no exact numeric zoom is claimed.
+        var (outward,inward)=CameraWheelPlan(preset);
+        int inserted=1;
+        for(int i=0;i<outward+inward;i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            if(shouldStop()||!SameForegroundRoot(window)||
+               !TryClientSize(window,out size)||size!=expectedSize||
+               !HitBelongsToExpectedWindow(window,expectedPid,screen)||
+               !GetCursorPos(out actual)||Math.Abs(actual.X-screen.X)>1||
+               Math.Abs(actual.Y-screen.Y)>1)
+                return new(false,"ZOOM_TARGET_OR_FOCUS_CHANGED",inserted);
+            int delta=i<outward?-120:120;
+            if(SendInput(1,[Mouse(0,0,0x0800,unchecked((uint)delta))],
+                Marshal.SizeOf<INPUT>())!=1)
+                return new(false,"ZOOM_WHEEL_EVENT_FAILED",inserted);
+            inserted++;
+            await Task.Delay(14,ct);
+        }
+        return new(true,"WHEEL_EVENTS_SENT_ZOOM_NOT_API_VERIFIED",inserted);
+    }
 
     // RuneLite is a Java/AWT application. PostMessage success only shows that
     // Win32 queued messages, not that the AWT canvas accepted a game click.
@@ -80,8 +148,8 @@ internal static class BackgroundWindowInput
     internal static int MouseInputStructSize()=>Marshal.SizeOf<INPUT>();
     internal static bool IsRuneLiteForeground(IntPtr window)=>
         window!=IntPtr.Zero&&IsWindow(window)&&SameForegroundRoot(window);
-    private static INPUT Mouse(int dx,int dy,uint flags)=>new(){Type=0,MouseData=new(){
-        X=dx,Y=dy,Flags=flags}};
+    private static INPUT Mouse(int dx,int dy,uint flags,uint data=0)=>new(){Type=0,MouseData=new(){
+        X=dx,Y=dy,Flags=flags,Data=data}};
     private static bool SameForegroundRoot(IntPtr window)
     {
         IntPtr foreground=GetForegroundWindow();

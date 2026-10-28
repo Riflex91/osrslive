@@ -13,7 +13,13 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   keinen dadurch bestätigten Wegfortschritt. 1.8.24 prüft nun echte
   Win32-SendInput-Mausklicks auf RuneLite **nur im Vordergrund**, mit
   separater ausdrücklicher Nutzerfreigabe und sofortigem Fokus-/Ziel-
-  Stopp. Die neue Eingabe ist weiterhin **nicht live bewiesen**. Alle Schritte und Grenzen stehen
+  Stopp. Der 1.8.24-Live-Test bestätigt echte SendInput-Bewegung und einen
+  erreichten Wegpunkt. 1.8.25 korrigiert wiederholte API-Samples und die
+  tolerierte unmittelbare Endpunktüberschreitung, erkennt den kleinen
+  Spieler-Minimap-Ring nach Nutzer-Screenshot automatisch (mit manuellem
+  Fallback) und bietet ein ausdrücklich gewähltes 3D-Kamera-Wheel-Preset.
+  Numerischer Kamera-Zoom wird vom Plugin nicht geliefert; nur die
+  Windows-Eingabe ist prüfbar. Alle Schritte und Grenzen stehen
   in der Übergabe; keine automatische Konto-/Loginbedienung.
 - Alle Weltkoordinaten stammen vom geprüften lokalen Plugin-Hub-Export;
   keine Screenshot-Positionserkennung oder geratenen Ziffern freigeben.

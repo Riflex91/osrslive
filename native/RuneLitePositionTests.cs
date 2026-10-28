@@ -40,7 +40,7 @@ internal static class RuneLitePositionTests
         var motion=new RuneLiteMotionTrace();
         var initialMotion=motion.Observe(new WorldTile(3141,3212,0),now,2);
         Require(initialMotion is not null&&initialMotion.Contains("FIRST_CONFIRMED")&&
-                initialMotion.Contains("autonomous_input=false"),
+                initialMotion.Contains("input_initiator=UNATTRIBUTED_BY_OBSERVER"),
             "movement log starts only after the caller supplies a confirmed tile");
         Require(motion.Observe(new WorldTile(3141,3212,0),now.AddSeconds(1),3) is null,
             "stable confirmed frames increment counters without duplicate movement events");
@@ -86,7 +86,8 @@ internal static class RuneLitePositionTests
         RuneLiteRouteCoachTests.Run();
         RuneLiteRouteProgressTests.Run();
         RuneLiteAutoWalkTests.Run();
-        Console.WriteLine("RUNELITE GRID PASS: plugin event checks, guarded opt-in minimap projection and waypoint feedback tests; live movement remains unverified");
+        RuneLiteMinimapMarkerTests.Run();
+        Console.WriteLine("RUNELITE GRID PASS: plugin events, guarded minimap marker matching, opt-in input projection and waypoint feedback tests");
     }
     internal static async Task OcrFixture(OcrEngine engine)
     {

@@ -1,4 +1,89 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.24
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.25
+
+## 1.8.25 – SendInput live bestätigt; Spielerpunkt und Kamera automatisch vorbereiten
+
+Echtes Nutzerlog von 1.8.24 am 28.10.2026,
+19:38:04–19:39:20 Europe/Berlin (322 Zeilen), plus
+annotierter Screenshot aus RuneLite. Der seit 1.8.24
+aktivierte echte Win32-SendInput funktioniert **live**:
+Vier `FOREGROUND_INPUT_INSERTED`-Kommandos führten zu
+mehreren neuen API-Kacheln auf dem geplanten Kollisionsweg.
+Bei der zweiten Kalibrierung um 19:38:46 wurde von
+3220/3198 bis 3226/3196 gegangen; für den Wegpunkt
+3227/3196 folgte ein `WAYPOINT_CONFIRMED`, danach
+startete sogar automatisch ein zweiter Klick.
+Das Plugin und der Input-Transport arbeiten damit
+erstmals **zusammen**. Das ist noch kein bestätigter
+vollständiger Lauf bis Lumbridge.
+
+Die zwei verbliebenen Stop-Ursachen sind unabhängig:
+
+1. Im Fenster wurde `API_POSITION_UPDATED` auch für
+   die erneute Abfrage derselben Datei mit `new_event=false`
+   bis zum Ablauf der Dreisekundenschwelle gemeldet.
+   `Observe` erhielt diese alte Zeitmarke erneut und
+   wertete den gleichen bereits bestätigten Path-Index
+   als `OFF_PATH` (19:38:24 und 19:39:17). 1.8.25 ruft
+   `Observe` nur noch bei **tatsächlich neuer** API-
+   Ereigniszeit auf. Wiederholte bestätigte Kacheln
+   bleiben selbst bei neuer Zeitmarke ohne Fehlstopp;
+   echte rückwärts gerichtete Schritte werden geblockt.
+2. Nach einem bestätigten Path-Prefix bis 3230/3194
+   meldete das echte Plugin 3234/3194, also nur **eine**
+   Kachel neben dem angeklickten Waypoint 3233/3194.
+   Die Verifikation blockte dies bislang streng als
+   fremden Pfad. Jetzt erlaubt sie nur nach ausreichend
+   zuvor verifizierten Path-Tiles eine einmalige
+   `WAYPOINT_NEAR_CONFIRMED`-Endpunkttoleranz von genau
+   einer Kachel, nur bei gleicher Ebene; anschließend
+   ist eine **neue** Kollisionsroute erforderlich.
+   Ein echtes frühes Off-Path bleibt ein Stopp.
+
+Der Nutzer hat einen markierten Screenshot bereitgestellt
+(nicht ins Repo übernommen). Die roten Linien kreuzen
+den sichtbaren runden Spieler-Minimap-Marker etwa bei
+Bildpunkt 666/137 inklusive Fenster-Titelleiste;
+das entspricht etwa Client-x666/y111. Die bisher
+manuell angenommenen Zentren x643–645 lagen ca. 20px
+zu weit links. Ein lokaler reproduzierbarer Bildtest
+ergab **einen** eindeutigen Treffer: 16 von 16 dunklen
+Ringpunkten um einen hellen 15px-Marker, im begrenzten
+oberen rechten Minimap-Feld. `RuneLiteMinimapMarker`
+sucht diesen Ring ausschließlich in einem aktuellen
+WGC-Clientbild im RAM. Mehrere gleichartige Marker,
+fehlende Evidenz oder eine andere Fenstergeometrie
+führen zum weiterhin verfügbaren manuellen Kalibrieren;
+ein automatisch gesetzter gelber Kreis muss vor Start
+vom Nutzer im Dialog **geprüft und bestätigt** werden.
+Screenshots/Pixel/Accounts werden nicht gespeichert,
+die reale Weltkachel kommt weiterhin nur aus dem Plugin.
+
+Neu ist daneben ein vom Nutzer gewähltes 3D-Kamera-
+Zoom-Preset `Far`, `Medium`, `Near`, `Unchanged`. Nach
+der ausdrücklichen Mausfreigabe bringt der Client
+RuneLite in den Vordergrund, richtet den Mauszeiger
+auf den verifizierten Welt-Viewport und sendet eine
+begrenzte Serie echter Windows-Mausradereignisse.
+Zuerst wird Richtung äußerem Zoomlimit gefahren,
+danach optional eine feste Anzahl Schritte nach innen.
+Die Einstellung ist **relativ und abhängig von den
+RuneLite-Camera-Plugin-Optionen**, denn der vorhandene
+OSRS Toolkit Exporter enthält keinen `getScale()`-
+Kamerawert. `ZOOM_INPUT_SENT` bestätigt deshalb nur
+die Windows-Eingaben und nie einen genauen Kamera-
+Zoomwert. Der **separate Minimap-Zoom** bleibt
+im Test auf RuneLites API-Standard **4 Pixel/Tile**;
+der Nutzer bestätigt weiterhin Nordausrichtung und
+Standard-Minimap-Zoom. Die offiziellen RuneLite-
+APIs besitzen `getMinimapZoom`, aber der installierte
+Exporter übermittelt diese Information nicht. Bei
+anderer Skalierung darf die Projektion nicht als
+verifiziert gelten.
+
+Windows-CI prüft synthetische Ring-Erkennung,
+Ambiguitätsablehnung, Export-Repeat-Filter,
+ein Tile Toleranz am Endpunkt und echte Off-Path-
+Sperren. Erster Live-Test dieser Änderungen offen.
 
 ## 1.8.24 – Erster echter RuneLite-Mausklick statt PostMessage
 

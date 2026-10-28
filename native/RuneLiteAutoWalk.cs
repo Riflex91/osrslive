@@ -103,7 +103,24 @@ internal sealed class RuneLiteAutoWalk
             return new("IGNORED","no_post_click_api_event=true",false);
         var p=pending;
         int index=Array.FindIndex(p.Plan.PathPrefix,t=>t==tile)+1;
-        if(index<=p.LastIndex)
+        // A reread of the same exporter event is NOT a new move. Even a
+        // genuinely later event at the same tile is no backwards motion.
+        if(index==p.LastIndex&&index>0)
+            return new("IGNORED","tile_unchanged_since_last_confirmed_progress=true",false);
+        if(index<p.LastIndex&&index>0)
+            return new("OFF_PATH","previously_confirmed_route_tile_revisited=true "+
+                $"observed={tile.X},{tile.Y},{tile.Plane} last_index={p.LastIndex} current_index={index}",false);
+        if(index==0&&p.LastIndex>0&&
+            tile.Plane==p.Plan.Waypoint.Plane&&tile.Distance(p.Plan.Waypoint)<=1&&
+            p.LastIndex>=Math.Max(2,p.Plan.WaypointIndex/2))
+        {
+            pending=null;
+            return new("WAYPOINT_NEAR_CONFIRMED",
+                $"observed={tile.X},{tile.Y},{tile.Plane} waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
+                $"one_tile_endpoint_tolerance=true last_verified_path_index={p.LastIndex} "+
+                "requires_fresh_collision_replan=true confirmed_by=NEW_PLUGIN_API_EVENT",true);
+        }
+        if(index<=0)
             return new("OFF_PATH","tile_not_a_forward_step_on_dispatched_route=true "+
                 $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
                 $"observed={tile.X},{tile.Y},{tile.Plane} expected={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
@@ -158,6 +175,11 @@ internal static class RuneLiteAutoWalkTests
             "unverified jumping edges cannot be clicked");
         Require(BackgroundWindowInput.MouseInputStructSize()==(IntPtr.Size==8?40:28),
             "SendInput MOUSEINPUT and INPUT must match the native architecture layout");
+        Require(BackgroundWindowInput.CameraWheelPlan(RuneLiteCameraZoomPreset.Far)==(72,0)&&
+                BackgroundWindowInput.CameraWheelPlan(RuneLiteCameraZoomPreset.Medium)==(72,14)&&
+                BackgroundWindowInput.CameraWheelPlan(RuneLiteCameraZoomPreset.Near)==(72,28)&&
+                BackgroundWindowInput.CameraWheelPlan(RuneLiteCameraZoomPreset.Unchanged)==(0,0),
+            "camera preset always starts from a bounded wheel reference, unless untouched");
         Require(BackgroundWindowInput.TryNormalizeAbsolute(-1920,0,-1920,-100,3840,2160,
                     out int firstX,out int firstY)&&firstX==0&&firstY>0&&
                 BackgroundWindowInput.TryNormalizeAbsolute(1919,2059,-1920,-100,3840,2160,
@@ -189,6 +211,9 @@ internal static class RuneLiteAutoWalkTests
         Require(!walk.CanDispatch(now,now),"never send a second click before event confirmation");
         Require(walk.Observe(new(3202,3200),now.AddMilliseconds(650),now.AddMilliseconds(700)).Status=="PROGRESS_CONFIRMED",
             "API must verify incremental on-path progress");
+        Require(walk.Observe(new(3202,3200),now.AddMilliseconds(650),now.AddMilliseconds(850)).Status=="IGNORED"&&
+                walk.Observe(new(3202,3200),now.AddMilliseconds(920),now.AddMilliseconds(950)).Status=="IGNORED",
+            "reread exporter events and a repeated same-tile event cannot cause a false off-path stop");
         Require(walk.Observe(new(3207,3200),now.AddSeconds(2),now.AddSeconds(2)).Status=="WAYPOINT_CONFIRMED",
             "API tile near the selected waypoint enables replanning");
         Require(walk.CanDispatch(now.AddSeconds(2),now.AddSeconds(2)),
@@ -201,6 +226,14 @@ internal static class RuneLiteAutoWalkTests
             "a pre-click event cannot corroborate a new input");
         Require(walk.Observe(new(3202,3201),now.AddSeconds(3),now.AddSeconds(3)).Status=="OFF_PATH",
             "unexpected real API coordinates stop the walk");
+        walk.Stop();walk.Start(goal,geom,now);walk.Sent(plan,now,now);
+        Require(walk.Observe(new(3204,3200),now.AddSeconds(1),now.AddSeconds(1)).Status=="PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3209,3200),now.AddSeconds(2),now.AddSeconds(2)).Status=="WAYPOINT_NEAR_CONFIRMED"&&
+                !walk.WaitingForMovement,
+            "one-tile overshoot near a far waypoint after confirmed path progress is replanned safely");
+        walk.Stop();walk.Start(goal,geom,now);walk.Sent(plan,now,now);
+        Require(walk.Observe(new(3200,3201),now.AddSeconds(1),now.AddSeconds(1)).Status=="OFF_PATH",
+            "early off-route observations are still rejected even if close to the start");
         Require(walk.Timeout(now.AddSeconds(12))=="POSITION_EVENT_TIMEOUT",
             "stalled plugin feedback is an explicit input failure");
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
