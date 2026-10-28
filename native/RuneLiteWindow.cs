@@ -6,6 +6,7 @@ internal sealed class RuneLiteWindow:Form
 {
     private readonly RuneLiteApiPositionSource source=new();
     private readonly RuneLiteMotionTrace movement=new();
+    private readonly RuneLiteRouteProgress routeProgress=new();
     private readonly SemaphoreSlim routingSemaphore=new(1,1);
     private readonly Diagnostics log=new();
     private readonly ClientFailureLog failureLog;
@@ -27,8 +28,10 @@ internal sealed class RuneLiteWindow:Form
     private DateTimeOffset lastExportSummaryLoggedUtc;
     private WorldTile? lastVerifiedTile;
     private DateTimeOffset lastMotionEventUtc;
+    private DateTimeOffset lastPositionApiEventUtc;
     private string latestPositionDescription="Noch keine bestätigte Position";
     private string routeDescription="Route: Ziel wählen und neue RuneLite-Position abwarten.";
+    private string routeProgressDescription="Routenverlauf: Noch keine Vergleichsposition.";
     private Task<WorldMapData>? routeLoad;
     private WorldMapData? routeData;
     private long routeGeneration;
@@ -42,7 +45,7 @@ internal sealed class RuneLiteWindow:Form
         BackColor=Color.FromArgb(18,25,38);ForeColor=Color.WhiteSmoke;
         var panel=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new(20),ColumnCount=1,RowCount=8};
         panel.RowStyles.Add(new(SizeType.Absolute,42));panel.RowStyles.Add(new(SizeType.Absolute,42));
-        panel.RowStyles.Add(new(SizeType.Absolute,60));panel.RowStyles.Add(new(SizeType.Absolute,110));
+        panel.RowStyles.Add(new(SizeType.Absolute,60));panel.RowStyles.Add(new(SizeType.Absolute,138));
         panel.RowStyles.Add(new(SizeType.Absolute,76));panel.RowStyles.Add(new(SizeType.Percent,100));
         panel.RowStyles.Add(new(SizeType.Absolute,76));panel.RowStyles.Add(new(SizeType.Absolute,42));
         panel.Controls.Add(new Label{Text="OSRS PLAY · RUNELITE · DIAGNOSE",Dock=DockStyle.Fill,
@@ -70,6 +73,8 @@ internal sealed class RuneLiteWindow:Form
         navigationTarget.SelectedIndex=0;
         navigationTarget.SelectedIndexChanged+=(_,_)=>
         {
+            routeProgress.Reset();
+            routeProgressDescription="Routenverlauf: Neuer Zielvergleich startet.";
             var selected=SelectedDestination();
             log.Add(Severity.INFO,"RUNELITE_NAV","TARGET_SELECTED",
                 $"target={(selected is null?"NONE":selected.Id.Replace(' ','_'))} "+
@@ -94,6 +99,8 @@ internal sealed class RuneLiteWindow:Form
         {
             paused=!paused;generation++;source.Reset();movement.Reset();
             lastMotionEventUtc=default;lastRouteEventUtc=default;
+            lastPositionApiEventUtc=default;routeProgress.Reset();
+            routeProgressDescription="Routenverlauf: Verbindung pausiert.";
             position.Text="Position unbekannt";
             lastVerifiedTile=null;latestPositionDescription="Verbindung pausiert";
             routeGeneration++;routeDescription="Route: Verbindung pausiert.";
@@ -327,9 +334,12 @@ internal sealed class RuneLiteWindow:Form
         if(state.Tile is null&&lastVerifiedTile is not null)
         {
             routeGeneration++;lastRouteEventUtc=default;
+            lastPositionApiEventUtc=default;routeProgress.Reset();
             routeDescription="Route: Position aus dieser Sitzung nicht verfügbar.";
+            routeProgressDescription="Routenverlauf: Warte auf eine neue API-Position.";
         }
         lastVerifiedTile=state.Tile;
+        if(state.Tile is not null)lastPositionApiEventUtc=state.ObservedUtc;
         latestPositionDescription=state.Tile is not null?
             (state.Status=="API_POSITION_UPDATED"?
                 "Quelle: offizielles RuneLite-API-Ereignis · kürzlich aktualisiert.":
@@ -361,6 +371,7 @@ internal sealed class RuneLiteWindow:Form
         long request=++routeGeneration;
         var destination=SelectedDestination();
         var tile=lastVerifiedTile;
+        var eventAt=lastPositionApiEventUtc;
         if(paused||destination is null||tile is null)
         {
             routeDescription=destination is null?"Route: Ziel auswählen.":
@@ -388,6 +399,8 @@ internal sealed class RuneLiteWindow:Form
             if(IsDisposed||closing.IsCancellationRequested||request!=routeGeneration)return;
             if(path is null)
             {
+                routeProgress.Reset();
+                routeProgressDescription="Routenverlauf: Ohne geprüften Weg nicht messbar.";
                 routeDescription="Route: Kein geprüfter Weg in den verfügbaren F2P-Kollisionsdaten.";
                 log.Add(Severity.WARN,"RUNELITE_ROUTE","NO_ROUTE",
                     $"target={destination.Id.Replace(' ','_')} from={tile.X},{tile.Y},{tile.Plane} "+
@@ -399,6 +412,13 @@ internal sealed class RuneLiteWindow:Form
                 routeDescription=guide.Display;
                 log.Add(Severity.INFO,"RUNELITE_ROUTE","ROUTE_RECALCULATED",
                     guide.Diagnostic+" source=PLUGIN_HUB_EXPORT");
+                if(eventAt!=default)
+                {
+                    var progress=routeProgress.Observe(tile,destination,path,eventAt);
+                    routeProgressDescription=progress.Display;
+                    log.Add(Severity.INFO,"RUNELITE_ROUTE","PROGRESS",
+                        progress.Diagnostic+" source=PLUGIN_HUB_EXPORT");
+                }
             }
             UpdateDetailText();RefreshLogPreview();
         }
@@ -407,6 +427,8 @@ internal sealed class RuneLiteWindow:Form
         {
             if(IsDisposed||closing.IsCancellationRequested||request!=routeGeneration)return;
             routeLoad=null;routeDescription="Route: geprüfte Kartendaten derzeit nicht verfügbar.";
+            routeProgress.Reset();
+            routeProgressDescription="Routenverlauf: Wartet auf verifizierte Kartendaten.";
             failureLog.ReportFailure("RUNELITE_ROUTE","ROUTE_DATA_UNAVAILABLE",
                 ExceptionDiagnostic.Describe(ex));
             UpdateDetailText();UpdateFailureBanner();RefreshLogPreview();
@@ -424,7 +446,7 @@ internal sealed class RuneLiteWindow:Form
             .Select(e=>e.Display+(e.Recent?"":" (älterer Stand)"));
         string others=string.Join(" · ",summaries);
         detail.Text=latestPositionDescription+Environment.NewLine+navigation+Environment.NewLine+
-            routeDescription+Environment.NewLine+
+            routeDescription+Environment.NewLine+routeProgressDescription+Environment.NewLine+
             (others.Length>0?"Lokale Exportdaten: "+others:
                 "Lokale Exportdaten: noch keine verifizierten Zusatzdateien.");
     }

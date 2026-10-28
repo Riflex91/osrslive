@@ -1,4 +1,54 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.20
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.21
+
+## 1.8.21 – Live-A*-Navigation bestätigt, diagonale Logklassifikation repariert
+
+Das zweite reale 1.8.20-Protokoll vom 28.10.2026,
+18:20:50–18:21:22 Uhr Europe/Berlin bestätigt
+42 API-Proben, zehn neue Kachelereignisse,
+zehn `RUNELITE_ROUTE ROUTE_RECALCULATED`-Einträge
+**nach** Auswahl des Ziels Lumbridge. Die
+kollisionsbasierte Routenlänge sank beim manuellen
+Gehen von 92 auf 73 Schritte. 72 Regionen und
+421 typisierte Transporte wurden ohne Map-Referenzbilder
+geladen; keine neuen Positions-/Routingfehler,
+keine OCR oder Grafikaufnahme zur Positionsfreigabe.
+Die alleinige rote Meldung betrifft nach wie vor
+die ausdrücklich nicht implementierte Spielautomatik.
+
+Beim Prüfen fiel ein gezielter Logfehler auf:
+`dx=1,dy=-1` zwischen benachbarten Diagonal-Tiles
+wurde als `non_adjacent_observation=true`
+markiert, weil die bisherige Formel Manhattan-Distanz
+statt Chebyshev-Abstand benutzte. 1.8.21 repariert
+das, ergänzt `chebyshev_tiles` und ersetzt
+`capture_gap_ms` (kein Screenshot mehr im
+RuneLite-Companion) durch korrektes `event_gap_ms`.
+Negative Tests für echte Mehrfeld-Sprünge bleiben.
+Der Nutzer-Live-Test von 1.8.21 steht noch aus.
+
+Zusätzlich erhält der Companion einen rein lesenden
+`RuneLiteRouteProgress`-Zustand pro ausgewähltem Ziel.
+Die Fortschrittsanzeige benutzt ausschließlich aktuelle
+API-Ereignisse und bereits aus gepinnten Kollisionen
+berechnete A*-Routen; die vorherige Weg-Kachelmenge
+wird vor jeder Neuberechnung mit der **jetzt**
+gemeldeten Spielerposition verglichen. Ein Aufruf
+meldet `BASELINE`, `ON_PREVIOUS_ROUTE`,
+`OFF_PREVIOUS_ROUTE`, `ARRIVED` oder `LEFT_GOAL`,
+`step_delta` misst die Änderung der **verbleibenden
+Routenschritte** und ist nicht die Zahl tatsächlich
+gelaufener Kacheln. Der Zielwechsel, die Pausierung
+und unzuverlässige API-/Kartendaten setzen den
+Fortschritt zurück. Die GUI zeigt die Route und die
+neue fünfte Routenverlauf-Zeile.
+
+Live-Test nach Auto-Update: RuneLite-Profil `auto`,
+Ziel Lumbridge auswählen, erst einige Kacheln auf der
+vorgeschlagenen Route gehen, dann absichtlich davon
+abweichen und bei Bedarf zurückkehren. Die
+`RUNELITE_ROUTE PROGRESS`-Einträge müssen
+die vorherige Wegmenge und die Restschritte trennen.
+Kein Spielinput, kein automatischer Bot-Lauf.
 
 ## 1.8.20 – RuneLite-Eventstream statt OCR und erste Live-Kollisionsroute
 

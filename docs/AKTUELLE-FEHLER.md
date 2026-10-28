@@ -1,4 +1,40 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.20
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.21
+
+**1.8.21 – zweite reale 1.8.20-Routenprobe bestanden,
+Diagnosefehler gefunden:** Im Nutzerlog vom 28.10.2026,
+18:20:50–18:21:22 Uhr Europe/Berlin sind 42
+API-Positionsproben, zehn echte neue API-Ereignisse
+und zehn erfolgreiche `RUNELITE_ROUTE ROUTE_RECALCULATED`
+verzeichnet. Die Lumbridge-Route verbesserte sich von
+92 auf 73 verbleibende Schritte, `ROUTING_ONLY_READY`
+verifizierte 72 Kollisionsregionen und 421 Transporte.
+Kein OCR-Bild, kein Positionsausfall, kein Wegfehler.
+Die einzige rote Meldung `AUTOMATION_NOT_IMPLEMENTED`
+entspricht weiterhin dem dokumentierten Read-only-Modus.
+
+**Neuer manuell testbarer Routenverlauf:** Eine
+zustandsbehaftete, rein lokale Auswertung vergleicht
+das nächste echte RuneLite-API-Tile mit den Kacheln
+der **vorherigen A*-Route** und vermerkt
+`BASELINE`, `ON_PREVIOUS_ROUTE`,
+`OFF_PREVIOUS_ROUTE`, `ARRIVED`, `LEFT_GOAL`
+und `step_delta` zur vorherigen Restlänge.
+Ein übersprungener Bildschirm-/Plugin-Zwischenstand
+wird nicht als tatsächlich gegangener Weg erfunden.
+Zielwechsel, Pause, Quellenverlust oder Routenfehler
+setzen die Verlaufsreferenz zurück. Die GUI bekommt
+einen sichtbar eigenen Routenverlauf; erster Live-Test
+von Abweichung/Rückkehr steht noch aus.
+
+**Korrigierter Logfehler:** Ein OSRS-Diagonalschritt
+(`dx=1,dy=1` oder Vorzeichenvarianten) ist ein
+benachbartes Feld. Die alte Logformel `manhattan_tiles>1`
+meldete ihn fälschlich als `non_adjacent_observation=true`.
+Nun entscheidet `chebyshev_tiles>1` (oder Ebenenwechsel)
+und `event_gap_ms` bezeichnet den Abstand zweier
+API-Exportzeiten. Ein Zwei-Felder-Sprung bleibt ein
+nicht benachbartes Ereignis, keine rekonstruierte Route.
+Windows-CI und neuer Nutzer-Live-Test stehen noch aus.
 
 **1.8.20 – neue Architektur nach 1.8.19-Live-Test:**
 1.8.19 wurde am 28.10.2026, 17:56–17:58 Uhr live mit bereits
