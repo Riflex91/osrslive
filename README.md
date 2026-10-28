@@ -1,4 +1,53 @@
-# OSRS Play 1.8.18 – Live-Positionswechsel, Lese-Navigation und lokale Exportdaten
+# OSRS Play 1.8.19 – Exakte Wiedererkennung bereits bestätigter Grid-Pixel
+
+## Neu in 1.8.19: Stationäre Position ohne unbekannte Ziffern zu erraten
+
+Der nächste echte RuneLite-Live-Test vom 28.10.2026,
+17:33:17–17:34:26 Uhr Europe/Berlin bestätigt die automatische
+Installation von 1.8.18, 40 bestätigte Positionen in 86 Proben,
+31 direkte API-Auswertungen, die neue F2P-Navigationszielauswahl
+und acht von neun erfolgreich eingelesene Zusatzexportdateien
+(eine Datei ist noch nicht vorhanden, kein ungültiger Export).
+Der neue `WAITING_FOR_EXPORT_FRAME`-Zustand unterdrückte sechsmal
+korrekt die OCR eines nachweislich vor dem neuen JSON-Export
+entstandenen Bildes.
+
+**Echte verbleibende Blockade:** Beim Stillstand auf 3176/3198/0
+und später 3202/3193/0 liefert der Plugin Hub nach einigen Sekunden
+keinen neuen Export, denn das Plugin schreibt nur bei Kachelwechseln.
+Auch vier vollständig passende Chunk-/Region-/X/Y-Zahlenlesungen
+können am ersten Ort fehlende unabhängige Pixelvorlagen für `6`
+und `7` nicht ersetzen; später verhindert `32Ø2` sogar vollständige
+X/Y-OCR-Stimmen. 21 Messungen wurden vorübergehend nicht freigegeben;
+nach vier und zehn Sekunden wurden die geforderten roten Warnungen
+und Clipboard-Logs ausgelöst. Die API und der Updater selbst liefen.
+
+**Neue Lösung ohne Positionsraten:** Zwei echte, zeitlich verschiedene,
+zuvor über den offiziellen RuneLite-API-Export bestätigte Aufnahmen
+dürfen gemeinsam einen flüchtigen **Pixelabdruck des gesamten
+World-Location-Zahlenrasters** autorisieren: acht X/Y-Ziffern,
+die Ebene, sechs Chunk- und fünf Region-Ziffern sowie zwei
+wirklich sichtbare Kommas. Nur ein späterer **exakter Treffer**
+dieser Pixelmuster im aktuellen RuneLite-Fenster darf denselben
+alten API-Ort erneut als Kandidaten liefern. Auch dann bleiben
+zwei aktuelle, eigenständige Fensteraufnahmen Pflicht.
+
+Ein anderes Feld **innerhalb desselben Chunks**, eine andere Ebene,
+fehlende Kommas, andere Bildgröße/ein anderes Fenster oder ein neuer
+API-Ort invalidieren den alten Abdruck. Es werden weder OCR-Zeichen
+geschätzt noch Screenshots oder Fingerprint-Hashes gespeichert,
+ausgegeben oder ins Log kopiert. Der Abdruck existiert höchstens
+flüchtig im Arbeitsspeicher und läuft ohne echte neue Bildbeweise ab.
+`stage=GRID_FINGERPRINT`, `TRUSTED_AFTER_TWO_CONFIRMED_FRAMES`,
+`EXACT_CURRENT_PANEL_MATCH`, `CURRENT_PANEL_DIFFERENT` und
+`NO_TRUSTED_REFERENCE` zeigen im Log die Beweiskette mit Zählern.
+
+Die zusätzlichen lokalen Exportübersichten und die rein lesende
+Navigation aus 1.8.18 bleiben bestehen. Gameplay-Automation und
+echte begehbare Routen werden weiterhin nicht behauptet. Der
+1.8.19-Windows-Test und ein neuer Nutzer-Live-Test stehen noch aus.
+
+## Vorherige Version: 1.8.18 – Live-Positionswechsel, Lese-Navigation und lokale Exportdaten
 
 ## Neu in 1.8.18: Positionsnavigation und Zusatzdaten aus dem echten Client
 
