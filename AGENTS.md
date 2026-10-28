@@ -6,14 +6,15 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
 
 - Zielclient ist reguläres RuneLite, gestartet über den offiziellen Jagex
   Launcher. Der separate Entwicklungsclient wurde vom Benutzer verworfen.
-- Standardstart ist derzeit ein nur lesender Companion. Automatische RuneLite-
-  Aufgaben sind noch nicht implementiert. Die eigenständige Pixelprüfung hat
-  die Position live in 1.8.5 bestätigt. Der erste Bewegungs-Live-Lauf in
-  1.8.6 scheiterte an fehlenden Ziffernvorlagen der neuen Chunk-ID;
-  1.8.7 an komplementären OCR-Feldfehlern trotz einer erfolgreichen
-  Einzelbild-Pixelprüfung. Navigation und Spieleingaben bleiben unimplementiert.
-- Erfolgreiche Offline-Fixtures belegen keine funktionierende Live-Navigation.
-  Bekannte OCR-Mehrdeutigkeiten nicht durch geratenen Ziffernersatz freigeben.
+- Standardstart bleibt ohne Spieleingaben. Der inzwischen API-basierte
+  Companion bietet ab 1.8.22 einen nur explizit gestarteten Autowalk-
+  Test mit Nutzer-Minimapkalibrierung. 1.8.23 repariert die im Live-Log
+  erkannte Erstklick-Sperre bei einem stationären Spieler. Die Annahme
+  der gezielten Win32-Fensternachrichten durch echtes RuneLite ist
+  weiterhin **nicht live bewiesen**. Alle Schritte und Grenzen stehen
+  in der Übergabe; keine automatische Konto-/Loginbedienung.
+- Alle Weltkoordinaten stammen vom geprüften lokalen Plugin-Hub-Export;
+  keine Screenshot-Positionserkennung oder geratenen Ziffern freigeben.
 - Das lokale RuneLite-Profil `auto` liegt nicht im Git-Checkout. Keine Konto-,
   Authentifizierungs-, Profilrohdateien oder Bildschirmbilder einchecken.
 - Details zu Tests, Dateien, Plugins und nächsten Schritten stehen in der

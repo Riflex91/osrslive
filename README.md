@@ -1,4 +1,56 @@
-# OSRS Play 1.8.22 – Erster optionaler RuneLite-Autowalk-Test
+# OSRS Play 1.8.23 – Erste automatische Bewegung ohne Startblockade
+
+## Neu in 1.8.23: Kalibrierter Erstklick bei stationärem Charakter
+
+Der reale 1.8.22-Live-Test am 28.10.2026, 19:07–19:09 Uhr
+bestätigt die automatische Installation von 1.8.22,
+den aktuellen Manifestcheck, direkte RuneLite-API-
+Positionsereignisse und zwei erfolgreich bestätigte
+Minimap-Kalibrierungen (Fenster 773×534, Mittelpunkt
+645/112). Beide Kalibrierungen armierten die Automatik,
+**aber kein Klick wurde gesendet**. Ursache: Beim
+ersten Start war das letzte echte RuneLite-Positionsevent
+12 beziehungsweise 33 Sekunden alt. Da das offizielle
+Plugin keine stationären Heartbeats exportiert,
+verhinderte der bisherige 3-Sekunden-Filter gerade
+den ersten Versuch trotz bewusster Nutzerfreigabe.
+
+1.8.23 gestattet nach einer **ausdrücklich bestätigten
+aktuellen Minimap-Kalibrierung** exakt **einen einzigen
+ersten Klick** vom letzten **in dieser laufenden
+OSRS-Play-Sitzung bereits akzeptierten** API-Tile,
+sofern das Ereignis höchstens 60 Sekunden alt ist und
+der Klick binnen zwölf Sekunden nach der Bestätigung
+erfolgt. Der Click bleibt auf den kleinen geprüften
+Minimap-Radius begrenzt. Das ist eine einmalige
+Start-Ausnahme, **kein fiktiver Plugin-Heartbeat**.
+Danach gelten unverändert die strengen Regeln:
+Jeder weitere Klick benötigt ein neues höchstens
+drei Sekunden altes API-Ereignis, das die vorige
+Route in vorwärts gerichteter Reihenfolge bestätigt.
+Bleibt diese Bewegung aus, stoppt der Test nach
+neun Sekunden mit rotem Fehlerhinweis und vollständiger
+Log-Kopie in der Zwischenablage. Ohne vorher jemals
+akzeptiertes API-Ereignis wird weiterhin überhaupt
+nicht geklickt.
+
+**Erneut im Spiel testen:** Alte OSRS Play EXE über
+„Jetzt Updates prüfen“ auf 1.8.23 bringen. Im
+eingeloggten RuneLite-Profil `auto` mindestens einmal
+eine Kachel manuell gehen, danach Ziel Lumbridge wählen
+und den Button „Automatisch gehen (Test)“ benutzen.
+Minimap-Norden oben und Zoom heraus, weißen Punkt
+markieren und zügig bestätigen. Nun sollte ein
+`RUNELITE_AUTOWALK CLICK_INTENT` mit
+`manually_calibrated_first_click=true` und danach
+`WINDOW_MESSAGES_POSTED` erscheinen. Erst wenn RuneLite
+wirklich läuft, folgt `PROGRESS_CONFIRMED` beziehungsweise
+`WAYPOINT_CONFIRMED`. Ist keine neue Bewegung sichtbar,
+bitte die kopierte Logdatei schicken. Die Annahme von
+Fensternachrichten im offiziellen RuneLite ist **noch
+nicht live bestätigt**.
+
+## Vorherige Version: 1.8.22 – Erster optionaler Autowalk-Test
 
 ## Neu in 1.8.22: Automatisch zum ausgewählten Ziel (erster Bewegungstest)
 

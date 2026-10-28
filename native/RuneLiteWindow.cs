@@ -478,6 +478,8 @@ internal sealed class RuneLiteWindow:Form
                     $"target={goal.Id.Replace(' ','_')} minimap_center={center.X},{center.Y} "+
                     $"pixels_per_tile={setup.PixelsPerTile:0.0} client={size.Width}x{size.Height} "+
                     "north_up_confirmed_by_user=true zoom_out_confirmed_by_user=true "+
+                    "first_calibrated_click_last_known_api_max_age_s=60 first_click_window_s=12 "+
+                    "later_clicks_require_event_age_s_at_most=3 "+
                     "click_limit=40 runtime_limit_s=300 verify_each_waypoint=true "+
                     "source=PLUGIN_API no_screenshot_saved=true");
                 _=RefreshRouteAsync();
@@ -531,12 +533,16 @@ internal sealed class RuneLiteWindow:Form
             return;
         }
         clickInProgress=true;
+        bool manuallyAttestedFirstClick=autoWalk.Clicks==0&&
+            now-eventAt>TimeSpan.FromSeconds(3)&&
+            autoWalk.CalibratedFirstClickAllowed(now,eventAt);
         autoWalk.Sent(plan,eventAt,now);
         log.Add(Severity.INFO,"RUNELITE_AUTOWALK","CLICK_INTENT",
             $"command={autoWalk.Clicks} target={goal.Id.Replace(' ','_')} "+
             $"from={tile.X},{tile.Y},{tile.Plane} waypoint={plan.Waypoint.X},{plan.Waypoint.Y},{plan.Waypoint.Plane} "+
             $"waypoint_index={plan.WaypointIndex} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
             $"api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
+            $"manually_calibrated_first_click={manuallyAttestedFirstClick.ToString().ToLowerInvariant()} "+
             "input_not_yet_verified=true screenshot_position_estimation=false");
         try
         {

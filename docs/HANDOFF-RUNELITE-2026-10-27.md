@@ -1,4 +1,51 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.22
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.23
+
+## 1.8.23 – Automatik-Startblockade aus echtem 1.8.22-Lauf beheben
+
+Echtes Nutzerlog 28.10.2026, 19:07:19–19:09:22 Uhr
+Europe/Berlin, OSRS Play 1.8.22 mit automatischem
+Updater `PREVIOUS_UPDATE` und `ALREADY_CURRENT`.
+Am Start lag ein 1.538 Sekunden alter Export einer
+früheren RuneLite-Sitzung vor. Deshalb war die
+erste Nutzeranfrage um 19:07:30 korrekt gesperrt
+(`START_REQUIRES_PLUGIN_POSITION`, Clipboard kopiert).
+Um 19:07:34 folgte ein echtes API-Ereignis.
+Weitere manuelle Schritte um 19:08:21 und 19:08:39
+wurden sauber übernommen; Lumbridge A* war stets bereit.
+
+Eine Minimap-Aufnahme/Kalibrierung startete um 19:07:36,
+wurde um 19:08:51 bestätigt (`ARMED`, Zentrum
+645/112, 4,0 px/Tile). Eine zweite Kalibrierung
+von 19:09:03 bis 19:09:12 gelang ebenfalls.
+**Es gab null `CLICK_INTENT` und null Inputversuche.**
+Die Ursache ist exakt rekonstruierbar: Bei `ARMED`
+war das letzte angenommene Positionsereignis 12 bzw.
+33 Sekunden alt. Der `CanDispatch`-Filter erlaubte
+aber selbst nach bewusst kalibrierter, aktueller
+Minimap nur `event_age <= 3s`. Der unveränderte
+Hub-Exporter sendet bei Stillstand keine Heartbeats.
+Der Nutzer stoppte den ersten Lauf nach 12 Sekunden,
+der zweite war nach zehn Sekunden noch aktiv, als
+das Log kopiert wurde. Kein beweisbarer Klick-Transport-
+Defekt, denn noch kein Klick wurde ausprobiert.
+
+1.8.23 führt `CalibratedFirstClickAllowed` ein:
+Nur **ein** anfänglicher Wegpunkt darf binnen zwölf
+Sekunden nach dem bestätigten Kalibrierungsdialog
+von einem höchstens 60 Sekunden alten, aber bereits
+in **derselben laufenden Programmsitzung** akzeptierten
+API-Ereignis gestartet werden. Ohne so ein
+Sessionereignis gibt es keine Koordinate und keinen
+Klick. Die bereits validierte HWND- und Bildgeometrie,
+kurzer kollisionsgeprüfter Wegpunkt, Transportverbot,
+Timeout, Stopp und Fehler-Clipboard bleiben. Nach
+dem ersten Klick darf eine weitere Eingabe nur nach
+einem neuen höchstens drei Sekunden alten API-Ereignis
+ausgelöst werden. Regressionsprüfungen decken 33s-
+Last-Known-Start, 61s-Ablehnung, abgelaufene 12s-
+Kalibrierung sowie das fortbestehende Verbot weiterer
+Altevent-Klicks ab. Der echte Klick/RuneLite-Java-
+Inputtransport ist weiterhin ungetestet.
 
 ## 1.8.22 – Erster expliziter RuneLite-Bewegungstest
 
