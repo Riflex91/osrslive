@@ -1,4 +1,30 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.29
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.30
+
+**1.8.30 – Korridor-Fix live bestätigt, Stillstand vor Wegpunkt offen:**
+Im echten 1.8.29-Log vom 28.10.2026, 21:14–21:15, kamen zwei
+Wegpunkte und jeweils ein zweiter Spielklick ohne `OFF_PATH`/
+`UNEXPECTED_API_TILE` zustande. Es gab je einen frischen
+Stillstand **zwei Tiles** vor dem Wegpunkt (3229,3170 bzw.
+3235,3182). Der Nutzer wechselte daraufhin den Vordergrund;
+`RUNELITE_FOREGROUND_LOST` schützt absichtlich weiter.
+1.8.30 probiert bei mindestens zwei bestätigten Schritten,
+exakt zwei Rest-Tiles und einer 1,6-Sekunden-Ruhephase
+einen höchstens zweimaligen **neu geplanten** Wiederklick
+vom letzten noch <=3s alten Plugin-Tile. Echte Stillstand-
+Verifikation ohne Exporter-Heartbeat bleibt ausgeschlossen.
+
+Startproblem: Nur ein 22 Minuten altes `position.json` war
+vorhanden; als Live-Position darf es niemals übernommen werden.
+1.8.30 zeigt sie sofort als **UNBESTÄTIGTE historische
+Position**, lässt aber automatische Eingaben davon aus.
+
+Neue optionale Eingabesperre per Windows-Low-Level-Hooks
+blockiert physische Spielklicks/Tasten bei aktivem RuneLite-
+Vordergrund-Test; Esc, Alt-Tab und Systemausstieg bleiben.
+Die Wirkung des Hooks ist auf echtem Windows/RuneLite noch
+zu prüfen. **Hintergrundspielklicks sind mit dem bisherigen
+SendInput-/read-only-Exporter-Weg weiterhin nicht möglich**;
+der gewollte Fokus-Stopp wird nicht abgeschafft.
 
 **1.8.29 – geklärt: 1.8.28-Stopps trotz echter Wegbewegung:**
 Das neue Live-Log vom 28.10.2026, 20:50–20:52, bestätigt

@@ -1,4 +1,83 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.29
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.30
+
+## 1.8.30 – 1.8.29-Live-Beweis und Grenzen von Startup, Hooks und Hintergrund
+
+Neuer 266-Zeilen-Nutzerlog vom 28.10.2026, 21:14:26–21:15:16:
+
+1. Version 1.8.29 wurde **automatisch aktualisiert**:
+   `UPDATER PREVIOUS_UPDATE=Letztes Update installiert und neue EXE gestartet`,
+   neue Binary `build_run=40760899794`, Startup-Manifest
+   `ALREADY_CURRENT remote_version=1.8.29`.
+2. Nach Kalibrierung des weißen Punkts bei `(645,111)`:
+   Klick von `(3222,3160)` zu `(3228,3164)`; echte Positionen
+   `(3224,3160)`, `(3226,3162)`, `(3228,3164)` zeigen
+   `CORRIDOR_PROGRESS_CONFIRMED` und `WAYPOINT_CONFIRMED`.
+   Klick 2 zu `(3231,3171)` verläuft über `(3230,3168)` nach
+   `(3229,3170)`, dann **keine weiteren neuen API-Tiles**.
+   Nach ca. 5 Sekunden `RUNELITE_FOREGROUND_LOST`.
+3. Zweite ausdrücklich gestartete Sitzung: `(3229,3170)`
+   über `(3229,3172)` und `(3230,3174)` zu `(3233,3177)`:
+   `WAYPOINT_CONFIRMED`, danach zweiter Klick zu
+   `(3237,3183)`. Neue Positionen `(3233,3179)`,
+   `(3234,3181)`, `(3235,3182)` – wiederum **zwei
+   Kacheln vor Wegpunkt**, dann etwa fünf Sekunden ohne
+   neues Exportevent. `COPY_REQUEST origin=MANUAL` ging dem
+   `RUNELITE_FOREGROUND_LOST` voraus. Die zweite automatische
+   Fehler-Log-Kopie trat separat korrekt auf.
+4. Keine einzige `UNEXPECTED_API_TILE`-Abweichung; die
+   1.8.29-Korridorlogik funktioniert unter diesen Echtbedingungen.
+
+**1.8.30-Nächster Schritt:** `RecoverNearWaypointAfterQuietPeriod`
+gibt einen begrenzten `WAYPOINT_QUIET_REPLAN` nur frei,
+wenn der **zuletzt per Plugin bestätigte** Tile auf derselben
+Ebene genau zwei Kacheln vor dem Wegpunkt liegt, mindestens
+zwei belegte Zwischenbewegungen existieren, seit 1,6 Sekunden
+kein neuer Tile einging, die bekannte Position maximal drei
+Sekunden alt ist und seit dem Klick mindestens drei Sekunden
+vergangen sind. Maximal zwei vorzeitige Kollision-Neuplanungen
+pro Armierung, sonst `WAYPOINT_STALL_RECOVERY_LIMIT` mit
+Clipboard/roter GUI. Jeder tatsächliche weitere Klick nutzt
+vollständig neue F2P-Kollisionen, verifizierten RuneLite-
+Vordergrund und nur die bisherige gezielte `SendInput`-Route.
+Falls nach einer solchen Neuplanung innerhalb von drei Sekunden
+kein sicherer Folgeklick abgesetzt werden kann, stoppt
+`QUIET_REPLAN_EXPIRED` ebenfalls mit Clipboard/roter GUI.
+Keine Behauptung über gesicherte Stillstandserkennung ohne
+Plugin-Heartbeat. Synthetische Negativfälle sperren altes
+Event, fehlenden Postclick-Fortschritt, zu kurze Ruhephase
+und dritten Versuch.
+
+**Startup:** Beim Start war die einzige gültige Plugin-Datei
+ca. **1336 Sekunden alt**. `RuneLiteApiPositionTracker` hat
+dies bisher korrekt nicht als Live-Koordinate angenommen.
+Die neue `HistoricalPreview` zeigt deren letzte X/Y nur
+mit explizitem **UNBESTÄTIGT**, ohne sie an `lastVerifiedTile`,
+Route oder Klickfreigabe zu geben. Der Exporter sendet kein
+regelmäßiges Position-Heartbeat und muss vom Hersteller
+beim Login/Pluginstart einen neuen Export bekommen, um ohne
+manuelles Bewegen eine belastbare aktuelle Tile zu zeigen.
+
+**Physische Eingabesperre:** Neue optional anzuklickende
+`RuneLiteInputShield`-Funktion nutzt native WH_MOUSE_LL und
+WH_KEYBOARD_LL nur bei bestätigtem RuneLite im Vordergrund
+und während der bewussten Autowalk-Armierung. Menschliche
+Spielklicks und Tasten werden gefiltert, synthetische
+SendInput-Ereignisse sowie Esc/Alt-Tab/Windows-Tasten bleiben
+passierbar. Kein Windows-`BlockInput`, niemals ganzer Desktop,
+bei Hookfehler kein Autowalk. `Esc` löst Stop und Hookfreigabe
+aus. Keine Garantie, dass Windows Low-Level-Hooks dauerhaft
+installiert hält. Muss real auf Windows getestet werden.
+**Hintergrundsteuerung ist noch nicht implementierbar:**
+Windows-SendInput adressiert den System-Eingabestrom;
+erprobtes PostMessage bewirkte im RuneLite/AWT keine
+bestätigte Bewegung. Der Plugin-Hub-Exporter ist read-only.
+Eine echte Hintergrundlösung bräuchte eine zusätzliche
+legitime, verifizierte Steuer-Schnittstelle; diese ist nicht
+vorhanden. Fokus-Stopp bleibt unbedingt bestehen.
+
+Quelle Microsoft: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput
+und https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelmouseproc.
+Jagex-Regeln: https://legal.jagex.com/de-de/docs/rules/rules-of-runescape.
 
 ## 1.8.29 – Weitere 1.8.28-Echtdaten: API überspringt mehrere Kacheln, zu früher Replan
 

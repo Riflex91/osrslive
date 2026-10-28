@@ -1,4 +1,68 @@
-# OSRS Play 1.8.29 – Echte Plugin-Bewegung im sicheren Minimap-Korridor verfolgen
+# OSRS Play 1.8.30 – Wegpunkt-Wiederaufnahme, Startpositions-Vorschau und Eingabeschutz
+
+## 1.8.30: Neue Liveprobe von 1.8.29, zwei weitere Tests vorbereitet
+
+Das echte 266-Zeilen-Log vom 28.10.2026 (21:14–21:15 Uhr)
+zeigt nun **keinen** falschen `UNEXPECTED_API_TILE`-Stopp
+mehr. Die RuneLite-API bestätigte den ersten Wegpunkt
+`(3228,3164)` und nach einem Neustart `(3233,3177)`;
+jeweils folgte ein zweiter echter SendInput-Klick. Die
+Bewegung endete zweimal mit `RUNELITE_FOREGROUND_LOST`.
+Im zweiten Versuch war vorher `COPY_REQUEST origin=MANUAL`
+erfasst – das Öffnen eines anderen Fensters bleibt ein
+beabsichtigter Sicherheitsstopp.
+
+**Neuer Wiederaufnahme-Test:** Die letzten beiden bestätigten
+Kacheln `(3229,3170)` und `(3235,3182)` lagen jeweils
+**genau zwei Kacheln** vor dem angeklickten Wegpunkt. Danach
+lieferte das Plugin mehrere Sekunden keine weitere Position.
+Bei mindestens zwei nach dem Klick bestätigten API-Bewegungen,
+exakt zwei Kacheln Restabstand, mindestens 1,6 Sekunden
+ohne neue Positionsmeldung und einem noch höchstens drei
+Sekunden alten letzten Event erlaubt 1.8.30 einmalig
+eine Neuplanung aus dem **zuletzt echten Plugin-Tile**.
+Es bleiben höchstens zwei solche/sonstige vorzeitigen
+Neuplanungen pro bewusst gestarteter Sitzung. Alte Ereignisse,
+Vordergrundverlust und fehlende Kollision sperren neue Klicks.
+Eine kurze Pause ist **kein Beweis**, dass die Figur tatsächlich
+stillsteht; dies wird ausdrücklich protokolliert.
+
+**Startpositions-Vorschau:** Falls der Exporter beim Start nur
+eine ältere `position.json` besitzt, zeigt OSRS Play nun deren
+letzte checksum-geprüfte X/Y-Koordinate als **UNBESTÄTIGT**,
+einschließlich Zeitstempel im Diagnoseprotokoll. Diese
+historische Position ist kein Nachweis einer laufenden
+Spielsitzung und wird **niemals** als Grundlage automatischer
+Eingaben verwendet. Für die erste sichere Live-Koordinate
+benötigt der bestehende OSRS Toolkit Exporter weiterhin
+ein aktuelles Positionsereignis; die nötige Export-Funktion
+beim Einloggen müsste der Plugin-Anbieter ergänzen.
+
+**Optionaler RuneLite-Eingabeschutz:** Im Automatikbereich
+gibt es die neue, standardmäßig **nicht** ausgewählte Option
+„Eigene RuneLite-Eingaben während des Gehversuchs sperren“.
+Sie filtert physische Spiel-Mausklicks und Tastaturanschläge
+über Windows-Low-Level-Hooks, aber nur während des
+expliziten **Vordergrundtests**. Vom Programm synthetisch
+gesendete Klicks sowie `Esc`, Alt-Tab und andere
+System-Notausstiege bleiben erlaubt. Die Filterwirkung hängt
+von Windows ab; bei Hook-Installationsfehler wird der Test
+nicht gestartet. Die Option zuerst vorsichtig testen.
+
+**Wichtige Grenze:** Das gewöhnliche RuneLite, gestartet über
+den Jagex Launcher, kann durch Windows-`SendInput` nicht
+zuverlässig im Hintergrund angeklickt werden. Frühere
+`PostMessage`-Tests bestätigten keine Wirkung im Spiel;
+der Plugin-Hub-Exporter liefert derzeit **nur Daten**, keine
+Game-Aktionen. 1.8.30 behauptet deshalb **keine**
+Hintergrundautomatik und stoppt weiterhin bei Fokusverlust.
+Eine globale Desktop-Eingabesperre gibt es nicht. Bitte
+beachte auch Jagex' Regeln gegen automatisierte Aktionen:
+https://legal.jagex.com/de-de/docs/rules/rules-of-runescape.
+
+Ein vollständiger Zielweg ist weiterhin im Spiel zu testen.
+
+## Vorherige Version: 1.8.29 – Echte Plugin-Bewegung im sicheren Minimap-Korridor
 
 ## 1.8.29: Große API-Abtastschritte und seitliche Wegabweichungen
 

@@ -37,6 +37,16 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   beobachtet einen maximal zwei Kacheln breiten und nur näher zum
   Wegpunkt führenden Korridor, ohne bei jedem Zwischenereignis
   erneut zu klicken. Es protokolliert jedes Klick-Prefix.
+  Der echte 1.8.29-Test bestätigt diese Reparatur und zwei jeweils
+  automatisch erreichte Wegpunkte, aber zweimal Stillstand zwei
+  Kacheln vor dem nächsten Wegpunkt. 1.8.30 erlaubt nur mit
+  still-rezentem verifiziertem Plugin-Tile eine zweimal begrenzte
+  Wiederaufnahme nach 1,6s ohne neue Position. Es zeigt alte
+  Startup-Exports ausschließlich als unbestätigte Vorschau,
+  und bietet optional einen manuellen Vordergrund-Eingabeschutz
+  mit Esc-Notausstieg. Keine Hintergrundautomatik behaupten:
+  SendInput geht an den Windows-Eingabestrom, nicht gezielt an
+  inaktive RuneLite-Fenster; der Exporter gibt keine Game-Befehle.
   Die strikte
   `RUNELITE_FOREGROUND_LOST`-Sperre bleibt bestehen. Alle Schritte
   und Grenzen stehen

@@ -10,8 +10,9 @@ internal sealed class RuneLiteApiPositionTracker
 {
     private RuneLitePositionExportSource.Snapshot? accepted;
     private static readonly TimeSpan StartupWindow=TimeSpan.FromSeconds(10);
+    internal (WorldTile Tile,DateTimeOffset ExportedAtUtc)? HistoricalPreview{get;private set;}
 
-    internal void Reset()=>accepted=null;
+    internal void Reset(){accepted=null;HistoricalPreview=null;}
 
     internal RuneLitePositionState Observe(RuneLitePositionExportSource.Snapshot? value,
         DateTimeOffset now,string exportDiagnostic)
@@ -33,14 +34,21 @@ internal sealed class RuneLiteApiPositionTracker
         if(accepted is null)
         {
             // An export from an earlier OSRS session is not proof of a
-            // currently logged-in player. Wait for a new real API event.
+            // currently logged-in player. Expose the checksum-verified last
+            // recorded tile to the UI ONLY as a labelled historical preview.
+            // Never turn this into an accepted live tile or a game click.
             if(now-current.ExportedAtUtc>StartupWindow)
+            {
+                HistoricalPreview=(current.Position.Tile,current.ExportedAtUtc);
                 return new("API_WAITING_FOR_NEW_EVENT",Diagnostic:
                     $"export_age_s={(now-current.ExportedAtUtc).TotalSeconds:0} "+
-                    "previous_session_not_assumed=true move_one_tile_to_sync=true "+
+                    "previous_session_not_assumed=true historical_preview_available=true "+
+                    "no_game_input_from_historical_tile=true move_one_tile_to_sync=true "+
                     "screen_fallback=false");
+            }
             accepted=current;
             newEvent=true;
+            HistoricalPreview=null;
         }
         else if(current.ExportedAtUtc>accepted.Value.ExportedAtUtc)
         {
@@ -78,6 +86,7 @@ internal sealed class RuneLiteApiPositionSource:IDisposable
     // Callers must additionally require a recent accepted API tile event.
     internal IntPtr TrustedWindowHandle=>lastWindow;
     internal string? TrustedWindowTitle=>lastTitle;
+    internal (WorldTile Tile,DateTimeOffset ExportedAtUtc)? HistoricalPreview=>tracker.HistoricalPreview;
     private DateTimeOffset lastExportScanUtc;
     internal RuneLiteExportSummarySource.Result AdditionalExports{get;private set;}=
         new([],"stage=ADDITIONAL_EXPORTS result=NOT_SCANNED redacted=true");
