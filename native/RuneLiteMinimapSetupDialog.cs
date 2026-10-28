@@ -9,6 +9,7 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
     private readonly Label hint=new();
     private readonly NumericUpDown pixelsPerTile=new();
     private readonly CheckBox north=new();
+    private readonly CheckBox foregroundConsent=new();
     private readonly Button accept=new();
     private Point? selected;
 
@@ -23,14 +24,17 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
         ClientSize=new(980,760);MinimumSize=new(790,610);
         BackColor=Color.FromArgb(18,25,38);ForeColor=Color.WhiteSmoke;
         var layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new(14),ColumnCount=1,RowCount=4};
-        layout.RowStyles.Add(new(SizeType.Absolute,74));
+        layout.RowStyles.Add(new(SizeType.Absolute,102));
         layout.RowStyles.Add(new(SizeType.Percent,100));
-        layout.RowStyles.Add(new(SizeType.Absolute,94));
+        layout.RowStyles.Add(new(SizeType.Absolute,121));
         layout.RowStyles.Add(new(SizeType.Absolute,50));
         layout.Controls.Add(new Label{Dock=DockStyle.Fill,AutoSize=false,
             Text="Bitte auf den WEISSEN SPIELERPUNKT in der RuneLite-Minimap klicken. " +
                  "RuneLite muss im Spiel sein; Minimap-Norden oben und Zoom ganz heraus einstellen. " +
-                 "Das Bild dient nur zur Eingabegeometrie, nicht zur Positionserkennung.",
+                 "Das Bild dient nur zur Eingabegeometrie, nicht zur Positionserkennung. " +
+                 "Nach Bestätigung wird RuneLite in den Vordergrund geholt und die echte Windows-Maus " +
+                 "für kurze, einzeln überwachte Spielklicks bewegt. Andere Programme dürfen den Fokus " +
+                 "nicht übernehmen; andernfalls stoppt die Automatik.",
             Font=new("Segoe UI",10,FontStyle.Bold)},0,0);
         preview.Dock=DockStyle.Fill;preview.SizeMode=PictureBoxSizeMode.Zoom;
         preview.Image=screenshot;preview.BackColor=Color.Black;
@@ -46,7 +50,7 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
             selected=new(x,y);hint.Text=$"Ausgewählter Mittelpunkt: x={x}, y={y} · " +
                 (IsWhitePlayerMark(screenshot,selected.Value)?"weiße Spielermarkierung sichtbar":
                     "keine weiße Spielermarkierung erkannt – bitte genauer klicken");
-            accept.Enabled=north.Checked&&ValidSelection();preview.Invalidate();
+            accept.Enabled=CanAccept();preview.Invalidate();
         };
         preview.Paint+=(_,e)=>
         {
@@ -71,8 +75,12 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
         pixelsPerTile.Increment=.5m;pixelsPerTile.Value=4;
         controls.Controls.Add(pixelsPerTile);
         north.Text="Minimap zeigt Norden oben, vollständig herausgezoomt";
-        north.AutoSize=true;north.CheckedChanged+=(_,_)=>accept.Enabled=north.Checked&&ValidSelection();
+        north.AutoSize=true;north.CheckedChanged+=(_,_)=>accept.Enabled=CanAccept();
         controls.Controls.Add(north);
+        foregroundConsent.Text="Ich erlaube ausschließlich für diesen Test echte Mausbewegungen und Klicks im Vordergrund-RuneLite.";
+        foregroundConsent.AutoSize=true;
+        foregroundConsent.CheckedChanged+=(_,_)=>accept.Enabled=CanAccept();
+        controls.Controls.Add(foregroundConsent);
         var optCol=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=2,ColumnCount=1};
         optCol.RowStyles.Add(new(SizeType.Absolute,29));optCol.RowStyles.Add(new(SizeType.Percent,100));
         optCol.Controls.Add(hintRow,0,0);optCol.Controls.Add(controls,0,1);
@@ -80,7 +88,7 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
         accept.Text="Kalibrierung übernehmen";accept.AutoSize=true;accept.Enabled=false;
         accept.Click+=(_,_)=>
         {
-            if(!ValidSelection()||!north.Checked)return;
+            if(!CanAccept())return;
             DialogResult=DialogResult.OK;Close();
         };
         var cancel=new Button{Text="Abbrechen",AutoSize=true,DialogResult=DialogResult.Cancel};
@@ -93,6 +101,7 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
     private bool ValidSelection()=>selected is Point point&&
         RuneLiteAutoWalk.ValidGeometry(new(new IntPtr(1),screenshot.Size,point,(double)pixelsPerTile.Value))&&
         IsWhitePlayerMark(screenshot,point);
+    private bool CanAccept()=>north.Checked&&foregroundConsent.Checked&&ValidSelection();
 
     internal static bool IsWhitePlayerMark(Bitmap image,Point point)
     {

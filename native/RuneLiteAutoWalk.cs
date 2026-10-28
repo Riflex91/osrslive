@@ -156,6 +156,15 @@ internal static class RuneLiteAutoWalkTests
             "a transport cannot be passed by a raw minimap click");
         Require(RuneLiteAutoWalk.Project(origin,[new(new(3208,3208))],geom) is null,
             "unverified jumping edges cannot be clicked");
+        Require(BackgroundWindowInput.MouseInputStructSize()==(IntPtr.Size==8?40:28),
+            "SendInput MOUSEINPUT and INPUT must match the native architecture layout");
+        Require(BackgroundWindowInput.TryNormalizeAbsolute(-1920,0,-1920,-100,3840,2160,
+                    out int firstX,out int firstY)&&firstX==0&&firstY>0&&
+                BackgroundWindowInput.TryNormalizeAbsolute(1919,2059,-1920,-100,3840,2160,
+                    out int endX,out int endY)&&endX==65535&&endY==65535&&
+                !BackgroundWindowInput.TryNormalizeAbsolute(1920,100,-1920,-100,3840,2160,
+                    out _,out _),
+            "foreground click mapping respects negative-origin multi-monitor virtual desktops");
         Require(!RuneLiteAutoWalk.ValidGeometry(geom with{PlayerCenter=new(10,90)})&&
                 !RuneLiteAutoWalk.ValidGeometry(geom with{PixelsPerTile=0}),
             "off-screen or uncalibrated geometry is not accepted");

@@ -1,4 +1,31 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.23
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.24
+
+**1.8.24 – PostMessage erzeugt weiterhin keine bestätigte
+automatische RuneLite-Bewegung:** Drei `CLICK_INTENT`-
+Ereignisse sind im echten 1.8.23-Nutzerlog nachweisbar.
+Der erste PostMessage-Klickversuch endet nach 9 Sekunden
+ohne Plugin-Bewegung (`POSITION_EVENT_TIMEOUT`). Nach
+dem zweiten erreicht ein API-Tile die Position 3215/3197,
+aber **außerhalb** des berechneten Wegs Richtung
+3222/3198: korrekter `UNEXPECTED_API_TILE`-Stopp.
+Beim dritten Klick ist die Logdatei nach nur 3,3s
+manuell kopiert worden. Der eigentliche Java-/AWT-
+Maus-Input wurde nie bestätigt; eine erfolgreiche
+PostMessage-Queue reicht nicht als Beweis.
+
+1.8.24 führt für den ausdrücklichen Bewegungstest
+`SendInput` statt PostMessage ein. Das ist sichtbare
+Vordergrund-Maussteuerung und deshalb nur mit zusätzlicher
+Einwilligung nach Nutzerkalibrierung möglich. Der erste
+Klick versucht RuneLite regulär in den Vordergrund zu
+holen, weitere Klicks tun das **nicht** erneut. Vor jedem
+Klick müssen RuneLite-Prozess, Fenstergeometrie, aktueller
+Vordergrund, minimapbezogenes Bildschirmziel und
+unbelegte Maustasten stimmen. Sonst sofortiger roter
+`FOREGROUND_CLICK_NOT_SENT`-Fehler samt vollständigem Log,
+ohne weiteren Spielinput. Auch erfolgreiche SendInput-
+Übermittlung benötigt später einen **neuen** bestätigenden
+Plugin-Wegschritt. Echte Liveannahme weiterhin **offen**.
 
 **1.8.23 – live bestätigte Autowalk-Startblockade:**
 Die echte Sitzung 19:07–19:09 Uhr am 28.10.2026

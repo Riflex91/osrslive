@@ -1,4 +1,57 @@
-# OSRS Play 1.8.23 – Erste automatische Bewegung ohne Startblockade
+# OSRS Play 1.8.24 – Erster echter Windows-Mausklick in RuneLite
+
+## Neu in 1.8.24: Vordergrund-Eingabe nur mit Einwilligung
+
+Der 1.8.23-Live-Test hat drei automatische Klickversuche
+protokolliert, aber **keinen nachweislich erfolgreichen
+Wegpunkt**. Die ersten zwei wurden als Win32-
+`PostMessage`-Nachrichten zugestellt; beim ersten kam
+innerhalb von neun Sekunden kein Positionsereignis.
+Beim zweiten meldete das Plugin zwar einen späteren
+Schritt, aber **außerhalb** der berechneten Route.
+Beim dritten endete die Protokollaufnahme bereits 3,3s
+nach dem Klickversuch. Die RuneLite-Position selbst
+ist weiterhin zuverlässig aus dem Plugin verfügbar.
+
+1.8.24 benutzt für den ausdrücklich aktivierten
+Bewegungstest die native Windows-Funktion `SendInput`,
+die tatsächlich Mausereignisse in Windows einfügt.
+Dies geschieht **nur im geprüften RuneLite-Vordergrund**,
+mit separater Einwilligung in der Minimap-Kalibrierung.
+Der erste Klick holt RuneLite bei erlaubter Windows-
+Fokusaktivierung nach vorne. Danach gilt: Sobald ein
+anderes Fenster aktiv oder das Minimapziel verdeckt ist,
+**kein neuer Klick**. Auch Fenstergröße, Mausknöpfe,
+Bildschirmauflösung und die geprüfte RuneLite-Fenster-
+Identität werden vor jeder Eingabe berücksichtigt.
+
+**Bitte so testen:**
+
+1. RuneLite via Jagex Launcher im Profil `auto` öffnen,
+   mit OSRS Toolkit Exporter einloggen und einen Schritt
+   manuell gehen, damit ein API-Ereignis vorliegt.
+2. In OSRS Play **Lumbridge** auswählen und
+   **„Automatisch gehen (Test)“** drücken.
+3. Im aktuellen Bild den weißen Spielerpunkt auf der
+   Minimap auswählen; Norden oben/Zoom heraus sowie
+   die **zusätzliche Mausfreigabe** ausdrücklich anhaken.
+4. Kalibrierung bestätigen. RuneLite sollte jetzt im
+   Vordergrund sein. Dort bleiben und Maus-/Tastatur-
+   Bedienung während des Tests vermeiden.
+5. Nach `RUNELITE_AUTOWALK FOREGROUND_INPUT_INSERTED`
+   auf `PROGRESS_CONFIRMED` oder `WAYPOINT_CONFIRMED`
+   warten. Ohne Bewegung stoppt der Client mit roter
+   Meldung und kopiert das vollständige Sitzungslog.
+   `FOREGROUND_CLICK_NOT_SENT reason=...` erklärt eine
+   Sicherheitsblockade noch **vor** dem Spieleingriff.
+
+Ein gesendetes Windows-Ereignis zählt weiterhin **nicht**
+als erfolgreiche Spielfortbewegung. Weltpositionen stammen
+ausschließlich vom offiziellen RuneLite-Plugin-Hub-Export,
+niemals aus Bildschirmaufnahmen. Die neue Eingabe muss
+erst durch deinen nächsten Live-Test bestätigt werden.
+
+## Vorherige Version: 1.8.23
 
 ## Neu in 1.8.23: Kalibrierter Erstklick bei stationärem Charakter
 
