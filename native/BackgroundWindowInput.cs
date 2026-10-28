@@ -5,73 +5,76 @@ namespace OSRSLiveDiagnostics;
 internal static class BackgroundWindowInput
 {
     internal sealed record ForegroundClickResult(bool Inserted,string Reason,int InputEvents);
-    internal sealed record CameraZoomResult(bool Inserted,string Reason,int InputEvents);
+    internal sealed record MinimapZoomResult(bool Inserted,string Reason,int InputEvents);
 
-    internal static (int Outward,int Inward) CameraWheelPlan(RuneLiteCameraZoomPreset preset)=>
-        preset switch
-        {
-            RuneLiteCameraZoomPreset.Unchanged=>(0,0),
-            RuneLiteCameraZoomPreset.Medium=>(72,14),
-            RuneLiteCameraZoomPreset.Near=>(72,28),
-            _=>(72,0)
-        };
+    // Right-clicking a RuneLite minimap with the Minimap plugin's Zoom option
+    // enabled resets its scale to the default 4 pixels/tile (RuneLite 1.9.0).
+    // If zoom is disabled, the minimap is already at its vanilla scale.
+    // Aim within the map, but away from the player-dot's exact click hotspot.
+    internal static Point MinimapResetPoint(Point playerCenter)=>
+        new(playerCenter.X-20,playerCenter.Y-16);
 
-    internal static async Task<CameraZoomResult> SetRuneLiteCameraZoomAsync(
-        IntPtr window,Size expectedSize,RuneLiteCameraZoomPreset preset,
+    internal static async Task<MinimapZoomResult> ResetRuneLiteMinimapZoomAsync(
+        IntPtr window,Size expectedSize,Point playerCenter,
         Func<bool> shouldStop,CancellationToken ct)
     {
-        if(preset==RuneLiteCameraZoomPreset.Unchanged)
-            return new(true,"USER_REQUESTED_UNCHANGED",0);
+        if(playerCenter.X<50||playerCenter.Y<50||playerCenter.X>=expectedSize.Width-40||
+           playerCenter.Y>=expectedSize.Height-40)
+            return new(false,"MINIMAP_ANCHOR_INVALID",0);
         if(shouldStop()||!TryClientSize(window,out var size)||size!=expectedSize)
-            return new(false,"ZOOM_WINDOW_OR_GEOMETRY_CHANGED",0);
+            return new(false,"MINIMAP_RESET_WINDOW_OR_GEOMETRY_CHANGED",0);
         GetWindowThreadProcessId(window,out uint expectedPid);
-        if(expectedPid==0)return new(false,"ZOOM_WINDOW_PID_UNAVAILABLE",0);
+        if(expectedPid==0)return new(false,"MINIMAP_RESET_WINDOW_PID_UNAVAILABLE",0);
         if(!SameForegroundRoot(window))
         {
-            if(!SetForegroundWindow(window))return new(false,"ZOOM_FOREGROUND_ACTIVATION_DENIED",0);
+            if(!SetForegroundWindow(window))return new(false,"MINIMAP_RESET_FOREGROUND_ACTIVATION_DENIED",0);
             await Task.Delay(120,ct);
         }
         if(shouldStop()||!SameForegroundRoot(window))
-            return new(false,"ZOOM_RUNELITE_NOT_FOREGROUND",0);
-        // World viewport, away from the minimap and interactive UI panels.
-        var screen=new POINT{X=size.Width/3,Y=size.Height/3};
+            return new(false,"MINIMAP_RESET_RUNELITE_NOT_FOREGROUND",0);
+        Point resetPoint=MinimapResetPoint(playerCenter);
+        var screen=new POINT{X=resetPoint.X,Y=resetPoint.Y};
         if(!ClientToScreen(window,ref screen)||
             !HitBelongsToExpectedWindow(window,expectedPid,screen))
-            return new(false,"ZOOM_VIEWPORT_COVERED",0);
+            return new(false,"MINIMAP_RESET_POINT_COVERED",0);
         if((GetAsyncKeyState(0x01)&0x8000)!=0||
            (GetAsyncKeyState(0x02)&0x8000)!=0)
-            return new(false,"ZOOM_PHYSICAL_BUTTON_HELD",0);
+            return new(false,"MINIMAP_RESET_PHYSICAL_BUTTON_HELD",0);
         if(!TryNormalizeAbsolute(screen.X,screen.Y,GetSystemMetrics(76),GetSystemMetrics(77),
             GetSystemMetrics(78),GetSystemMetrics(79),out int px,out int py))
-            return new(false,"ZOOM_SCREEN_MAPPING_INVALID",0);
+            return new(false,"MINIMAP_RESET_SCREEN_MAPPING_INVALID",0);
         if(SendInput(1,[Mouse(px,py,0x0001|0x8000|0x4000)],Marshal.SizeOf<INPUT>())!=1)
-            return new(false,"ZOOM_CURSOR_MOVE_FAILED",0);
+            return new(false,"MINIMAP_RESET_CURSOR_MOVE_FAILED",0);
         if(!GetCursorPos(out var actual)||Math.Abs(actual.X-screen.X)>1||
            Math.Abs(actual.Y-screen.Y)>1)
-            return new(false,"ZOOM_CURSOR_UNVERIFIED",1);
-        // A bounded wheel sequence first reaches the outer limit and then
-        // applies a user-selected *relative* offset. RuneLite's Camera plugin
-        // config may override wheel speed/limits; the exported plugin does
-        // not provide the camera scale, so no exact numeric zoom is claimed.
-        var (outward,inward)=CameraWheelPlan(preset);
-        int inserted=1;
-        for(int i=0;i<outward+inward;i++)
+            return new(false,"MINIMAP_RESET_CURSOR_UNVERIFIED",1);
+        if(shouldStop()||!SameForegroundRoot(window)||
+           !TryClientSize(window,out size)||size!=expectedSize||
+           !HitBelongsToExpectedWindow(window,expectedPid,screen))
+            return new(false,"MINIMAP_RESET_TARGET_OR_FOCUS_CHANGED",1);
+        ct.ThrowIfCancellationRequested();
+        // One actual right-click, never a 3D camera wheel event.
+        uint clicked=SendInput(2,[Mouse(0,0,0x0008),Mouse(0,0,0x0010)],
+            Marshal.SizeOf<INPUT>());
+        if(clicked!=2)
         {
-            ct.ThrowIfCancellationRequested();
-            if(shouldStop()||!SameForegroundRoot(window)||
-               !TryClientSize(window,out size)||size!=expectedSize||
-               !HitBelongsToExpectedWindow(window,expectedPid,screen)||
-               !GetCursorPos(out actual)||Math.Abs(actual.X-screen.X)>1||
-               Math.Abs(actual.Y-screen.Y)>1)
-                return new(false,"ZOOM_TARGET_OR_FOCUS_CHANGED",inserted);
-            int delta=i<outward?-120:120;
-            if(SendInput(1,[Mouse(0,0,0x0800,unchecked((uint)delta))],
-                Marshal.SizeOf<INPUT>())!=1)
-                return new(false,"ZOOM_WHEEL_EVENT_FAILED",inserted);
-            inserted++;
-            await Task.Delay(14,ct);
+            SendInput(1,[Mouse(0,0,0x0010)],Marshal.SizeOf<INPUT>());
+            return new(false,"MINIMAP_RESET_RIGHT_CLICK_INCOMPLETE",1+(int)clicked);
         }
-        return new(true,"WHEEL_EVENTS_SENT_ZOOM_NOT_API_VERIFIED",inserted);
+        // A right-click may also open an OSRS canvas menu. Dismiss it before
+        // any future waypoint click so no click can select a menu entry.
+        await Task.Delay(100,ct);
+        if(shouldStop()||!SameForegroundRoot(window)||
+           !TryClientSize(window,out size)||size!=expectedSize)
+            return new(false,"MINIMAP_RESET_FOCUS_LOST_BEFORE_MENU_DISMISS",3);
+        uint dismissed=SendInput(2,[Key(0x1B,0),Key(0x1B,0x0002)],
+            Marshal.SizeOf<INPUT>());
+        if(dismissed!=2)
+        {
+            SendInput(1,[Key(0x1B,0x0002)],Marshal.SizeOf<INPUT>());
+            return new(false,"MINIMAP_RESET_ESCAPE_INCOMPLETE",3+(int)dismissed);
+        }
+        return new(true,"RIGHT_CLICK_RESET_AND_ESCAPE_SENT_ACTUAL_ZOOM_NOT_API_EXPORTED",5);
     }
 
     // RuneLite is a Java/AWT application. PostMessage success only shows that
@@ -148,8 +151,10 @@ internal static class BackgroundWindowInput
     internal static int MouseInputStructSize()=>Marshal.SizeOf<INPUT>();
     internal static bool IsRuneLiteForeground(IntPtr window)=>
         window!=IntPtr.Zero&&IsWindow(window)&&SameForegroundRoot(window);
-    private static INPUT Mouse(int dx,int dy,uint flags,uint data=0)=>new(){Type=0,MouseData=new(){
-        X=dx,Y=dy,Flags=flags,Data=data}};
+    private static INPUT Mouse(int dx,int dy,uint flags,uint data=0)=>new(){Type=0,Data=new(){
+        Mouse=new(){X=dx,Y=dy,Flags=flags,Data=data}}};
+    private static INPUT Key(ushort virtualKey,uint flags)=>new(){Type=1,Data=new(){
+        Keyboard=new(){VirtualKey=virtualKey,Flags=flags}}};
     private static bool SameForegroundRoot(IntPtr window)
     {
         IntPtr foreground=GetForegroundWindow();
@@ -164,8 +169,15 @@ internal static class BackgroundWindowInput
     }
     [StructLayout(LayoutKind.Sequential)]private struct MOUSEINPUT
     {internal int X,Y;internal uint Data,Flags,Time;internal IntPtr ExtraInfo;}
+    [StructLayout(LayoutKind.Sequential)]private struct KEYBDINPUT
+    {internal ushort VirtualKey,Scan;internal uint Flags,Time;internal IntPtr ExtraInfo;}
+    [StructLayout(LayoutKind.Explicit)]private struct INPUTDATA
+    {
+        [FieldOffset(0)]internal MOUSEINPUT Mouse;
+        [FieldOffset(0)]internal KEYBDINPUT Keyboard;
+    }
     [StructLayout(LayoutKind.Sequential)]private struct INPUT
-    {internal uint Type;internal MOUSEINPUT MouseData;}
+    {internal uint Type;internal INPUTDATA Data;}
 
     internal static bool TryClientSize(IntPtr window,out Size size)
     {

@@ -175,11 +175,8 @@ internal static class RuneLiteAutoWalkTests
             "unverified jumping edges cannot be clicked");
         Require(BackgroundWindowInput.MouseInputStructSize()==(IntPtr.Size==8?40:28),
             "SendInput MOUSEINPUT and INPUT must match the native architecture layout");
-        Require(BackgroundWindowInput.CameraWheelPlan(RuneLiteCameraZoomPreset.Far)==(72,0)&&
-                BackgroundWindowInput.CameraWheelPlan(RuneLiteCameraZoomPreset.Medium)==(72,14)&&
-                BackgroundWindowInput.CameraWheelPlan(RuneLiteCameraZoomPreset.Near)==(72,28)&&
-                BackgroundWindowInput.CameraWheelPlan(RuneLiteCameraZoomPreset.Unchanged)==(0,0),
-            "camera preset always starts from a bounded wheel reference, unless untouched");
+        Require(BackgroundWindowInput.MinimapResetPoint(new(665,110))==new Point(645,94),
+            "zoom-reset click is inside the minimap, not the 3D world viewport");
         Require(BackgroundWindowInput.TryNormalizeAbsolute(-1920,0,-1920,-100,3840,2160,
                     out int firstX,out int firstY)&&firstX==0&&firstY>0&&
                 BackgroundWindowInput.TryNormalizeAbsolute(1919,2059,-1920,-100,3840,2160,

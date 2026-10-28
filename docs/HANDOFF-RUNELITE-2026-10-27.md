@@ -1,4 +1,57 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.25
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.26
+
+## 1.8.26 – Nutzerkorrektur: Spielerpunkt bleibt mittig, Minimap-Zoom statt Kamera
+
+Reales 1.8.25-Log vom 28.10.2026, 19:59–20:00 Uhr:
+`MINIMAP_MARKER_CALIBRATED ... auto_detector=... center_x=679
+center_y=138` hatte **nicht den Charakter**, sondern ein anderes
+kreisförmiges Symbol auf der Minimap gewählt. Der Nutzer zeigte im
+Dialog den gelben Kreis auf dem falschen Marker und stellte klar:
+Der Spielerpunkt ist **stets die feste Mitte der Minimap**. Sein vorher
+annotierter Screenshot zeigt die roten Linien genau bei (665,137)
+inklusive Windows-Titelleiste, in Clientkoordinaten (665,110).
+Die manuellen x644–645/y109–113 und der Autokandidat x679/y138
+weichen beide deutlich ab. Diese Ring-Erkennung war ein Fehler.
+
+Der neue `RuneLiteMinimapMarker` liefert daher keine Farb-/Ringsuche
+mehr, sondern im bekannten klassischen RuneLite-Layout mit Client-
+Größe ca. 768–773 × 528–534 **immer die feste Position (665,110)**.
+Er akzeptiert nur einen eng begrenzten Bereich um diese Fenstergröße;
+bei anderen Layouts ist eine manuelle, visuell überprüfte Kalibrierung
+erforderlich. Im bekannten Layout muss selbst eine manuelle Wahl
+innerhalb 7 Pixel um die feste Mitte liegen. Neue synthetische Tests
+belegen Unabhängigkeit von einem runden Map-Icon bei 679/138 und
+blockieren die bisherigen Fehlzentren. Fotos werden nur vorübergehend
+im RAM gezeigt; Weltkacheln kommen ausschließlich vom Plugin.
+
+Die vom Nutzer verlangte **Minimap-** statt 3D-Kamera-
+Zoomsteuerung nutzt die von RuneLite dokumentierte Interaktion:
+Bei aktiviertem RuneLite-Minimap-Plugin-Zoom setzt ein **Rechtsklick
+auf der Minimap die Skala auf den Standard 4 px/Tile** zurück.
+Quelle: https://runelite.net/blog/show/2022-10-05-1.9.0-Release/;
+API-Spezifikation `Client.getMinimapZoom()` dokumentiert ebenfalls
+den Standardwert 4:
+https://github.com/runelite/runelite/blob/master/runelite-api/src/main/java/net/runelite/api/Client.java.
+Die neue `ResetRuneLiteMinimapZoomAsync` setzt im bestätigten
+RuneLite-Vordergrund nach Prüfung von Fenster, PID, Trefferfenster,
+Mausknöpfen und Cursor einen einzelnen `SendInput`-Rechtsklick auf
+einen sicheren Minimap-Punkt abseits des Spielermarkers, danach
+`Escape` zur Schließung eines eventuellen Kontextmenüs. **Keine
+3D-Kamera-Wheel-Ereignisse mehr.** Der GUI-Maßstab ist fest 4.
+Weil der lokale OSRS Toolkit Exporter den tatsächlichen
+`getMinimapZoom()`-Wert nicht übermittelt, ist nur die ausgeführte
+Reset-Interaktion, nicht die erreichte numerische Skala beweisbar.
+Fehler blockieren vor dem ersten Bewegungsklick und lösen das
+vollständige Zwischenablagen-Log mit roter Warnung aus.
+
+Erwartete neue Logs: `MINIMAP_ANCHOR_CALIBRATED` mit
+`AUTO_FIXED_LAYOUT`, `RUNELITE_MINIMAP ZOOM_RESET_REQUEST`,
+`RUNELITE_MINIMAP ZOOM_RESET_INPUT_SENT`, danach `ARMED` und bei
+wirklicher RuneLite-API-Bewegung `PROGRESS_CONFIRMED`.
+Ein Live-Test unter dem Nutzerprofil `auto` ist nach Release nötig.
+
+Die folgende 1.8.25-Sektion ist historisch: ihre Ring-Deutung und
+der 3D-Zoom-Plan sind durch den Live-Befund widerlegt.
 
 ## 1.8.25 – SendInput live bestätigt; Spielerpunkt und Kamera automatisch vorbereiten
 
