@@ -1,4 +1,43 @@
-# OSRS Play 1.8.31 – Zielradius-Abschluss und beobachtete RuneLite-Umwege
+# OSRS Play 1.8.32 – Gehversuch sicher vormerken, statt Start abzulehnen
+
+## 1.8.32: Button bleibt bedienbar, auch ohne neues Plugin-Ereignis
+
+Der 49-Zeilen-Live-Log vom 28.10.2026, 22:04:50–22:04:59,
+bestätigt die automatisch installierte **Version 1.8.31**
+(`build_run=40767855357`), aber beim Klicken auf
+„Automatisch gehen (Test)“ hatte der Plugin-Hub-Exporter
+nur eine **1347 Sekunden alte** Position `(3251,3229)`.
+Der bisherige Code meldete daher `START_REQUIRES_PLUGIN_POSITION`
+und kopierte das vollständige Log in die Zwischenablage,
+ohne Kalibrierung oder Spielklick. Der Button selbst
+funktionierte: Die sperrende Positionsvorbedingung
+war nicht klar genug sichtbar.
+
+**Verbesserung:** Ein ausdrücklicher Start-Klick bei fehlender
+oder für den ersten Klick schon mehr als 60 Sekunden alter
+Pluginposition erzeugt jetzt `START_QUEUED_AWAITING_PLUGIN`:
+Die GUI zeigt in Gelb den vorgemerkten Gehversuch und
+erklärt, dass RuneLite **einmal eine neue Tile exportieren**
+muss. Der rote Stopp-Button bricht jederzeit ab. Sobald
+das Plugin eine tatsächlich **nach der Startanforderung**
+exportierte Position meldet, öffnet OSRS Play automatisch
+die bisherige Minimap-Kalibrierung samt Nutzerfreigabe.
+**Vor dieser erneuten Bestätigung erfolgt kein Spielklick.**
+Die Vormerkung ist auf Ziel, die laufende Clientidentität
+und maximal zwei Minuten begrenzt; Wechsel, Pause,
+Fenster-/Titelaustausch und Zeitüberschreitung beenden
+sie, Letztere mit rotem Fehler und vollständiger
+automatischer Log-Kopie. Neue Negativtests prüfen,
+dass alte Koordinaten nie eine Klickfreigabe erzeugen.
+
+**Wichtig:** Der OSRS Toolkit Exporter hat weiterhin keinen
+On-Login-/Start-Snapshot. Der Client kann die tatsächliche
+Weltposition nicht aus einer 22 Minuten alten Datei
+übernehmen; die einmalige manuelle Bewegung ist mit dem
+vorhandenen Plugin nötig. Diese Version verhindert den
+zusätzlichen erneuten Buttonklick und macht den Grund
+des Wartens sichtbar. Echte Hintergrund-Spielklicks
+bleiben mangels verifizierter API ausgeschlossen.
 
 ## 1.8.31: Realer 1.8.30-Test mit mehreren erfolgreichen Gehstrecken
 

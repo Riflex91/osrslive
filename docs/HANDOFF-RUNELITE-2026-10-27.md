@@ -1,4 +1,61 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.31
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.32
+
+## 1.8.32 – Beim Start verweigerter Button durch alte Pluginposition
+
+Neuer 49-Zeilen-Live-Log 28.10.2026, 22:04:50–22:04:59:
+
+1. Der Nutzer startete die automatisch installierte v1.8.31
+   (`build_channel=push`, `build_run=40767855357`,
+   `build_commit=77ca4b56b4d407a76f4da1ffb1934e7bc83efd9d`),
+   der Start-Updater meldete `ALREADY_CURRENT`.
+2. `RuneLiteApiPositionTracker` sah von Beginn an nur eine
+   **1347 Sekunden alte** Datei mit `(3251,3229,0)`.
+   `HISTORICAL_POSITION_PREVIEW` zeigte sie zutreffend als
+   `UNBESTÄTIGT`; bis zum Ende des 49-Zeilen-Logs kam kein
+   einziges späteres Tile-Event. Die Quelle ist korrekt
+   als `API_WAITING_FOR_NEW_EVENT` blockiert.
+3. Um 22:04:52 wurde `Lumbridge_Eichen` gewählt. Ein
+   echter Buttonklick um 22:04:54 erreichte die Start-
+   Logik, wurde dort jedoch als
+   `START_REQUIRES_PLUGIN_POSITION` gesperrt, worauf der
+   vollständige Log automatisch in die Zwischenablage ging.
+   Der Button war also nicht defekt; die interne
+   Vorbedingung wurde nur zu wenig handlungsleitend
+   sichtbar. Die nächsten zehn Sekunden brachten keinen
+   Post-Start-Positionsexport.
+
+**1.8.32-Fix:** Neue `RuneLiteQueuedStart`-Prüfung und
+UI-Wartemodus für Nutzerklicks bei fehlender oder über
+60 Sekunden alter letzter Position. Der Button loggt
+`START_BUTTON_CLICKED` und `START_QUEUED_AWAITING_PLUGIN`;
+die GUI zeigt auffällig gelb `GEHVERSUCH VORGEMERKT` und
+nennt den nötigen einmaligen manuellen Tilewechsel. Der
+rote STOPP-Button bleibt aktiv. Erst ein gegenüber der
+Vormerkung **neueres** Plugin-API-Tile mit höchstens drei
+Sekunden Alter, aus derselben gebundenen RuneLite-
+Fensteridentität und mit unverändertem Ziel, öffnet
+automatisch die bisherige Minimap-Kalibrierung für eine
+**neue ausdrückliche Freigabe**. Kein automatischer
+Spielinput schon beim Vormerken; keine Änderung an den
+kompletten Klickprüfungen oder am Minimap-Anker.
+Aus Sicherheitsgründen beträgt die Wartefrist höchstens
+zwei Minuten; danach `START_QUEUE_TIMEOUT` mit
+Clipboard/roter GUI. Zielwechsel und Pause annullieren
+ohne Spielinput. Fenster-/Titelwechsel verwirft die
+Vormerkung und meldet den Kontextfehler; Schließen
+räumt sie ebenfalls auf. `RuneLiteQueuedStartTests`
+belegen die erlaubten und abgewiesenen Ereignisse.
+
+**Wichtige Grenze:** Das installierte Plugin schreibt
+weiterhin nur bei Bewegung ein neues Tile. Ob der Spieler
+seit dem letzten 22 Minuten alten Snapshot an derselben
+Position steht, ist **nicht** nachweisbar. Deshalb bleibt
+ein neuer Pluginexport erforderlich, der beim bestehenden
+Exporter durch einmalige manuelle Bewegung ausgelöst
+werden muss. Der Fix macht den Startklick sinnvoll und
+verhindert weiteres Klicken auf denselben Button; er
+erfindet keine aktuellen Koordinaten und unterstützt keine
+Hintergrund-Spielklicks.
 
 ## 1.8.31 – Tatsächlicher 1.8.30-Erfolg und zwei neue Stopper
 

@@ -393,6 +393,7 @@ internal static class RuneLiteAutoWalkTests
         Require(BackgroundWindowInput.MouseInputStructSize()==(IntPtr.Size==8?40:28),
             "SendInput MOUSEINPUT and INPUT must match the native architecture layout");
         RuneLiteInputShield.SelfTest();
+        RuneLiteQueuedStartTests.Run();
         Require(BackgroundWindowInput.MinimapResetPoint(new(645,111))==new Point(625,95),
             "zoom-reset click is inside the minimap, not the 3D world viewport");
         Require(BackgroundWindowInput.TryNormalizeAbsolute(-1920,0,-1920,-100,3840,2160,

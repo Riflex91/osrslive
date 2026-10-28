@@ -59,6 +59,17 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   Start-Umweg-Kacheln, sendet dabei KEINEN Folgeklick und
   verlängert keine Timeout-Grenze. Vollständiger Zielerfolg
   steht weiterhin aus.
+  1.8.31 wurde erfolgreich automatisch installiert; der
+  neue 49-Zeilen-Log vom 28.10.2026, 22:04:54 belegt,
+  dass „Automatisch gehen (Test)“ bei einem rund 22 Minuten
+  alten Export mit `START_REQUIRES_PLUGIN_POSITION` abwies.
+  1.8.32 ergänzt nur einen befristeten, sichtbar abbrechbaren
+  VORMERKUNGS-Modus. Erst eine **nach dem Nutzer-Klick**
+  frisch exportierte API-Tile öffnet automatisch die
+  Kalibrierung; bis zur erneuten ausdrücklichen Freigabe
+  sendet der Client keinen Klick. Ohne Exporter-Heartbeat
+  erfordert das weiterhin einen manuell ausgelösten
+  ersten Tilewechsel. Keine stille Akzeptanz alter Datei.
   Die strikte
   `RUNELITE_FOREGROUND_LOST`-Sperre bleibt bestehen. Alle Schritte
   und Grenzen stehen
