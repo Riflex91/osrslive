@@ -93,8 +93,9 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.INFO,"CORE","STARTED",
             $"version={Diagnostics.Version} {BuildIdentity.Log} backend=RUNELITE_COMPANION profile_expected=auto");
         log.Add(Severity.INFO,"CORE","CAPABILITIES",
-            "read_only=true automated_game_actions=false source=WORLD_LOCATION_GRID_INFO "+
-            "fresh_frames_required=2 no_memory_access=true no_screenshots_written=true");
+            "read_only=true automated_game_actions=false sources=PLUGIN_HUB_POSITION_EXPORT,WORLD_LOCATION_GRID_INFO "+
+            "plugin_optional=true plugin_install_manual=true fresh_frames_required=2 "+
+            "no_memory_access=true no_screenshots_written=true");
         log.Add(Severity.INFO,"CORE","PRIVACY",
             "credentials_and_authentication_handled_by_jagex=true local_log_only=true clipboard_on_failure=true");
         if(Updater.TakeLastOutcome() is string previousUpdate)

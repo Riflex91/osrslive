@@ -1,4 +1,71 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.16
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.17
+
+## Client-API über bereits geprüften Plugin Hub gefunden (1.8.17)
+
+Auf ausdrücklichen Wunsch des Benutzers wurde die Praxis anderer
+OSRS-Bots vor einer weiteren Korrektur geprüft. Microbot und OSBot
+verwenden clientinterne Positionsobjekte statt Screenshot-OCR;
+Rund um Instanzen müssen Welt- und lokale Koordinaten sauber
+unterschieden werden. Ein modifizierter Microbot/RuneLite-Client
+kommt für den Benutzer nicht infrage; der offizielle Jagex Launcher
+und RuneLite-Profil `auto` sind unveränderliche Voraussetzungen.
+
+**Wichtiger konkreter Fund:** Der reguläre RuneLite Plugin Hub hat
+einen bereits gelisteten `position-exporter`-Eintrag, aktuell ohne
+`disabled=`-Marker. Repository: `Gorsokk/position-exporter`,
+geprüfter Commit `8e2799abb23836ea84700a6bfbba00742295845b`.
+`OSRS Toolkit Exporter` lauscht auf `GameTick`, nutzt
+`client.getLocalPlayer().getWorldLocation()` und schreibt bei
+Kacheländerung über RuneLites `Filepath`-API atomar eine lokale
+`.runelite/plugin-data/position-exporter/<character>/position.json`.
+Felder: `exported_at`, `player_name`, `world`, `plane`, `x`, `y`,
+`region_id`, `region_x`, `region_y`. Laut Quellcode kein Netzwerk.
+Das alternative geprüfte `HTTP Server`-Plugin bietet nur `/stats`,
+`/inv`, `/equip`, keine Position; `statussocket` ist derzeit mit
+`disabled=true` im offiziellen Plugin-Hub-Marker markiert.
+
+OSRS Play 1.8.17 erkennt optional genau diesen Export ohne Änderung
+des offiziellen Clients. Der komplette RuneLite-Fenstertitel muss
+dem JSON-Charakternamen **exakt** entsprechen; mehrdeutige/alte,
+beschädigte oder rechnerisch inkonsistente Dateien dürfen nicht
+blind eine Position freigeben. Nur 3 Sekunden alte Positionen
+werden direkt aus der API gelesen, stets mit weiterhin notwendiger
+WGC-Zweibildbestätigung. Bei älteren Dateien (stationärer Spieler)
+braucht der Bildleser drei zum Export passende aktuelle X/Y- und
+Region-OCR-Stimmen, kein widersprechendes vollständiges ID-Feld,
+sichtbare getrennte Kommas, echte Pixelziffern und Plane plus zwei
+frische Frames. Nur in diesem nun extern eindeutig benannten Fall
+darf ein bisher unbeschrifteter Einzelglyph benannt und nach zwei
+bestätigten Frames in die Ephemeral-Historie übernommen werden.
+Das reguläre OCR-Verfahren und seine strengeren Verbote bleiben
+für nicht installierte/unverfügbare Plugins unangetastet.
+
+**Einrichtung:** Benutzer muss in regulärem RuneLite `OSRS Toolkit
+Exporter` aus dem Plugin Hub installieren und `Export position`
+aktivieren; die anderen standardmäßig aktiven GE-/Inventar-/
+Bank-/Charakterdatenexporte aus Privatsphäregründen ausschalten.
+World Location Grid Info bleibt für alten Datei-/Ausfall-Fallback
+sichtbar. Kein selbst geladenes oder ungeprüftes Plugin, kein
+Entwicklungsclient, kein Speicherzugriff und keine Spielautomation.
+Der 1.8.17-Live-Test sowie der Windows-CI-Lauf stehen aus.
+
+## 1.8.16-Live-Bestätigung und verbleibender OCR-Ausfall
+
+Echtes Benutzerprotokoll vom 28.10.2026, 16:27–16:28 Uhr Europe/Berlin
+bestätigt das auto-installierte Release `1.8.16`, `PREVIOUS_UPDATE`,
+`ALREADY_CURRENT` und `clipboard=COPIED`. Sieben Proben nutzen
+`SINGLE_CHUNK_CROSSCHECK_VERIFIED` aktiv, acht ID-Pixelprüfungen
+haben `PIXEL_GRID_VERIFIED`; 13 Positionen wurden unabhängig
+zweifach bestätigt. Nach Probe 25 fehlten jedoch zeitweise alle
+numerisch lesbaren Chunk-IDs; später bei circa 3155/3186/0
+hatte `FIELD_QUORUM xy_votes=4 chunk_votes=2 region_votes=4`
+und dennoch `unknown_singleton_rejects=6`, `full_matches=0`:
+Ziffer 6 kommt in den aktuellen IDs 807310/12593 nicht vor.
+Ab Probe 25 werden keine neuen Positionen freigegeben;
+`GRID_INFO_NOT_READABLE` und `POSITION_NOT_CONFIRMED_TIMEOUT`
+kopieren nachweislich die vollständige Logdatei. Neue Belege
+machen die Forderung nach einer strukturierten Datenquelle statt
+immer weiterer ungerechtfertigter OCR-Zeichenersetzung deutlich.
 
 ## 1.8.15 live: starke X/Y-Mehrheit sperrt den Ein-Chunk-Sonderweg (1.8.16)
 

@@ -1,4 +1,72 @@
-# OSRS Play 1.8.16 – Mehrfach bestätigtes X/Y bei einzelner Chunk-ID
+# OSRS Play 1.8.17 – Direkte RuneLite-Position mit offiziellem Plugin-Hub
+
+## Neu in 1.8.17: Präzise Koordinaten ohne modifizierten RuneLite-Client
+
+Der echte 1.8.16-Live-Test vom 28.10.2026 um 16:27–16:28 Uhr
+(Europe/Berlin) belegt die automatische Installation und **sieben**
+erfolgreiche `SINGLE_CHUNK_CROSSCHECK_VERIFIED`-Ereignisse. Der
+Pixelweg verifizierte acht ID-basierte Kandidaten; 13 Aufnahmen
+wurden durch zwei frische Frames bestätigt. Danach fielen bei
+Bewegungen Chunk-ID-Ziffern vollständig aus, und am Ort um
+3155/3186 fehlte die Ziffer `6` in sämtlichen ID-Pixelvorlagen.
+Trotz vier passender X/Y- und vier Region-OCR-Stimmen ging die
+Position verloren. Weitere OCR-Ratereien sind keine verlässliche
+Grundlage für eigenständige Navigation.
+
+Es gibt bereits einen im **regulären RuneLite Plugin Hub** gelisteten,
+unveränderten Positionsdatenexport:
+[OSRS Toolkit Exporter](https://github.com/Gorsokk/position-exporter).
+Er nutzt intern RuneLites `client.getLocalPlayer().getWorldLocation()`
+und schreibt bei jedem erkannten Kachelwechsel lokal eine
+`position.json`. Der Jagex Launcher und das RuneLite-Profil `auto`
+bleiben unverändert. **Weder ein modifizierter Client noch ein eigener
+Plugin-Loader wird installiert.**
+
+**Einmalige Einrichtung in RuneLite:**
+
+1. RuneLite wie bisher über den **Jagex Launcher** mit Profil `auto` öffnen.
+2. Einstellungen → Plugin Hub → **OSRS Toolkit Exporter** installieren.
+3. In dessen Einstellungen **Export position** einschalten.
+4. Aus Datenschutzgründen nach Möglichkeit **Export GE offers**,
+   **Export character progress**, **Export inventory and equipment**,
+   **Export bank** und **Export game quest data** ausschalten.
+5. Wie bisher das World-Location-Overlay mit **Grid Info** sichtbar lassen.
+   Bewege die Spielfigur einmal, falls der Export noch keine Datei erzeugt hat.
+
+OSRS Play liest **ausschließlich** die positionsbezogene Datei
+`position.json` unter dem vom Plugin angelegten RuneLite-Datenordner.
+Sie enthält zwar intern auch den Charakternamen, dieser wird aber
+weder angezeigt noch in Logs übernommen. Die Dateizuordnung muss zum
+**vollständigen Namen im Titel genau eines offiziellen RuneLite-Fensters**
+passen. Mehrdeutige Dateien, falsche Prüfsummen, ungültige Ebenen,
+falsche Accountzuordnung, beschädigte JSON-Daten und zukünftige
+Zeitstempel werden ohne Positionsfreigabe verworfen.
+
+Bei einer höchstens drei Sekunden alten Position nutzt OSRS Play
+direkt die vom RuneLite-Client berechnete Position, verlangt aber
+weiterhin **zwei frische, unabhängige Fensteraufnahmen**. Das Plugin
+schreibt im Stillstand nicht periodisch neu: Ist die Datei älter,
+verlangt OSRS Play deshalb mindestens drei zum Export passende
+X/Y- und Region-Zahlenlesungen aus dem **jetzigen Bildschirm** sowie
+eine eindeutige echte Pixelprüfung aller Feldraster, Kommas und der
+Ebene. Eine bislang nicht in den IDs enthaltene einzelne Ziffer darf
+**nur der ohnehin von RuneLite direkt bezeichnete Ort** kennzeichnen,
+wenn der neue Pixelglyph auch tatsächlich sichtbar und eindeutig
+verschieden ist. Danach kann dieser Glyph aus zwei bestätigten
+Aufnahmen in die bisherige kurzlebige Glyphhistorie gelangen.
+Bei fehlendem Plugin bleibt die bestehende vorsichtige OCR-Prüfung
+aktiv; es werden keine Positionen erfunden.
+
+Diagnosen: `POSITION_EXPORT`, `DIRECT_CLIENT_API`,
+`STALE_REQUIRES_LIVE_SCREEN_CROSSCHECK`,
+`POSITION_EXPORT_SCREEN_CROSSCHECK`,
+`CLIENT_EXPORT_PLUS_SCREEN_PIXELS`, `client_export_labelled_glyphs`.
+Die RuneLite-Oberfläche und gespeicherte Screenshots werden nicht
+verändert; private Profil-/Charakterdateien werden nicht eingecheckt.
+Das ist bis zum nächsten Benutzer-Live-Test nur synthetisch erprobt.
+Die automatische RuneLite-Spielsteuerung bleibt unimplementiert.
+
+## Bisherige Versionen
 
 **Neu in 1.8.16 – echte OCR-Lücke aus dem 1.8.15-Live-Test geschlossen:**
 Das echte Live-Protokoll vom 27.10.2026, 23:11–23:12 Uhr bestätigt
