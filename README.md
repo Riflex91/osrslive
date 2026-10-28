@@ -1,4 +1,41 @@
-# OSRS Play 1.8.32 – Gehversuch sicher vormerken, statt Start abzulehnen
+# OSRS Play 1.8.33 – Kurze seitliche Umwege am Wegpunkt kontrolliert beobachten
+
+## 1.8.33: Zwei reale Frühabbrüche im automatischen Gehen behoben
+
+Ein neues **461-Zeilen-Live-Log** vom 28.10.2026 bestätigt, dass
+v1.8.32 automatisch aktualisiert wurde, der vormerkbare Start nach
+einem neuen RuneLite-Plugin-Ereignis funktioniert und die Spielerfigur
+bei mehreren `SendInput`-Klicks tatsächlich läuft. Die automatische
+Strecke zu Varrock stoppte jedoch nach vier Klicks beim Tile
+`(3239,3269)` und die zu Grand Exchange nach zwei Klicks bei
+`(3237,3296)` jeweils mit `UNEXPECTED_API_TILE`. Beide stehen
+**zwei Kacheln vor dem angeklickten Wegpunkt**: RuneLite ist einen
+kurzen Schritt seitwärts statt exakt auf dem öffentlichen A*-Pfad
+gelaufen. Ein dritter Test endete nach dem Verlust des RuneLite-
+Vordergrunds; dieser Schutzstopp bleibt ausdrücklich erhalten.
+
+**Fix:** Nach einem bereits durch neue RuneLite-API-Tiles bestätigten
+langen Klick-Pfad darf höchstens **ein einzelnes neues seitliches
+Tile-Ereignis** mit Sprungweite 1, maximal zwei Kacheln Abstand
+zum verifizierten Wegprefix und genau zwei Kacheln Restdistanz
+als `NEAR_WAYPOINT_LATERAL_OBSERVED` beobachtet werden. Dies ist
+**kein bestätigter Wegpunkt** und **keine Erlaubnis für einen
+Folgeklick**. Nur ein danach wirklich bestätigter Wegpunkt oder
+die bereits zuvor vorhandene streng begrenzte Ruhephasen-
+Wiederaufnahme (`WAYPOINT_LATERAL_QUIET_REPLAN`) kann eine neue
+Kollisionsroute aus dem frischen API-Tile prüfen. Diese setzt
+mindestens 1,6 Sekunden ohne neues Ereignis, ein höchstens
+drei Sekunden altes API-Tile und maximal zwei Wiederholungen
+pro Gehversuch voraus. Wiederholte seitliche Schritte, größere
+Abweichungen, falsche Ebene und Vordergrundverlust stoppen
+weiterhin sofort. Regressionstests spielen beide echten
+Fehlerfolgen und verbotene Abweichungen nach.
+
+Ein im Spiel **vollständig erreichtes Ziel** ist weiterhin
+nicht bestätigt. Bitte mit regulärem RuneLite aus dem Jagex
+Launcher im Vordergrund testen. Der vorhandene read-only Exporter
+liefert keinen neuen Positionssnapshot beim reinen App-Start,
+und `SendInput` erlaubt keine verlässlichen Hintergrundklicks.
 
 ## 1.8.32: Button bleibt bedienbar, auch ohne neues Plugin-Ereignis
 

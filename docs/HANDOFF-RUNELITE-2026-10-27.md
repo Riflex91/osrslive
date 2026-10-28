@@ -1,4 +1,61 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.32
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.33
+
+## 1.8.33 – Echter v1.8.32-Test: Bewegung klappt, früher Seitenstopp zweimal falsch
+
+Das neu übermittelte **461-Zeilen-Log** bestätigt `v1.8.32`,
+`build_channel=push`, `build_run=40770678261`, Auto-Updater
+`ALREADY_CURRENT` und einen funktionierenden vorgemerkten
+Start von `Varrock_Westbank`: Nach dem anfangs 306 Sekunden
+alten Export gab es ein neues RuneLite-Tile, welches die
+Kalibrierung automatisch öffnete. Vier vom Programm in den
+Vordergrund gesendete Mausbefehle wurden anhand echter
+Exporter-Events als Bewegung beobachtet. Der letzte Klick
+ging ab `(3241,3263)` nach `(3241,3271)`; nach `(3240,3269)`
+kam `(3239,3269)`. Obwohl nur ein Seitwärtsschritt und
+weiterhin zwei Tiles zum Wegpunkt, trat `UNEXPECTED_API_TILE`
+auf – der alte Korridor verlangte zwingend eine kleinere
+Chebyshev-Distanz zum Wegpunkt und `axisConsistent=true`.
+
+Ein folgender `Lumbridge_Hühner`-Lauf schickte zwei Klicks
+und bestätigte erneut reale API-Bewegung, wurde dann mit
+`RUNELITE_FOREGROUND_LOST` abgebrochen. Das bleibt ein
+absichtlicher Fail-Closed-Fokuscheck; kein Hintergrund-
+Spielinput behaupten oder bei anderem aktiven Fenster
+weiterklicken.
+
+Der `Grand_Exchange`-Lauf schickte zwei Klicks und meldete
+echte Prefix-/Korridorbewegung. Direkt nach `(3238,3295)`
+beobachtete die API `(3237,3296)` (Wegpunkt `(3239,3297)`),
+ebenfalls ein letzter seitlicher Schritt bei Distanz 2,
+und der gleiche `UNEXPECTED_API_TILE`-Stopp trat auf.
+
+**1.8.33-Fix:** `RuneLiteAutoWalk.Observe` führt für exakt
+diese späten API-Tile-Muster `NEAR_WAYPOINT_LATERAL_OBSERVED`
+ein: höchstens ein Seitwärtsschritt pro Klick, nach mindestens
+der Hälfte des exakt geprüften Wegpräfixes und mindestens
+drei bestätigten Schritten, Tile-Jump=1, Distanz zum Ziel-
+Waypoint vorher/nachher exakt 2, höchstens zwei Tiles zum
+verifizierten Prefix, höchstens fünf Sekunden seit dem Klick
+und höchstens zwei Sekunden zwischen Beobachtungen.
+Dieser Schritt wird **NICHT** als Fortschritt/Ankunft gezählt;
+es wird **KEIN** Spielinput gesendet. Falls RuneLite danach
+den echten Wegpunkt bestätigt, läuft die reguläre Route
+weiter. Sonst erlaubt die bereits vorhandene Wiederaufnahme
+erst nach mindestens 1,6 Sekunden ruhig beobachteter Phase,
+bei maximal drei Sekunden altem API-Tile und höchstens zwei
+solchen Replans der gesamten Sitzung eine neue, durch die
+Kollisionsdaten geprüfte Route. Das Ereignis ist separat als
+`WAYPOINT_LATERAL_QUIET_REPLAN` protokolliert. Die echte
+Ingame-Standphase ist mangels Exporter-Heartbeat nicht
+unabhängig messbar; keine verlängerten Timeouts oder
+Klicks aus alter Position. Tests rekonstruieren **beide**
+echten v1.8.32-Stopps und prüfen anschließend sowohl die
+spätere exakte Wegpunktbestätigung als auch Nebenbewegungen,
+die zwingend abgewiesen werden müssen.
+
+**Offen:** Kein im Spiel vollständig erreichtes Ziel
+bewiesen; keine Hintergrundsteuerung mit `SendInput`;
+Startkoordinaten weiterhin erst bei frischem Plugin-Ereignis.
 
 ## 1.8.32 – Beim Start verweigerter Button durch alte Pluginposition
 

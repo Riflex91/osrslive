@@ -70,6 +70,18 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   sendet der Client keinen Klick. Ohne Exporter-Heartbeat
   erfordert das weiterhin einen manuell ausgelösten
   ersten Tilewechsel. Keine stille Akzeptanz alter Datei.
+  Der echte v1.8.32-Test bestätigt 8 weitere automatische
+  SendInput-Klicks in drei Versuchen (4 nach Varrock,
+  2 nach Lumbridge, 2 zur Grand Exchange). Zwei Versuche
+  stoppten an **einer** seitlichen Kachel nahe Wegpunkt
+  trotz echten Plugin-Wegfortschritts, der dritte korrekt
+  bei Vordergrundverlust. v1.8.33 beobachtet höchstens
+  einen späten Seitwärtsschritt statt sofort zu stoppen;
+  es gibt dabei keinen neuen Klick und keinen falschen
+  Wegpunkterfolg. Ein echter späterer Wegpunkt oder der
+  weiterhin streng begrenzte frische API-Quiet-Replan
+  ist für die Fortsetzung nötig. Vollständige Ankunft
+  bleibt weiterhin ungetestet.
   Die strikte
   `RUNELITE_FOREGROUND_LOST`-Sperre bleibt bestehen. Alle Schritte
   und Grenzen stehen
