@@ -1,4 +1,29 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.27
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.28
+
+**1.8.28 – bestätigter Fortschritt, zwei verschiedene Stopps in 1.8.27:**
+Das neue Nutzerlog vom 28.10.2026, 20:37, zeigt zweimal den
+geprüften **weißen Spielerpunkt (645,111)** und mehrere echte, nach
+Win32-SendInput vom RuneLite-Exporter gemeldete Kachelwechsel.
+Im zweiten Versuch wurden sogar **zwei** aufeinanderfolgende
+Automatik-Klicks ausgeführt, ein Wegpunkt bestätigt und ein weiterer
+Wegverlauf beobachtet. Kein vollständiger Zielerfolg bislang.
+
+Der erste Versuch stoppte nach (3244,3192) auf der einen benachbarten
+abweichenden Kachel (3243,3193), die näher zum angeklickten
+Wegpunkt lag. 1.8.28 ermöglicht nur nach mindestens zwei
+wirklich bestätigten Prefix-Schritten eine strikt begrenzte
+`WAYPOINT_CORRIDOR_REPLAN`-Neuplanung aus einer benachbarten,
+nachweislich näher liegenden Kachel; maximal zwei pro Sitzung,
+nie ein ungeprüfter Folgeklick ohne neu berechneten Kollisionsweg.
+Alle anderen Abweichungen bleiben harte Fehler.
+
+Der zweite Versuch stoppte, als RuneLite den **Vordergrund verlor**.
+Diese Sicherheitsregel ist beabsichtigt und wird **nicht**
+abgeschwächt. Für den nächsten Test RuneLite die ganze Zeit
+aktiv halten. Keine automatischen Klicks in ein anderes Fenster.
+
+Die folgenden 1.8.27-Notizen dokumentieren nun eine behobene
+Fehlposition, nicht den aktuellen Status.
 
 **1.8.27 – schwerer Koordinatenfehler in 1.8.26:** Der gelbe
 Kalibrierungsring traf den kleinen weißen Spielerpunkt **erneut nicht**.

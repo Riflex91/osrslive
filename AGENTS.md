@@ -27,7 +27,13 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   **Minimap-** statt 3D-Kamera-Zoom über einen geprüften Minimap-
   Rechtsklick auf RuneLites Standard 4 Pixel/Tile zurück. Die echte
   Zoomstufe wird vom Exporter nicht mitgeliefert; nur der Input ist
-  prüfbar. Alle Schritte und Grenzen stehen
+  prüfbar. Das 1.8.27-Live-Log bestätigt die weiße Mitte und mindestens
+  zwei automatische SendInput-Klicks mit echtem API-Wegefortschritt.
+  1.8.28 erlaubt bis zu zwei eng begrenzte Vorwärtsabweichungen von
+  einer Kachel vom genauen A*-Prefix, nur nach früherem Plugin-
+  Fortschritt und mit erneuter Kollisionsplanung. Die strikte
+  `RUNELITE_FOREGROUND_LOST`-Sperre bleibt bestehen. Alle Schritte
+  und Grenzen stehen
   in der Übergabe; keine automatische Konto-/Loginbedienung.
 - Alle Weltkoordinaten stammen vom geprüften lokalen Plugin-Hub-Export;
   keine Screenshot-Positionserkennung oder geratenen Ziffern freigeben.

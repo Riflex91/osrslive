@@ -295,8 +295,8 @@ internal sealed class RuneLiteWindow:Form
                 else if(feedback.Status!="IGNORED")
                 {
                     log.Add(Severity.INFO,"RUNELITE_AUTOWALK",feedback.Status,feedback.Diagnostic);
-                    autoWalkDescription=feedback.Status is "WAYPOINT_CONFIRMED" or "WAYPOINT_NEAR_CONFIRMED"?
-                        "Automatik: Wegpunkt per RuneLite-API bestätigt · plane nächsten Klick.":
+                    autoWalkDescription=feedback.Status is "WAYPOINT_CONFIRMED" or "WAYPOINT_NEAR_CONFIRMED" or "WAYPOINT_CORRIDOR_REPLAN"?
+                        "Automatik: RuneLite-API-Fortschritt bestätigt · prüfe neue Kollisionsroute.":
                         "Automatik: echte Kachelbewegung bestätigt · warte auf Wegpunkt.";
                 }
             }
@@ -518,7 +518,7 @@ internal sealed class RuneLiteWindow:Form
                     "north_up_confirmed_by_user=true minimap_reset_rightclick_dispatched=true "+
                     "first_calibrated_click_last_known_api_max_age_s=60 first_click_window_s=12 "+
                     "later_clicks_require_event_age_s_at_most=3 "+
-                    "click_limit=40 runtime_limit_s=300 verify_each_waypoint=true "+
+                    "click_limit=40 corridor_replan_limit=2 runtime_limit_s=300 verify_each_waypoint=true "+
                     $"marker_selection_method={setup.SelectionSource} expected_minimap_scale=4 "+
                     "foreground_mouse_consent=true sendinput_not_postmessage=true "+
                     "source=PLUGIN_API no_screenshot_saved=true");

@@ -18,14 +18,16 @@ internal sealed class RuneLiteAutoWalk
 
     private Pending? pending;
     private DateTimeOffset started;
-    private int clicks;
+    private int clicks,corridorReplans;
     internal bool Active{get;private set;}
     internal NavigationDestination? Destination{get;private set;}
     internal Calibration? Geometry{get;private set;}
     internal int Clicks=>clicks;
+    internal int CorridorReplans=>corridorReplans;
     internal bool WaitingForMovement=>pending is not null;
     internal static readonly TimeSpan EventTimeout=TimeSpan.FromSeconds(9);
     internal const int MaxClicks=40;
+    internal const int MaxCorridorReplans=2;
 
     internal void Start(NavigationDestination destination,Calibration geometry,DateTimeOffset now)
     {
@@ -37,7 +39,7 @@ internal sealed class RuneLiteAutoWalk
     internal void Stop()
     {
         Active=false;pending=null;Destination=null;Geometry=null;
-        started=default;clicks=0;
+        started=default;clicks=0;corridorReplans=0;
     }
 
     internal static bool ValidGeometry(Calibration c)=>
@@ -120,8 +122,38 @@ internal sealed class RuneLiteAutoWalk
                 $"one_tile_endpoint_tolerance=true last_verified_path_index={p.LastIndex} "+
                 "requires_fresh_collision_replan=true confirmed_by=NEW_PLUGIN_API_EVENT",true);
         }
+        // The in-game route solver can take a one-tile corridor shortcut
+        // different from the static A* prefix. The 1.8.27 live log confirms
+        // an on-path step (3244,3192), followed by (3243,3193), still
+        // closer to the same waypoint (3242,3195). Do NOT treat an arbitrary
+        // off-path tile as progress: require a previous verified prefix, a
+        // single adjacent tile, decreasing distance, and proximity to an
+        // imminent known path tile. Then clear the pending click so the NEXT
+        // click must be based on a new collision path from the fresh API tile.
+        if(index==0&&p.LastIndex>=2&&corridorReplans<MaxCorridorReplans&&
+           tile.Plane==p.Plan.Waypoint.Plane&&
+           p.Plan.PathPrefix.Length>=p.LastIndex&&
+           p.Plan.PathPrefix[p.LastIndex-1] is WorldTile last&&
+           tile.Distance(last)==1&&
+           tile.Distance(p.Plan.Waypoint)<last.Distance(p.Plan.Waypoint)&&
+           p.Plan.PathPrefix.Skip(p.LastIndex).Take(3)
+               .Any(next=>tile.Distance(next)<=1))
+        {
+            corridorReplans++;
+            pending=null;
+            return new("WAYPOINT_CORRIDOR_REPLAN",
+                $"observed={tile.X},{tile.Y},{tile.Plane} "+
+                $"last_confirmed={last.X},{last.Y},{last.Plane} "+
+                $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
+                $"last_verified_path_index={p.LastIndex} "+
+                $"corridor_replans={corridorReplans}/{MaxCorridorReplans} "+
+                "one_adjacent_forward_deviation=true prior_progress_confirmed=true "+
+                "observed_by=NEW_PLUGIN_API_EVENT old_input_complete=true "+
+                "next_click_requires_new_collision_route=true no_unverified_edge_traversal=true",true);
+        }
         if(index<=0)
             return new("OFF_PATH","tile_not_a_forward_step_on_dispatched_route=true "+
+                $"corridor_replans={corridorReplans}/{MaxCorridorReplans} "+
                 $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
                 $"observed={tile.X},{tile.Y},{tile.Plane} expected={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
                 $"event_gap_ms={(eventAt-p.EventAt).TotalMilliseconds:0} input_was_only_posted=true",false);
@@ -231,8 +263,47 @@ internal static class RuneLiteAutoWalkTests
         walk.Stop();walk.Start(goal,geom,now);walk.Sent(plan,now,now);
         Require(walk.Observe(new(3200,3201),now.AddSeconds(1),now.AddSeconds(1)).Status=="OFF_PATH",
             "early off-route observations are still rejected even if close to the start");
+        // Exact live 1.8.27 geometry: RuneLite confirmed four A* prefix
+        // steps but then used one adjacent forward tile not on the prefix.
+        var liveOrigin=new WorldTile(3242,3188);
+        PathStep[] livePrefix=[
+            new(new(3243,3189)),new(new(3244,3190)),
+            new(new(3244,3191)),new(new(3244,3192)),
+            new(new(3244,3193)),new(new(3244,3194)),
+            new(new(3243,3194)),new(new(3242,3194)),new(new(3242,3195))];
+        var livePlan=RuneLiteAutoWalk.Project(liveOrigin,livePrefix,geom)!;
+        Require(livePlan is not null&&livePlan.Waypoint==new WorldTile(3242,3195)&&
+                livePlan.WaypointIndex==9,
+            "live-test corridor waypoint is built entirely from adjacent collision steps");
+        walk.Stop();walk.Start(goal,geom,now);walk.Sent(livePlan,now,now);
+        Require(walk.Observe(new(3244,3192),now.AddSeconds(1),now.AddSeconds(1)).Status=="PROGRESS_CONFIRMED",
+            "first on-prefix progress must be independently confirmed before a detour");
+        var corridor=walk.Observe(new(3243,3193),now.AddSeconds(2),now.AddSeconds(2));
+        Require(corridor.Status=="WAYPOINT_CORRIDOR_REPLAN"&&corridor.Continue&&
+                walk.CorridorReplans==1&&!walk.WaitingForMovement&&
+                walk.CanDispatch(now.AddSeconds(2),now.AddSeconds(2)),
+            "one adjacent, waypoint-approaching live detour may start a fresh collision replan");
+        walk.Stop();walk.Start(goal,geom,now);walk.Sent(livePlan,now,now);
+        walk.Observe(new(3244,3192),now.AddSeconds(1),now.AddSeconds(1));
+        Require(walk.Observe(new(3245,3193),now.AddSeconds(2),now.AddSeconds(2)).Status=="OFF_PATH",
+            "one adjacent tile moving no closer to the waypoint is still a hard stop");
+        walk.Stop();walk.Start(goal,geom,now);walk.Sent(livePlan,now,now);
+        walk.Observe(new(3243,3189),now.AddSeconds(1),now.AddSeconds(1));
+        Require(walk.Observe(new(3244,3189),now.AddSeconds(2),now.AddSeconds(2)).Status=="OFF_PATH",
+            "an early unverified sideways step must never trigger the new detour replan");
         Require(walk.Timeout(now.AddSeconds(12))=="POSITION_EVENT_TIMEOUT",
             "stalled plugin feedback is an explicit input failure");
+        walk.Stop();walk.Start(goal,geom,now);
+        for(int i=0;i<=RuneLiteAutoWalk.MaxCorridorReplans;i++)
+        {
+            var sentAt=now.AddSeconds(i*3);
+            walk.Sent(livePlan,sentAt,sentAt);
+            walk.Observe(new(3244,3192),sentAt.AddSeconds(1),sentAt.AddSeconds(1));
+            var result=walk.Observe(new(3243,3193),sentAt.AddSeconds(2),sentAt.AddSeconds(2));
+            Require(result.Status==(i<RuneLiteAutoWalk.MaxCorridorReplans?
+                    "WAYPOINT_CORRIDOR_REPLAN":"OFF_PATH"),
+                "at most two narrow corridor deviations per armed session; third is a hard stop");
+        }
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
     }

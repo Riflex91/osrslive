@@ -1,4 +1,55 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.27
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.28
+
+## 1.8.28 – Neue RuneLite-Live-Daten bestätigen weiße Minimap-Mitte und mehrere Spielklicks
+
+Der Nutzer lud am 28.10.2026 ein neues OSRS-Play-1.8.27-Log mit
+232 Zeilen (20:36:52–20:37:40 Europe/Berlin) hoch. Darin zwei
+automatisch gestartete Gehversuche nach der neuen Kalibrierung:
+
+1. 20:37:13: `MINIMAP_ANCHOR_CALIBRATED` meldet
+   `AUTO_FIXED_LAYOUT_WHITE_DOT center_x=645 center_y=111
+   client=773x539 white_dot_result=VISIBLE_NEAR_FIXED_CENTER`.
+   `ZOOM_RESET_INPUT_SENT input_events=5` folgt. Ein echter
+   `CLICK_INTENT` von (3242,3188) nach (3242,3195) mit Bildschirm-
+   Klick (645,83) erzeugt einen bestätigten API-Fortschritt
+   (3244,3192) mit `observed_path_index=4`. 0,8 s später kommt
+   (3243,3193): **ein** benachbarter Schritt näher zum Wegpunkt,
+   der nicht exakt auf dem gespeicherten Prefix liegt. 1.8.27
+   meldete `UNEXPECTED_API_TILE` und stoppte korrekt unter der
+   damals geltenden strikten Regel; kein weiterer Klick.
+2. 20:37:31: Neuer Test von Plugin-Tile (3242,3195) mit Auto-Anker
+   (645,111), `CLICK_INTENT` (629,87), bestätigte RuneLite-
+   Positionen (3241,3197) → (3239,3200). Das ist ein
+   `WAYPOINT_CONFIRMED`, gefolgt von automatischem Klick 2 zum
+   Wegpunkt (3234,3206), Bildschirmposition (625,87).
+   Neue API-Tiles (3237,3202) → (3235,3204) bestätigen den
+   weiteren realen Fortschritt, ohne Off-Path. Um 20:37:38
+   erkennt die Sicherheitslogik `RUNELITE_FOREGROUND_LOST`.
+   Diese Abschaltung bleibt unverändert: Ein fremdes
+   Vordergrundfenster darf niemals weitere Eingaben erhalten.
+
+**1.8.28-Änderung:** `RuneLiteAutoWalk.Observe` erlaubt nach mindestens
+zwei bestätigten Prefix-Schritten eine **einzelne** frisch vom
+Plugin gelieferte benachbarte Kachel, die weder auf einem früheren
+Prefix liegt noch Ebene oder Wegpunkt zurücksetzt, aber näher zum
+aktuellen Wegpunkt führt und höchstens eine Kachel von den nächsten
+drei geplanten Pfadkacheln entfernt ist. Statt sie blind zu
+akzeptieren, löst `WAYPOINT_CORRIDOR_REPLAN` die alte `Pending`-
+Freigabe und verlangt vor dem nächsten Klick den vollständigen,
+frisch gerechneten Kollisionspfad ab dem neuen bestätigten Tile.
+Maximal zwei solche Ausnahmen **pro bewaffneter Testsitzung**;
+bei einer dritten Abweichung wieder `OFF_PATH` samt rotem
+Fehler- und Clipboard-Log. Ein rückwärts führender, weiter
+entfernter oder nicht benachbarter Schritt bleibt verboten.
+
+Neue synthetische Regressionen reproduzieren exakt den ersten
+realen Schritt (3244,3192) → (3243,3193) und prüfen die
+Ablehnung einer seitlichen Frühabweichung, eines nicht näherrückenden
+Schritts und der dritten Korridorausnahme. Alle Weltkacheln stammen
+unverändert ausschließlich aus dem Plugin-Hub-Exporter. Die
+Minimap-Geometrie und der Zoom-Reset aus 1.8.27 bleiben unverändert.
+Erneuter echter Live-Test mit RuneLite im Vordergrund erforderlich;
+ein Lauf bis Lumbridge wurde noch nicht gezeigt.
 
 ## 1.8.27 – rote Linien richtig interpretiert, sichtbaren weißen Spielerpunkt verifizieren
 

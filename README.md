@@ -1,4 +1,47 @@
-# OSRS Play 1.8.27 – Weißer Spielerpunkt statt fehlgedeuteter Bildschirmmarkierung
+# OSRS Play 1.8.28 – Sichere Neuplanung bei kleiner RuneLite-Routenabweichung
+
+## 1.8.28: Echtes Gehen bestätigt, streng begrenzte Korridor-Neuplanung
+
+Der Live-Test der Version 1.8.27 am 28.10.2026, 20:37 Uhr,
+bestätigt erstmals die korrigierte automatische Minimap-Kalibrierung:
+`AUTO_FIXED_LAYOUT_WHITE_DOT` bei **(645,111)**. Der Minimap-Zoom-
+Reset wurde ausgeführt. RuneLite führte daraufhin in zwei Versuchen
+mehrere Schritte auf dem geplanten Weg aus. Im zweiten Versuch
+folgten auf den ersten bestätigten Wegpunkt bereits ein **zweiter
+automatischer Klick** und weitere frische, passende Plugin-Kacheln.
+
+Im ersten Versuch zeigte das Log noch eine kleine Abweichung des
+RuneLite-internen Laufwegs von der statischen A*-Zwischenroute:
+Nach dem bestätigten Kachelstand (3244,3192) kam (3243,3193),
+also **eine benachbarte Kachel näher zum selben Wegpunkt**.
+Die alte Prüfung beendete dies sofort als `UNEXPECTED_API_TILE`.
+
+Version 1.8.28 akzeptiert nur diesen eng definierten Sonderfall:
+
+- Zuerst müssen mindestens zwei tatsächlich durch das Plugin
+  bestätigte Wegschritte auf dem zuvor berechneten Pfad vorliegen.
+- Die Abweichung darf **höchstens eine benachbarte Kachel** sein,
+  muss in Richtung des Wegpunkts führen und nahe an den nächsten
+  vorgesehenen Kacheln liegen; Ebenenwechsel bleiben ausgeschlossen.
+- Der alte Klick wird abgeschlossen. **Vor jedem weiteren Klick**
+  wird vom aktuellen Plugin-Tile eine vollständig neue Kollisions-
+  route berechnet. Maximal **zwei** solche Neuplanungen pro Test;
+  jede weitere Abweichung bleibt ein harter Fehler.
+- Neue Logs `WAYPOINT_CORRIDOR_REPLAN` erklären den exakten
+  letzten bestätigten Punkt, die Abweichung, den Wegpunkt und
+  das Neuplanungslimit.
+
+Der zweite Test endete mit `RUNELITE_FOREGROUND_LOST`, nachdem die
+Routenposition bereits mehrfach fortgeschritten war. **Das ist
+eine gewollte Sicherheitsabschaltung**: Wenn ein anderes Programm
+den Vordergrund übernimmt, werden keinerlei weiteren Spielklicks
+gesendet. Bitte RuneLite für den gesamten Test im Vordergrund lassen.
+
+Ein vollständiger Lauf zum Ziel ist weiterhin **nicht** verifiziert.
+Die gesamte Ortsbestimmung stammt vom RuneLite-Plugin; der weiße
+Minimap-Spielerpunkt dient ausschließlich der Klickgeometrie.
+
+## Vorherige Version: 1.8.27 – Weißer Spielerpunkt bestätigt
 
 ## 1.8.27: Nutzerbild erneut vermessen und Kalibrierung abgesichert
 
