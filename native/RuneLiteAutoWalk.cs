@@ -345,9 +345,9 @@ internal static class RuneLiteAutoWalkTests
         // Real 1.8.28 first off-prefix events: public A* wanted east+north,
         // RuneLite moved 2 tiles north, then continued near that route.
         var northStart=new WorldTile(3230,3167);
-        var northPath=new[]{new WorldTile(3231,3168),new(3232,3169),
+        WorldTile[] northPath=[new(3231,3168),new(3232,3169),
             new(3232,3170),new(3232,3171),new(3232,3172),
-            new(3232,3173),new(3232,3174),new(3232,3175)};
+            new(3232,3173),new(3232,3174),new(3232,3175)];
         var northPlan=RuneLiteAutoWalk.Project(northStart,
             northPath.Select(t=>new PathStep(t)).ToArray(),geom)!;
         Require(northPlan.Waypoint==new WorldTile(3232,3175),
@@ -365,9 +365,9 @@ internal static class RuneLiteAutoWalkTests
         // In another real test, the FIRST post-click event was four tiles
         // ahead and two tiles away from the A* path, still closer to target.
         var diagonalStart=new WorldTile(3232,3174);
-        var diagonalPath=new[]{new WorldTile(3233,3175),new(3234,3176),
+        WorldTile[] diagonalPath=[new(3233,3175),new(3234,3176),
             new(3235,3177),new(3235,3178),new(3235,3179),
-            new(3236,3180),new(3236,3181)};
+            new(3236,3180),new(3236,3181)];
         var diagonalPlan=RuneLiteAutoWalk.Project(diagonalStart,
             diagonalPath.Select(t=>new PathStep(t)).ToArray(),geom)!;
         walk.Stop();walk.Start(goal,geom,now);walk.Sent(diagonalPlan,now,now);
@@ -398,9 +398,9 @@ internal static class RuneLiteAutoWalkTests
         // Only a sustained series of forward near-prefix observations may
         // replan before reaching the waypoint, and at most twice per arm.
         var longStart=new WorldTile(3200,3200);
-        var longPath=new[]{new WorldTile(3201,3201),new(3202,3202),
+        WorldTile[] longPath=[new(3201,3201),new(3202,3202),
             new(3203,3202),new(3204,3202),new(3205,3202),
-            new(3206,3202),new(3207,3202),new(3208,3202)};
+            new(3206,3202),new(3207,3202),new(3208,3202)];
         var longPlan=RuneLiteAutoWalk.Project(longStart,
             longPath.Select(t=>new PathStep(t)).ToArray(),geom)!;
         WorldTile[] offSamples=[new(3202,3200),new(3203,3200),new(3204,3200),
