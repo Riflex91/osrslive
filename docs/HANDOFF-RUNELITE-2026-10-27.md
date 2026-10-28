@@ -1,4 +1,53 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.21
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.22
+
+## 1.8.22 – Erster expliziter RuneLite-Bewegungstest
+
+Der reale Test von 1.8.21 am 28.10.2026, 18:40:52–18:41:43
+Europe/Berlin belegt `PREVIOUS_UPDATE`, `ALREADY_CURRENT`,
+13 neue API-Positionen (davon zwölf Bewegungen), 14
+`ROUTE_RECALCULATED` und 14 `PROGRESS`-Einträge.
+Lumbridge wurde von 72 auf 59 Restschritte angenähert
+und auf 68 Schritte wieder verlassen; zwei Meldungen
+`ON_PREVIOUS_ROUTE`, zehn `OFF_PREVIOUS_ROUTE`,
+zwei `BASELINE`. Eine diagonale Bewegung
+`dx=1,dy=-1` wurde korrekt als benachbart erkannt.
+Keine Positionsfehler und keine Screenshots/OCR für
+Weltkoordinaten. Der Nutzer möchte nun zum ersten Mal
+automatische Bewegung direkt im Spiel testen.
+
+Der neue `RuneLiteAutoWalk` wird nur durch den GUI-Knopf
+„Automatisch gehen (Test)“ aktiv. Vorher muss ein aktueller
+RuneLite-WGC-Frame gezeigt und dessen Minimap-Spielerpunkt
+durch Nutzerklick bestimmt werden; Norden oben, Zoom
+ganz heraus und Pixel-pro-Tile-Wert werden **manuell**
+bestätigt. Diese Projektion ist vor dem Live-Test nur
+eine kalibrierbare Annahme. Der WorldTile kommt weiterhin
+streng aus dem offiziellen Plugin Hub. Aus einer validierten
+Kollisionsroute werden nur kurze, untransportierte, gleich-
+ebene, benachbarte Wegpunkte in höchstens 34 Pixel Abstand
+um den kalibrierten Minimap-Mittelpunkt gewählt. Eingaben
+gehen als überprüfte HWND-Klicknachrichten an das eindeutig
+identifizierte RuneLite-Fenster; RuneLite-Java-Akzeptanz
+dieser Nachrichten ist **noch nicht live bestätigt**.
+
+`CLICK_INTENT` ist kein Erfolg. Nach dem Versand wird
+ein frischer API-Tile auf dem vorher gewählten Pfad in
+aufsteigender Wegreihenfolge verlangt; erst nach
+`WAYPOINT_CONFIRMED` darf der nächste Klick folgen.
+`OFF_PATH`, mehr als neun Sekunden ohne API-Fortschritt,
+ausgefallene/ungültige Exportdaten, veränderte HWND/
+Clientgröße, Pause, Stop, Zielwechsel oder Routenfehler
+stoppen zukünftige Klicks. 40 Klicks/fünf Minuten sind
+die Obergrenzen. Alle echten Blockaden rufen
+`ClientFailureLog.ReportFailure` auf und kopieren das
+vollständige lokale Sitzungslog. Der letzte bereits
+übermittelte Spielweg kann trotz STOPP noch auslaufen;
+Nutzer kann im Spiel manuell gegensteuern.
+
+Windows-CI prüft die GUI, reine Minimap-Projektion,
+Kollisionsweg-Grenzen, alte Eventzeitstempel,
+API-Wegbestätigung und Timeouts. Der erste echte
+Run mit Profil `auto` ist ausdrücklich offen.
 
 ## 1.8.21 – Live-A*-Navigation bestätigt, diagonale Logklassifikation repariert
 

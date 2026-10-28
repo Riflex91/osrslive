@@ -7,12 +7,14 @@ internal sealed class RuneLiteWindow:Form
     private readonly RuneLiteApiPositionSource source=new();
     private readonly RuneLiteMotionTrace movement=new();
     private readonly RuneLiteRouteProgress routeProgress=new();
+    private readonly RuneLiteAutoWalk autoWalk=new();
     private readonly SemaphoreSlim routingSemaphore=new(1,1);
     private readonly Diagnostics log=new();
     private readonly ClientFailureLog failureLog;
     private readonly Label status=new(),position=new(),detail=new(),failureBanner=new(),updateStatus=new();
     private readonly TextBox logPreview=new();
     private readonly Button copyLog=new(),checkUpdate=new(),showExports=new();
+    private readonly Button startWalk=new(),stopWalk=new();
     private readonly ComboBox navigationTarget=new();
     private readonly NavigationDestination[] navigationChoices=RuneLiteNavigationAdvisor.AvailableDestinations();
     private readonly System.Windows.Forms.Timer timer=new(){Interval=800};
@@ -20,7 +22,8 @@ internal sealed class RuneLiteWindow:Form
     private readonly System.Windows.Forms.Timer updateTimer=new(){Interval=30*60*1000};
     private readonly Stopwatch uptime=Stopwatch.StartNew();
     private readonly CancellationTokenSource closing=new();
-    private bool paused,busy,updateRunning,updatePendingRestart;
+    private bool paused,busy,updateRunning,updatePendingRestart,calibrating,clickInProgress;
+    private string? autoWalkWindowTitle;
     private long generation,samples;
     private string? lastStatus;
     private DateTimeOffset blockedSince;
@@ -32,6 +35,7 @@ internal sealed class RuneLiteWindow:Form
     private string latestPositionDescription="Noch keine bestätigte Position";
     private string routeDescription="Route: Ziel wählen und neue RuneLite-Position abwarten.";
     private string routeProgressDescription="Routenverlauf: Noch keine Vergleichsposition.";
+    private string autoWalkDescription="Automatik: AUS · Zum Test aktivieren und Minimap kalibrieren.";
     private Task<WorldMapData>? routeLoad;
     private WorldMapData? routeData;
     private long routeGeneration;
@@ -39,22 +43,23 @@ internal sealed class RuneLiteWindow:Form
     internal RuneLiteWindow()
     {
         failureLog=new ClientFailureLog(log,ClientFailureLog.SessionPath("runelite"));
-        log.SetMode("RUNELITE_COMPANION_READ_ONLY");
+        log.SetMode("RUNELITE_COMPANION_OPT_IN_WALK_TEST");
         Text=$"OSRS Play {Diagnostics.Version} – RuneLite";ClientSize=new(940,700);
         MinimumSize=new(760,560);StartPosition=FormStartPosition.CenterScreen;
         BackColor=Color.FromArgb(18,25,38);ForeColor=Color.WhiteSmoke;
         var panel=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new(20),ColumnCount=1,RowCount=8};
         panel.RowStyles.Add(new(SizeType.Absolute,42));panel.RowStyles.Add(new(SizeType.Absolute,42));
-        panel.RowStyles.Add(new(SizeType.Absolute,60));panel.RowStyles.Add(new(SizeType.Absolute,138));
+        panel.RowStyles.Add(new(SizeType.Absolute,60));panel.RowStyles.Add(new(SizeType.Absolute,165));
         panel.RowStyles.Add(new(SizeType.Absolute,76));panel.RowStyles.Add(new(SizeType.Percent,100));
-        panel.RowStyles.Add(new(SizeType.Absolute,76));panel.RowStyles.Add(new(SizeType.Absolute,42));
+        panel.RowStyles.Add(new(SizeType.Absolute,94));panel.RowStyles.Add(new(SizeType.Absolute,42));
         panel.Controls.Add(new Label{Text="OSRS PLAY · RUNELITE · DIAGNOSE",Dock=DockStyle.Fill,
             Font=new("Segoe UI",16,FontStyle.Bold)},0,0);
         status.Dock=position.Dock=detail.Dock=failureBanner.Dock=DockStyle.Fill;
         status.Font=new("Segoe UI",12,FontStyle.Bold);position.Font=new("Segoe UI",20,FontStyle.Bold);
         detail.Font=new("Segoe UI",9);failureBanner.Font=new("Segoe UI",11,FontStyle.Bold);
         failureBanner.ForeColor=Color.FromArgb(255,105,105);
-        failureBanner.Text="VERBESSERUNG MUSS EINGEBAUT WERDEN: RuneLite-Automatik ist noch nicht implementiert.";
+        failureBanner.Text="VERBESSERUNG MUSS EINGEBAUT WERDEN, wenn ein Bewegungstest scheitert. " +
+            "Automatische Bewegung ist zunächst AUS und noch nicht live bestätigt.";
         panel.Controls.Add(status,0,1);panel.Controls.Add(position,0,2);
         panel.Controls.Add(detail,0,3);panel.Controls.Add(failureBanner,0,4);
         logPreview.Dock=DockStyle.Fill;logPreview.ReadOnly=true;
@@ -67,18 +72,19 @@ internal sealed class RuneLiteWindow:Form
         var buttons=new FlowLayoutPanel{Dock=DockStyle.Fill};
         navigationTarget.DropDownStyle=ComboBoxStyle.DropDownList;
         navigationTarget.Width=182;
-        navigationTarget.AccessibleName="Leseziel für die RuneLite-Positionsnavigation";
+        navigationTarget.AccessibleName="Ziel für die RuneLite-Navigation und optionale Automatik";
         navigationTarget.Items.Add("Navigationsziel wählen");
         foreach(var destination in navigationChoices)navigationTarget.Items.Add(destination.Id);
         navigationTarget.SelectedIndex=0;
         navigationTarget.SelectedIndexChanged+=(_,_)=>
         {
+            if(autoWalk.Active)StopAutoWalk("TARGET_CHANGED",false);
             routeProgress.Reset();
             routeProgressDescription="Routenverlauf: Neuer Zielvergleich startet.";
             var selected=SelectedDestination();
             log.Add(Severity.INFO,"RUNELITE_NAV","TARGET_SELECTED",
                 $"target={(selected is null?"NONE":selected.Id.Replace(' ','_'))} "+
-                "advice_only=true movement_input=false collision_route_calculated=false");
+                $"auto_walk_active={autoWalk.Active.ToString().ToLowerInvariant()} collision_route_calculated=false");
             _=RefreshRouteAsync();UpdateDetailText();RefreshLogPreview();
         };
         var launcher=new Button{Text="Jagex Launcher öffnen",AutoSize=true};
@@ -97,6 +103,7 @@ internal sealed class RuneLiteWindow:Form
         var pause=new Button{Text="Verbindung pausieren",AutoSize=true};
         pause.Click+=(_,_)=>
         {
+            if(autoWalk.Active)StopAutoWalk("USER_PAUSED",false);
             paused=!paused;generation++;source.Reset();movement.Reset();
             lastMotionEventUtc=default;lastRouteEventUtc=default;
             lastPositionApiEventUtc=default;routeProgress.Reset();
@@ -130,8 +137,14 @@ internal sealed class RuneLiteWindow:Form
                 MessageBoxButtons.OK,MessageBoxIcon.Information);
             RefreshLogPreview();
         };
+        startWalk.Text="Automatisch gehen (Test)";startWalk.AutoSize=true;
+        startWalk.Click+=async(_,_)=>await BeginAutoWalkAsync();
+        stopWalk.Text="AUTOMATIK STOPP";stopWalk.AutoSize=true;stopWalk.Enabled=false;
+        stopWalk.BackColor=Color.FromArgb(145,35,35);stopWalk.ForeColor=Color.White;
+        stopWalk.Click+=(_,_)=>StopAutoWalk("USER_STOPPED",false);
         buttons.Controls.Add(launcher);buttons.Controls.Add(pause);buttons.Controls.Add(copyLog);
         buttons.Controls.Add(checkUpdate);buttons.Controls.Add(navigationTarget);buttons.Controls.Add(showExports);
+        buttons.Controls.Add(startWalk);buttons.Controls.Add(stopWalk);
         panel.Controls.Add(buttons,0,6);
         updateStatus.Text="Automatische Updateprüfung beim Start und alle 30 Minuten · RuneLite bleibt geöffnet.\n"+
             "Sitzungslog: "+Path.GetFileName(failureLog.FilePath);
@@ -143,9 +156,12 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.INFO,"CORE","STARTED",
             $"version={Diagnostics.Version} {BuildIdentity.Log} backend=RUNELITE_COMPANION profile_expected=auto");
         log.Add(Severity.INFO,"CORE","CAPABILITIES",
-            "read_only=true automated_game_actions=false source=PLUGIN_HUB_POSITION_EVENTS "+
+            "read_only_by_default=true automated_game_actions=OPT_IN_FIRST_WALK_TEST "+
+            "input_transport=VERIFIED_RUNELITE_HWND_WINDOW_MESSAGES "+
+            "clicks_require_fresh_api_events=true source=PLUGIN_HUB_POSITION_EVENTS "+
             "plugin_required=true plugin_install_manual=true screen_captures_for_position=false "+
-            "navigation=API_EVENT_COLLISION_ROUTE_GUIDANCE extra_exports=LOCAL_SUMMARY_ONLY "+
+            "navigation=API_EVENT_COLLISION_ROUTE_AND_SHORT_WAYPOINTS "+
+            "minimap_geometry=user_calibrated_in_memory extra_exports=LOCAL_SUMMARY_ONLY "+
             "no_memory_access=true no_screenshots_written=true");
         log.Add(Severity.INFO,"CORE","PRIVACY",
             "credentials_and_authentication_handled_by_jagex=true local_log_only=true clipboard_on_failure=true");
@@ -164,7 +180,9 @@ internal sealed class RuneLiteWindow:Form
                 $"busy={busy} status={lastStatus??"none"} working_set_mib={process.WorkingSet64/1024/1024} "+
                 $"confirmed_position_frames={motion.ConfirmedFrames} stable_frames={motion.StableFrames} "+
                 $"observed_tile_changes={motion.Changes} non_adjacent_observations={motion.NonAdjacent} "+
-                $"log_storage={failureLog.StorageStatus} clipboard={failureLog.ClipboardStatus}");
+                $"autowalk_active={autoWalk.Active} autowalk_waiting={autoWalk.WaitingForMovement} "+
+                $"autowalk_clicks={autoWalk.Clicks} log_storage={failureLog.StorageStatus} "+
+                $"clipboard={failureLog.ClipboardStatus}");
             RefreshLogPreview();
         };
         healthTimer.Start();
@@ -175,8 +193,8 @@ internal sealed class RuneLiteWindow:Form
         {
             await RefreshPosition();
             if(IsDisposed||closing.IsCancellationRequested)return;
-            failureLog.ReportFailure("RUNELITE","AUTOMATION_NOT_IMPLEMENTED",
-                "official_client_read_only=true automatic_tasks_not_executed=true");
+            log.Add(Severity.INFO,"RUNELITE_AUTOWALK","DISARMED_AT_STARTUP",
+                "user_opt_in_required=true no_unattended_clicks=true calibration_required=true");
             UpdateFailureBanner();RefreshLogPreview();
         };
     }
@@ -206,6 +224,7 @@ internal sealed class RuneLiteWindow:Form
             if(closing.IsCancellationRequested||IsDisposed)return;
             if(restart)
             {
+                if(autoWalk.Active)StopAutoWalk("UPDATE_RESTART",false);
                 updatePendingRestart=true;
                 log.Add(Severity.INFO,"UPDATER","RESTART_REQUESTED",
                     $"trigger={trigger} reason=VERIFIED_NEW_VERSION runeLite_process_untouched=true");
@@ -256,6 +275,30 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.DEBUG,"RUNELITE","POSITION_SAMPLE",
             $"sample={sequence} result={state.Status} {state.Diagnostic} "+
             (state.Tile is WorldTile tile?$"x={tile.X} y={tile.Y} plane={tile.Plane}":"position=NOT_RELEASED"));
+        if(autoWalk.Active)
+        {
+            if(autoWalkWindowTitle!=source.TrustedWindowTitle)
+                StopAutoWalk("RUNELITE_TITLE_CHANGED",true,"player_title_changed=true no_more_input=true");
+            else if(state.Status is "RUNELITE_NOT_RUNNING" or "MULTIPLE_RUNELITE_CLIENTS" or
+                "PLUGIN_EXPORT_UNAVAILABLE" or "PLUGIN_EXPORT_INVALID" or "INTERNAL_ERROR")
+                StopAutoWalk("API_SOURCE_LOST",true,$"sample={sequence} state={state.Status}");
+            else if(state.Status=="API_POSITION_UPDATED"&&state.Tile is WorldTile walked)
+            {
+                var feedback=autoWalk.Observe(walked,state.ObservedUtc,DateTimeOffset.UtcNow);
+                if(feedback.Status=="OFF_PATH")
+                    StopAutoWalk("UNEXPECTED_API_TILE",true,feedback.Diagnostic);
+                else if(feedback.Status!="IGNORED")
+                {
+                    log.Add(Severity.INFO,"RUNELITE_AUTOWALK",feedback.Status,feedback.Diagnostic);
+                    autoWalkDescription=feedback.Status=="WAYPOINT_CONFIRMED"?
+                        "Automatik: Wegpunkt per RuneLite-API bestätigt · plane nächsten Klick.":
+                        "Automatik: echte Kachelbewegung bestätigt · warte auf Wegpunkt.";
+                }
+            }
+            if(autoWalk.Timeout(DateTimeOffset.UtcNow) is string fault)
+                StopAutoWalk(fault,true,$"sample={sequence} status={state.Status} "+
+                    $"awaiting_move={autoWalk.WaitingForMovement}");
+        }
         if(source.LastExportScanUtc!=default&&
            source.LastExportScanUtc!=lastExportSummaryLoggedUtc)
         {
@@ -344,7 +387,7 @@ internal sealed class RuneLiteWindow:Form
             (state.Status=="API_POSITION_UPDATED"?
                 "Quelle: offizielles RuneLite-API-Ereignis · kürzlich aktualisiert.":
                 "Quelle: letzter RuneLite-API-Stand · Plugin meldet im Stillstand keine Heartbeats.")+
-            " Keine Screenshotprüfung und keine Spieleingaben.":
+            " Keine Screenshotprüfung für Positionen; Spieleingaben nur bei aktivem Test.":
             state.Status=="API_WAITING_FOR_NEW_EVENT"?
                 "Export stammt möglicherweise aus einer früheren Sitzung · einmal im Spiel bewegen.":
                 "RuneLite über Jagex Launcher starten · Plugin Hub: OSRS Toolkit Exporter aktivieren.";
@@ -358,6 +401,190 @@ internal sealed class RuneLiteWindow:Form
             _=RefreshRouteAsync();
         }
         UpdateFailureBanner();RefreshLogPreview();
+    }
+
+    private async Task BeginAutoWalkAsync()
+    {
+        if(calibrating||autoWalk.Active||paused||closing.IsCancellationRequested)return;
+        var goal=SelectedDestination();
+        if(goal is null)
+        {
+            MessageBox.Show(this,"Bitte zunächst ein Navigationsziel auswählen.",
+                "Automatisches Gehen",MessageBoxButtons.OK,MessageBoxIcon.Information);
+            return;
+        }
+        IntPtr window=source.TrustedWindowHandle;
+        if(lastVerifiedTile is null||window==IntPtr.Zero||
+            !BackgroundWindowInput.TryClientSize(window,out var size))
+        {
+            failureLog.ReportFailure("RUNELITE_AUTOWALK","START_REQUIRES_PLUGIN_POSITION",
+                "recent_accepted_runelite_api_position_and_trusted_window_required=true no_input_sent=true");
+            UpdateFailureBanner();RefreshLogPreview();return;
+        }
+        calibrating=true;startWalk.Enabled=false;
+        try
+        {
+            log.Add(Severity.INFO,"RUNELITE_AUTOWALK","CALIBRATION_REQUEST",
+                $"target={goal.Id.Replace(' ','_')} client_width={size.Width} client_height={size.Height} "+
+                "position_source=PLUGIN_API screenshot_for_click_geometry_only=true screenshot_stored=false");
+            // The game image is displayed temporarily for the user's choice
+            // of the actual minimap centre. No file, screenshot or pixels are
+            // added to the diagnostic log or saved to disk.
+            using var capture=new BackgroundWindowCapture();
+            CapturedWindowFrame? frame=null;
+            for(int attempt=0;attempt<18&&!closing.IsCancellationRequested;attempt++)
+            {
+                frame=capture.ReadClient(window);
+                if(frame is not null)break;
+                await Task.Delay(200,closing.Token);
+            }
+            if(frame is null)
+            {
+                failureLog.ReportFailure("RUNELITE_AUTOWALK","MINIMAP_CALIBRATION_CAPTURE_FAILED",
+                    $"capture_state={Diagnostics.Sanitize(capture.State)} "+
+                    $"frame_error={Diagnostics.Sanitize(capture.LastFrameError)} no_input_sent=true");
+                UpdateFailureBanner();return;
+            }
+            using(frame)
+            {
+                if(frame.Image.Size!=size||frame.CapturedUtc<DateTimeOffset.UtcNow.AddSeconds(-3))
+                {
+                    failureLog.ReportFailure("RUNELITE_AUTOWALK","MINIMAP_FRAME_GEOMETRY_INVALID",
+                        $"capture={frame.Image.Width}x{frame.Image.Height} window={size.Width}x{size.Height} "+
+                        "screenshot_not_saved=true no_input_sent=true");
+                    UpdateFailureBanner();return;
+                }
+                using var setup=new RuneLiteMinimapSetupDialog(frame.Image);
+                if(setup.ShowDialog(this)!=DialogResult.OK||setup.PlayerCenter is not Point center)
+                {
+                    log.Add(Severity.INFO,"RUNELITE_AUTOWALK","CALIBRATION_CANCELLED",
+                        "no_input_sent=true no_screenshot_saved=true");
+                    return;
+                }
+                if(closing.IsCancellationRequested||IsDisposed||paused||
+                   source.TrustedWindowHandle!=window||SelectedDestination()?.Id!=goal.Id||
+                   !BackgroundWindowInput.TryClientSize(window,out var updatedSize)||updatedSize!=size)
+                {
+                    failureLog.ReportFailure("RUNELITE_AUTOWALK","CALIBRATION_CONTEXT_CHANGED",
+                        "window_destination_or_pause_changed=true no_input_sent=true");
+                    UpdateFailureBanner();return;
+                }
+                var geometry=new RuneLiteAutoWalk.Calibration(window,size,center,setup.PixelsPerTile);
+                autoWalk.Start(goal,geometry,DateTimeOffset.UtcNow);
+                autoWalkWindowTitle=source.TrustedWindowTitle;
+                stopWalk.Enabled=true;
+                autoWalkDescription="Automatik: AKTIV · warte auf frisches RuneLite-API-Ereignis.";
+                log.Add(Severity.INFO,"RUNELITE_AUTOWALK","ARMED",
+                    $"target={goal.Id.Replace(' ','_')} minimap_center={center.X},{center.Y} "+
+                    $"pixels_per_tile={setup.PixelsPerTile:0.0} client={size.Width}x{size.Height} "+
+                    "north_up_confirmed_by_user=true zoom_out_confirmed_by_user=true "+
+                    "click_limit=40 runtime_limit_s=300 verify_each_waypoint=true "+
+                    "source=PLUGIN_API no_screenshot_saved=true");
+                _=RefreshRouteAsync();
+            }
+        }
+        catch(OperationCanceledException) when(closing.IsCancellationRequested){}
+        catch(Exception ex)
+        {
+            failureLog.ReportFailure("RUNELITE_AUTOWALK","CALIBRATION_EXCEPTION",
+                ExceptionDiagnostic.Describe(ex)+" no_input_sent=true");
+            UpdateFailureBanner();
+        }
+        finally
+        {
+            calibrating=false;
+            if(!IsDisposed)startWalk.Enabled=!autoWalk.Active;
+            if(!IsDisposed){UpdateDetailText();RefreshLogPreview();}
+        }
+    }
+
+    private async Task MaybeSendWalkClickAsync(WorldTile tile,NavigationDestination goal,
+        PathStep[] path,DateTimeOffset eventAt)
+    {
+        if(!autoWalk.Active||clickInProgress||paused)return;
+        if(autoWalk.Destination?.Id!=goal.Id)
+        {StopAutoWalk("TARGET_CHANGED",false);return;}
+        if(path.Length==0)
+        {
+            if(tile.Distance(goal.Tile)<=goal.Radius)StopAutoWalk("TARGET_REACHED",false);
+            return;
+        }
+        var now=DateTimeOffset.UtcNow;
+        if(!autoWalk.CanDispatch(now,eventAt))return;
+        var geometry=autoWalk.Geometry!;
+        if(source.TrustedWindowHandle!=geometry.Window||
+            autoWalkWindowTitle!=source.TrustedWindowTitle||
+            !BackgroundWindowInput.TryClientSize(geometry.Window,out var size)||
+            size!=geometry.ClientSize)
+        {
+            StopAutoWalk("GAME_WINDOW_CHANGED",true,
+                "trusted_runeLite_process_or_calibrated_client_size_changed=true no_input_sent=true");
+            return;
+        }
+        var plan=RuneLiteAutoWalk.Project(tile,path,geometry);
+        if(plan is null)
+        {
+            StopAutoWalk("WAYPOINT_PROJECTION_UNAVAILABLE",true,
+                $"target={goal.Id.Replace(' ','_')} current={tile.X},{tile.Y},{tile.Plane} "+
+                $"remaining_steps={path.Length} next_transport={path[0].Transport is not null} "+
+                "projection_did_not_pass_safe_minimap_radius_or_walkable_edge=true no_input_sent=true");
+            return;
+        }
+        clickInProgress=true;
+        autoWalk.Sent(plan,eventAt,now);
+        log.Add(Severity.INFO,"RUNELITE_AUTOWALK","CLICK_INTENT",
+            $"command={autoWalk.Clicks} target={goal.Id.Replace(' ','_')} "+
+            $"from={tile.X},{tile.Y},{tile.Plane} waypoint={plan.Waypoint.X},{plan.Waypoint.Y},{plan.Waypoint.Plane} "+
+            $"waypoint_index={plan.WaypointIndex} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
+            $"api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
+            "input_not_yet_verified=true screenshot_position_estimation=false");
+        try
+        {
+            bool posted=await BackgroundWindowInput.ClickAsync(geometry.Window,plan.Pixel,
+                ()=>!autoWalk.Active||paused||closing.IsCancellationRequested||
+                    source.TrustedWindowHandle!=geometry.Window||
+                    autoWalkWindowTitle!=source.TrustedWindowTitle,
+                closing.Token);
+            if(!autoWalk.Active)return;
+            if(!posted)
+            {
+                StopAutoWalk("WINDOW_CLICK_NOT_POSTED",true,
+                    $"command={autoWalk.Clicks} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
+                    "input_not_verified=true no_position_claim=true");
+                return;
+            }
+            autoWalkDescription="Automatik: Klick gesendet · überprüfe Bewegung über RuneLite-API.";
+            log.Add(Severity.INFO,"RUNELITE_AUTOWALK","WINDOW_MESSAGES_POSTED",
+                $"command={autoWalk.Clicks} awaiting_newer_api_event=true "+
+                "postmessage_is_not_proof_of_game_input=true click_status=UNVERIFIED");
+        }
+        catch(OperationCanceledException) when(closing.IsCancellationRequested){}
+        catch(Exception ex)
+        {
+            if(autoWalk.Active)StopAutoWalk("WINDOW_CLICK_EXCEPTION",true,ExceptionDiagnostic.Describe(ex));
+        }
+        finally{clickInProgress=false;}
+    }
+
+    private void StopAutoWalk(string reason,bool failed,string details="")
+    {
+        if(!autoWalk.Active)return;
+        int commands=autoWalk.Clicks;
+        bool pending=autoWalk.WaitingForMovement;
+        autoWalk.Stop();
+        autoWalkWindowTitle=null;
+        stopWalk.Enabled=false;startWalk.Enabled=!calibrating;
+        autoWalkDescription=reason=="TARGET_REACHED"?
+            "Automatik: Zielradius laut RuneLite-API erreicht!":
+            failed?"Automatik: FEHLER – gestoppt; bitte rotes Diagnosefeld beachten.":
+                "Automatik: gestoppt · eventuelle letzte Spielbewegung manuell abbrechen.";
+        string diagnostic=$"reason={reason} commands_posted_or_attempted={commands} "+
+            $"pending_verification={pending} no_more_clicks=true in_game_last_click_may_continue=true {details}";
+        log.Add(failed?Severity.WARN:Severity.INFO,"RUNELITE_AUTOWALK",
+            failed?"SAFETY_STOP":"STOPPED",diagnostic);
+        if(failed)
+            failureLog.ReportFailure("RUNELITE_AUTOWALK",reason,diagnostic);
+        UpdateDetailText();UpdateFailureBanner();RefreshLogPreview();
     }
 
     private NavigationDestination? SelectedDestination()=>
@@ -399,6 +626,8 @@ internal sealed class RuneLiteWindow:Form
             if(IsDisposed||closing.IsCancellationRequested||request!=routeGeneration)return;
             if(path is null)
             {
+                if(autoWalk.Active)StopAutoWalk("NO_COLLISION_ROUTE",true,
+                    $"target={destination.Id.Replace(' ','_')} x={tile.X} y={tile.Y} plane={tile.Plane}");
                 routeProgress.Reset();
                 routeProgressDescription="Routenverlauf: Ohne geprüften Weg nicht messbar.";
                 routeDescription="Route: Kein geprüfter Weg in den verfügbaren F2P-Kollisionsdaten.";
@@ -419,6 +648,8 @@ internal sealed class RuneLiteWindow:Form
                     log.Add(Severity.INFO,"RUNELITE_ROUTE","PROGRESS",
                         progress.Diagnostic+" source=PLUGIN_HUB_EXPORT");
                 }
+                if(autoWalk.Active)
+                    await MaybeSendWalkClickAsync(tile,destination,path,eventAt);
             }
             UpdateDetailText();RefreshLogPreview();
         }
@@ -430,6 +661,8 @@ internal sealed class RuneLiteWindow:Form
             routeProgress.Reset();
             routeProgressDescription="Routenverlauf: Wartet auf verifizierte Kartendaten.";
             failureLog.ReportFailure("RUNELITE_ROUTE","ROUTE_DATA_UNAVAILABLE",
+                ExceptionDiagnostic.Describe(ex));
+            if(autoWalk.Active)StopAutoWalk("ROUTE_DATA_UNAVAILABLE",true,
                 ExceptionDiagnostic.Describe(ex));
             UpdateDetailText();UpdateFailureBanner();RefreshLogPreview();
         }
@@ -447,13 +680,21 @@ internal sealed class RuneLiteWindow:Form
         string others=string.Join(" · ",summaries);
         detail.Text=latestPositionDescription+Environment.NewLine+navigation+Environment.NewLine+
             routeDescription+Environment.NewLine+routeProgressDescription+Environment.NewLine+
+            autoWalkDescription+Environment.NewLine+
             (others.Length>0?"Lokale Exportdaten: "+others:
                 "Lokale Exportdaten: noch keine verifizierten Zusatzdateien.");
     }
 
     private void UpdateFailureBanner()
     {
-        string reason=failureLog.LastFailureCode??"RUNELITE/AUTOMATION_NOT_IMPLEMENTED";
+        string? reason=failureLog.LastFailureCode;
+        if(reason is null)
+        {
+            failureBanner.Text="VERBESSERUNG MUSS EINGEBAUT WERDEN, falls der erste " +
+                "automatische Bewegungstest scheitert. Noch nicht live bestätigt.";
+            copyLog.Text="Gesamte Logdatei kopieren";
+            return;
+        }
         string copied=failureLog.ClipboardStatus=="COPIED"?
             "Log wurde in die Zwischenablage kopiert.":
             "Log-Kopie ausstehend/fehlgeschlagen – bitte Kopierknopf nutzen.";
@@ -480,6 +721,7 @@ internal sealed class RuneLiteWindow:Form
            failureBanner.ForeColor!=Color.FromArgb(255,105,105)||
            !logPreview.ReadOnly||!logPreview.Multiline||copyLog.Text.Length==0||
            navigationTarget.DropDownStyle!=ComboBoxStyle.DropDownList||navigationChoices.Length<10||
+           startWalk.Text.Length==0||stopWalk.Text.Length==0||stopWalk.Enabled||
            showExports.Text.Length==0||
            checkUpdate.Text.Length==0||!updateTimer.Enabled||updateTimer.Interval!=30*60*1000||
            !updateStatus.Text.Contains("Updateprüfung"))
@@ -490,6 +732,7 @@ internal sealed class RuneLiteWindow:Form
     {
         if(disposing)
         {
+            if(autoWalk.Active)StopAutoWalk("WINDOW_CLOSING",false);
             closing.Cancel();timer.Dispose();healthTimer.Dispose();updateTimer.Dispose();
             routeData?.Dispose();routingSemaphore.Dispose();
             log.Add(Severity.INFO,"CORE","SHUTDOWN","no_game_process_terminated=true");

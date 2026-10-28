@@ -1,4 +1,23 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.21
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.22
+
+**1.8.22 – erster automatischer Bewegungsklick eingebaut,
+noch nicht live bestätigt:** Der 1.8.21-Nutzerlauf bestätigte
+14 verifizierte Wege aus 13 RuneLite-API-Spielpositionen.
+Der Benutzer wünscht jetzt den ersten echten Eingabetest.
+Neue GUI-Buttons aktivieren die Automatik ausdrücklich,
+lassen den Minimap-Mittelpunkt in einem temporär angezeigten
+RuneLite-Bild wählen und senden danach jeweils nur einen
+kurzen A*-Wegpunkt-Klick. Die Spielerposition wird weiterhin
+aus dem Plugin Hub gelesen, **nie** aus dem Bild berechnet.
+Nur neue API-Positionsereignisse auf dem geplanten Pfad
+erlauben den nächsten Klick. Abweichung, fehlende Antwort,
+Pause, Stopp, ungültige Daten und Fensteränderung sperren.
+Der PostMessage-Transport zur Java-Game-Canvas sowie die
+manuelle Pixelmaßstab-Kalibrierung sind die wichtigsten
+offenen Live-Unbekannten. Vor dem Live-Test keine Zusage,
+dass RuneLite tatsächlich losläuft. Türen/Transporte/
+Treppen sind explizit nicht automatisiert. Fehlermeldungen
+und Clipboardprotokoll bleiben aktiv.
 
 **1.8.21 – zweite reale 1.8.20-Routenprobe bestanden,
 Diagnosefehler gefunden:** Im Nutzerlog vom 28.10.2026,

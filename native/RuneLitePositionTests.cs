@@ -85,7 +85,8 @@ internal static class RuneLitePositionTests
         RuneLiteNavigationAdvisorTests.Run();
         RuneLiteRouteCoachTests.Run();
         RuneLiteRouteProgressTests.Run();
-        Console.WriteLine("RUNELITE GRID PASS: player panel only, chunk/region checks, fresh independent frames, window changes, missing/stale rejection; no game input");
+        RuneLiteAutoWalkTests.Run();
+        Console.WriteLine("RUNELITE GRID PASS: plugin event checks, guarded opt-in minimap projection and waypoint feedback tests; live movement remains unverified");
     }
     internal static async Task OcrFixture(OcrEngine engine)
     {
