@@ -1,4 +1,28 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.28
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.29
+
+**1.8.29 – geklärt: 1.8.28-Stopps trotz echter Wegbewegung:**
+Das neue Live-Log vom 28.10.2026, 20:50–20:52, bestätigt
+erfolgreiche Klicks, den korrekten weißen Punkt `(645,111)` und
+von OSRS-Plugin-Events beobachteten Fortschritt. Vier-Lauf-Test:
+`(3230,3167)->(3230,3169)`, `(3232,3176)->(3233,3178)`,
+`(3241,3197)->(3240,3198)` mit voreiligem erneuten
+Klick, sowie `(3216,3163)->(3220,3163)` wurden allesamt
+als Abweichungen gestoppt, obwohl der Wegpunkt näher kam.
+Eine Abfrage kann **2–4 Kacheln** echter RuneLite-Bewegung
+repräsentieren; 1.8.28 erlaubte nur einen Einzel-Nachbarschritt
+und klickte dann sofort erneut.
+
+1.8.29 akzeptiert nur neue, zielnähere API-Kacheln im höchstens
+zwei Kacheln breiten **Vorwärtskorridor** bei maximal vier
+Kacheln Abstand zur vorigen Beobachtung. Dabei bleibt der
+laufende Klick aktiv; erst der erreichte oder beinahe erreichte
+Wegpunkt bzw. nach fünf solchen Ereignissen eine begrenzte
+Neuplanung erlaubt weitere Eingaben. Alle Achsen-,
+Ebenen-, Rückwärts-, Timeout- und Vordergrundstopps bleiben.
+Exakte `collision_prefix`-Koordinaten, Korridorabstand,
+Zeitintervalle und Sprungweite stehen im neuen Log.
+**Der Live-Test von 1.8.29 und das Erreichen von Lumbridge
+sind noch offen.**
 
 **1.8.28 – bestätigter Fortschritt, zwei verschiedene Stopps in 1.8.27:**
 Das neue Nutzerlog vom 28.10.2026, 20:37, zeigt zweimal den

@@ -1,4 +1,61 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.28
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.29
+
+## 1.8.29 – Weitere 1.8.28-Echtdaten: API überspringt mehrere Kacheln, zu früher Replan
+
+Der Nutzer lud am 28.10.2026 ein 553-Zeilen-Log der laufenden
+Windows-Version 1.8.28 (20:50:46 bis 20:52:15 Europe/Berlin) hoch.
+In vier explizit vom Nutzer freigegebenen Läufen bestätigte
+`AUTO_FIXED_LAYOUT_WHITE_DOT` wiederholt die RuneLite-Minimap-Mitte
+`(645,111)` im 773×539-Client, und `ZOOM_RESET_INPUT_SENT` meldete
+den Right-Click+Escape. Der tatsächliche Minimap-Zoom wird weiter
+**nicht exportiert**, also ist nur die Eingabe, nicht der Zoomwert belegt.
+
+- Lauf 1: `(3225,3161) -> (3227,3163) -> (3229,3165) ->
+  (3230,3167)` nach Klick 1, `WAYPOINT_CONFIRMED`. Danach Klick 2
+  zu `(3232,3175)`, erste neue API-Kachel `(3230,3169)` und
+  falscher `UNEXPECTED_API_TILE`-Stopp. Danach lief RuneLite durch
+  den bereits gesendeten Klick nachweislich weiter bis `(3232,3174)`.
+- Lauf 2: Klick 1 aus `(3232,3174)` zum Wegpunkt `(3236,3181)`,
+  danach `(3232,3176)` (exakter Prefix Index 2), dann
+  `(3233,3178)`: **vier** Kacheln seit dem Start, mehr als eine
+  Kachel seit dem letzten API-Ereignis. Das ist eine Richtung
+  Wegpunkt fortschreitende, nahe Korridor-Abweichung, aber 1.8.28
+  stoppte.
+- Lauf 3: Ab `(3236,3181)` wurden drei Klicks erfolgreich
+  gesendet. Wegpunkte `(3241,3187)` und beinahe `(3242,3194)`
+  wurden per Plugin bestätigt; auf Klick 3 folgten `(3241,3197)`
+  (Prefix 4) und `(3240,3198)`. Letzteres löste in 1.8.28
+  `WAYPOINT_CORRIDOR_REPLAN` aus, **obwohl der vorige Klick
+  noch weitergehen konnte**. Der neu gesendete Klick 4 wurde
+  bereits bei `(3239,3200)` als off-path gestoppt.
+- Lauf 4: `(3210,3157) -> (3212,3159) -> (3214,3161) ->
+  (3216,3163)` und `WAYPOINT_CONFIRMED`; nach Klick 2 zum
+  Wegpunkt `(3224,3164)` meldete der Exporter `(3220,3163)`:
+  ein einmaliger **Vier-Kachel-Sprung** innerhalb der zu
+  erwartenden Bewegungsrichtung, aber nicht auf dem fixen A*.
+  Auch hier stoppte 1.8.28 zu früh. Danach `(3222,3163)` ohne
+  weitere automatische Klicks: der vorherige Klick lief nach.
+
+**1.8.29-Fix:** Der Pending-Klick bleibt bei bis zu vier
+`CORRIDOR_PROGRESS_CONFIRMED`-API-Ereignissen aktiv, sofern
+gleiche Ebene, maximal vier Kacheln zwischen Beobachtungen,
+höchstens zwei Kacheln Abstand vom vorausliegenden
+Kollisions-Prefix, gleichbleibende Achsen bei geradlinigem
+Wegpunkt, **strikt abnehmender Chebyshev-Abstand** zum
+geklickten Wegpunkt sowie 9-Sekunden-Timeout eingehalten
+werden. Ein weiterer Spielklick wird dadurch **nicht**
+freigegeben; erst der bestätigte oder nahe Wegpunkt, bzw. nach
+fünf solchen echten Zwischenereignissen maximal zweimal
+eine neue Kollision-Routenplanung vom letzten Plugin-Tile.
+Sprung >4, Rückschritt, gleich bleibende/steigende Entfernung,
+falsche Ebene, fremdes Vordergrundfenster, altes Event bleiben
+harte Stopps. `CLICK_INTENT` loggt nun den **gesamten
+vorhergesagten Klick-Prefix**, damit tatsächliche API-Kacheln
+im nächsten Log exakt verglichen werden können. Regressions-
+tests verwenden vier im Live-Log tatsächlich beobachtete
+Klickmuster sowie Fälle mit falschen Schritten und Korridorlimit.
+Keine Weltkacheln werden aus Bildern gelesen. Zielerreichung
+noch offen, erneuter Ingame-Test nötig.
 
 ## 1.8.28 – Neue RuneLite-Live-Daten bestätigen weiße Minimap-Mitte und mehrere Spielklicks
 
