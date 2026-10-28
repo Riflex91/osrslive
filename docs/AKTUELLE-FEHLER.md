@@ -1,4 +1,40 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.30
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.31
+
+**1.8.31 – Konkrete Fehler aus dem v1.8.30-Live-Test (800 Zeilen):**
+Der automatische Update-Start war erfolgreich. In der ersten
+Sitzung wurden sieben echte Spielklicks und zwei begrenzte
+`WAYPOINT_QUIET_REPLAN`-Erholungen nachgewiesen. Nach einer
+folgenden `WAYPOINT_NEAR_CONFIRMED`-Meldung blieb nur noch
+ein A*-Kollisionsschritt `(3227,3219)->(3226,3218)` bis
+zum **Radius 4** von Lumbridge. Dieser Schritt projiziert
+sich nur 5,7 Pixel weit und war bisher mit `radius<7`
+gesperrt. 1.8.31 erlaubt eine gesondert geprüfte
+`ProjectFinalGoalStep`-Projektion nur für einen einzelnen
+validen, direkt angrenzenden, transportfreien Schritt in
+den Zielradius. Erfolg weiterhin nur nach neuer API-Position.
+
+Die dritte Sitzung bestätigte den Wegpunkt `(3257,3227)`
+und schickte den nächsten Klick nach `(3249,3226)`, doch
+die folgenden realen RuneLite-Tiles liefen zunächst in die
+entgegengesetzte Richtung: `(3258,3229)->(3257,3230)->
+(3253,3230)->(3251,3229)`. Vorige A*-Off-Path-Prüfung
+stoppte sofort, obwohl der vorherige Klick danach noch
+im Spiel weiterlief. `TRANSITION_DETOUR_OBSERVED`
+beobachtet nach zuvor bestätigtem Wegpunkt nur maximal fünf
+maximal vier Tile vom geplanten Präfix entfernte Events,
+höchstens vier Sekunden nach Klick und ohne neue Eingabe.
+Die normale 9-Sekunden-Frist gilt unverändert; ein später
+bestätigter Wegpunkt ist zwingend. Wiederholte, lange oder
+weit entfernte Umwege bleiben abgebrochen.
+
+Der separate manuelle Eingabeschutz war auf RuneLite
+**aktiv**; ein Test unterdrückte zehn physische Mausereignisse
+und wurde mit `Esc` freigegeben. Keine real gemessene
+Hintergrundsteuerung. Startup-Positionsdaten stammten erneut
+aus einer ~25 Minuten alten Datei, wurden nur als historische
+Vorschau angezeigt und erst nach manuellem Tilewechsel
+als aktuelle Pluginposition übernommen. Das benötigt
+weiterhin eine neue Exporter-Funktion beim Login/Start.
 
 **1.8.30 – Korridor-Fix live bestätigt, Stillstand vor Wegpunkt offen:**
 Im echten 1.8.29-Log vom 28.10.2026, 21:14–21:15, kamen zwei

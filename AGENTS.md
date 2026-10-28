@@ -47,6 +47,18 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   mit Esc-Notausstieg. Keine Hintergrundautomatik behaupten:
   SendInput geht an den Windows-Eingabestrom, nicht gezielt an
   inaktive RuneLite-Fenster; der Exporter gibt keine Game-Befehle.
+  Der neue echte 1.8.30-Test bestätigt automatische Installation,
+  sieben Folge-Klicks, zwei funktionierende Quiet-Replans und
+  zehn unterdrückte physische Mausereignisse mit Esc-Hookfreigabe.
+  Ein letzter Kollisionsschritt in Lumbridges Zielradius wurde
+  durch den allgemeinen 7-Pixel-Mindestabstand fälschlich
+  gesperrt. 1.8.31 erlaubt nur in diesem validen Ein-Schritt-
+  Zielfall eine Minimap-Projektion von 4–6 Pixel. Außerdem
+  wurde ein Spielumweg erst nach einem bestätigten Wegpunkt
+  sichtbar; 1.8.31 beobachtet höchstens fünf stark begrenzte
+  Start-Umweg-Kacheln, sendet dabei KEINEN Folgeklick und
+  verlängert keine Timeout-Grenze. Vollständiger Zielerfolg
+  steht weiterhin aus.
   Die strikte
   `RUNELITE_FOREGROUND_LOST`-Sperre bleibt bestehen. Alle Schritte
   und Grenzen stehen

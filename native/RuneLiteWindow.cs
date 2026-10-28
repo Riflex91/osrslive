@@ -317,6 +317,8 @@ internal sealed class RuneLiteWindow:Form
                     log.Add(Severity.INFO,"RUNELITE_AUTOWALK",feedback.Status,feedback.Diagnostic);
                     autoWalkDescription=feedback.Status is "WAYPOINT_CONFIRMED" or "WAYPOINT_NEAR_CONFIRMED" or "WAYPOINT_CORRIDOR_REPLAN"?
                         "Automatik: RuneLite-API-Fortschritt bestätigt · prüfe neue Kollisionsroute.":
+                        feedback.Status=="TRANSITION_DETOUR_OBSERVED"?
+                        "Automatik: Spiel geht Umweg · beobachte den laufenden Klick, keine neue Eingabe.":
                         "Automatik: echte Kachelbewegung bestätigt · warte auf Wegpunkt.";
                 }
             }
@@ -657,6 +659,12 @@ internal sealed class RuneLiteWindow:Form
             return;
         }
         var plan=RuneLiteAutoWalk.Project(tile,path,geometry);
+        bool finalGoalStep=false;
+        if(plan is null)
+        {
+            plan=RuneLiteAutoWalk.ProjectFinalGoalStep(tile,path,geometry,goal);
+            finalGoalStep=plan is not null;
+        }
         if(plan is null)
         {
             StopAutoWalk("WAYPOINT_PROJECTION_UNAVAILABLE",true,
@@ -674,6 +682,7 @@ internal sealed class RuneLiteWindow:Form
             $"command={autoWalk.Clicks} target={goal.Id.Replace(' ','_')} "+
             $"from={tile.X},{tile.Y},{tile.Plane} waypoint={plan.Waypoint.X},{plan.Waypoint.Y},{plan.Waypoint.Plane} "+
             $"waypoint_index={plan.WaypointIndex} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
+            $"single_tile_goal_finish={finalGoalStep.ToString().ToLowerInvariant()} "+
             $"collision_prefix={string.Join(";",plan.PathPrefix.Select(p=>$"{p.X},{p.Y},{p.Plane}"))} "+
             $"api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"manually_calibrated_first_click={manuallyAttestedFirstClick.ToString().ToLowerInvariant()} "+
