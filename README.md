@@ -1,4 +1,79 @@
-# OSRS Play 1.8.21 – Live-Routenverlauf, Abweichungen und korrekte Diagonalen
+# OSRS Play 1.8.22 – Erster optionaler RuneLite-Autowalk-Test
+
+## Neu in 1.8.22: Automatisch zum ausgewählten Ziel (erster Bewegungstest)
+
+Der Nutzer-Live-Lauf von 1.8.21 am 28.10.2026 um
+18:40–18:41 Uhr bestätigte automatische Installation,
+13 API-gemeldete Spielpositionen mit zwölf Änderungen,
+14 erfolgreiche neue Lumbridge-Kollisionsrouten sowie
+korrekte Vorwärts- und Rückwärts-Fortschritte von
+72 auf 59 und zurück auf 68 Restschritte. Kein OCR,
+kein neues Positionsproblem. Die einzige rote Meldung
+war die zuvor gewollte nicht implementierte Automatik.
+
+Ab 1.8.22 gibt es zwei neue GUI-Knöpfe:
+**„Automatisch gehen (Test)“** und **„AUTOMATIK STOPP“**.
+Der Standard bleibt AUS; OSRS Play klickt niemals beim
+Start selbstständig ins Spiel. Vor dem ersten Klick
+wird eine nur im Arbeitsspeicher gehaltene aktuelle
+Fensteraufnahme für die **manuelle Minimap-Kalibrierung**
+angezeigt. Der Nutzer muss im regulären RuneLite aus
+dem Jagex Launcher eingeloggt sein, Minimap nach
+Norden ausrichten, vollständig herauszoomen, den
+weißen Spielerpunkt anklicken, die geschätzte
+Pixel-pro-Kachel-Skalierung prüfen und ausdrücklich
+bestätigen. Die Aufnahme dient **nur der Klickgeometrie**:
+die Spielerposition stammt unverändert ausschließlich
+aus dem offiziellen RuneLite-Plugin-Hub-Export.
+Es werden keine Screenshots auf Datenträger geschrieben.
+
+OSRS Play sucht auf der kollisionsgeprüften A*-Route
+einen kurzen Wegpunkt innerhalb eines kleinen,
+beschränkten Minimap-Radius. Ein Mausklick wird gezielt
+als Windows-Fensternachricht an das validierte RuneLite-
+Fenster geschickt. **Das Absenden allein zählt nie als
+erfolgreicher Spielschritt.** Erst ein neueres, tatsächlich
+auf dem zuvor geplanten Weg vorwärts gelegenes
+Plugin-Positionsereignis bestätigt Fortschritt oder
+den Wegpunkt. Vor dem nächsten Klick wird neu geplant.
+Unverifizierte Transfers, Türen, Treppen und Ebenen-
+wechsel sind im ersten Test ausdrücklich blockiert.
+
+Weitere Schutzgrenzen: Nur frische API-Ereignisse,
+höchstens 40 Klicks oder fünf Minuten je Lauf,
+Positions-/Wegpunkt-Timeout neun Sekunden, manuelles
+STOPP, Pause, Zielwechsel, Fensterwechsel, minimiertes
+Fenster, fehlender Export oder abweichender Live-Pfad
+stoppen weitere Eingaben. Blockaden erzeugen ein
+ausführliches, automatisch in die Zwischenablage
+kopiertes Fehlerlog und die rote GUI-Meldung.
+**Ein bereits gesendeter Minimap-Klick kann noch eine
+laufende Ingame-Bewegung auslösen; STOPP verhindert
+weitere Klicks, beendet diese vorhandene Bewegung aber
+nicht rückwirkend.**
+
+### Live-Test
+
+1. RuneLite-Profil `auto` durch den Jagex Launcher starten,
+   einloggen und OSRS Toolkit Exporter aktiviert lassen.
+2. In OSRS Play **Lumbridge** oder ein nahes Ziel wählen.
+3. In RuneLite Minimap nach Norden drehen und vollständig
+   herauszoomen. „Automatisch gehen (Test)“ drücken.
+4. Im angezeigten aktuellen RuneLite-Bild den weißen
+   Spielerpunkt der Minimap anklicken; ungefähr 4 Pixel
+   je Kachel ist **nur ein Startwert**, kein live bewiesener
+   Kalibrierwert. Kalibrierung bestätigen.
+5. Bei Bedarf manuell eine Kachel gehen, damit der
+   positionsereignisbasierte Export frisch ist.
+6. Beobachten, ob sich der Charakter selbst auf einen
+   Wegpunkt bewegt. `RUNELITE_AUTOWALK CLICK_INTENT`,
+   `WINDOW_MESSAGES_POSTED`, `PROGRESS_CONFIRMED`
+   und `WAYPOINT_CONFIRMED` sind getrennt geloggt.
+   Falls der Klick nicht angenommen wird, folgt
+   `POSITION_EVENT_TIMEOUT` samt rotem Fehlerhinweis
+   und Clipboard-Log. **Diese Live-Bestätigung steht aus.**
+
+## Vorherige Version: 1.8.21 – Routenverlauf und Diagonalen
 
 ## Neu in 1.8.21: Echte Live-Routen bestätigt, Bewegungsdiagnose präzisiert
 

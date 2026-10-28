@@ -4,6 +4,14 @@ namespace OSRSLiveDiagnostics;
 
 internal static class BackgroundWindowInput
 {
+    internal static bool TryClientSize(IntPtr window,out Size size)
+    {
+        size=Size.Empty;
+        if(!IsWindow(window)||IsIconic(GetAncestor(window,2))||
+            !GetClientRect(window,out var bounds))return false;
+        size=new(bounds.Right-bounds.Left,bounds.Bottom-bounds.Top);
+        return size.Width>0&&size.Height>0;
+    }
     internal static bool Move(IntPtr window,Point point)
     {
         if(!IsWindow(window)||!GetClientRect(window,out var bounds)||point.X<0||point.Y<0||

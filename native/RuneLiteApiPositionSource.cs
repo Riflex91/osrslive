@@ -74,6 +74,10 @@ internal sealed class RuneLiteApiPositionSource:IDisposable
     private readonly RuneLiteApiPositionTracker tracker=new();
     private IntPtr lastWindow;
     private string? lastTitle;
+    // Only the previously path-verified, uniquely identified RuneLite HWND.
+    // Callers must additionally require a recent accepted API tile event.
+    internal IntPtr TrustedWindowHandle=>lastWindow;
+    internal string? TrustedWindowTitle=>lastTitle;
     private DateTimeOffset lastExportScanUtc;
     internal RuneLiteExportSummarySource.Result AdditionalExports{get;private set;}=
         new([],"stage=ADDITIONAL_EXPORTS result=NOT_SCANNED redacted=true");
