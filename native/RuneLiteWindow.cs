@@ -794,15 +794,15 @@ internal sealed class RuneLiteWindow:Form
             autoWalkDescription=failed?
                 "Automatik: Start abgebrochen – bitte roten Diagnosehinweis beachten.":
                 "Automatik: Vorgemerkter Start abgebrochen · kein Spielklick gesendet.";
-            string diagnostic=$"reason={reason} "+
+            string queuedDiagnostic=$"reason={reason} "+
                 $"target={queued.DestinationId.Replace(' ','_')} "+
                 $"wait_ms={(DateTimeOffset.UtcNow-queued.RequestedAt).TotalMilliseconds:0} "+
                 "queued_calibration_cancelled=true physical_input_shield_never_armed=true "+
                 $"no_game_input_sent=true {details}";
             log.Add(failed?Severity.WARN:Severity.INFO,"RUNELITE_AUTOWALK",
-                failed?"QUEUED_START_FAILED":"QUEUED_START_CANCELLED",diagnostic);
+                failed?"QUEUED_START_FAILED":"QUEUED_START_CANCELLED",queuedDiagnostic);
             if(failed)
-                failureLog.ReportFailure("RUNELITE_AUTOWALK",reason,diagnostic,
+                failureLog.ReportFailure("RUNELITE_AUTOWALK",reason,queuedDiagnostic,
                     independentUserAttempt:true);
             UpdateDetailText();UpdateFailureBanner();RefreshLogPreview();
             return;
