@@ -190,6 +190,7 @@ internal sealed class RuneLiteWindow:Form
         {
             using var process=Process.GetCurrentProcess();
             var motion=movement.Statistics;
+            var shieldCounts=inputShield.BlockedCounts;
             log.Add(Severity.DEBUG,"RUNTIME","HEALTH",
                 $"uptime_s={uptime.Elapsed.TotalSeconds:0} samples={samples} paused={paused} "+
                 $"busy={busy} status={lastStatus??"none"} working_set_mib={process.WorkingSet64/1024/1024} "+
@@ -197,6 +198,9 @@ internal sealed class RuneLiteWindow:Form
                 $"observed_tile_changes={motion.Changes} non_adjacent_observations={motion.NonAdjacent} "+
                 $"autowalk_active={autoWalk.Active} autowalk_waiting={autoWalk.WaitingForMovement} "+
                 $"autowalk_clicks={autoWalk.Clicks} log_storage={failureLog.StorageStatus} "+
+                $"input_shield_active={inputShield.Active} "+
+                $"physical_mouse_events_suppressed={shieldCounts.Mouse} "+
+                $"physical_keyboard_events_suppressed={shieldCounts.Keyboard} "+
                 $"clipboard={failureLog.ClipboardStatus}");
             RefreshLogPreview();
         };
@@ -707,6 +711,8 @@ internal sealed class RuneLiteWindow:Form
 
     private void StopAutoWalk(string reason,bool failed,string details="")
     {
+        var shieldCounts=inputShield.BlockedCounts;
+        bool shieldWasActive=inputShield.Active;
         inputShield.Disable();inputShieldChoice.Enabled=true;
         if(!autoWalk.Active)return;
         int commands=autoWalk.Clicks;
@@ -723,7 +729,10 @@ internal sealed class RuneLiteWindow:Form
         log.Add(failed?Severity.WARN:Severity.INFO,"RUNELITE_AUTOWALK",
             failed?"SAFETY_STOP":"STOPPED",diagnostic);
         log.Add(Severity.INFO,"RUNELITE_INPUT_SHIELD","RELEASED",
-            $"reason={reason} physical_input_restored=true game_foreground_policy_unchanged=true");
+            $"reason={reason} previously_active={shieldWasActive} "+
+            $"suppressed_physical_mouse_events={shieldCounts.Mouse} "+
+            $"suppressed_physical_keyboard_events={shieldCounts.Keyboard} "+
+            "physical_input_restored=true game_foreground_policy_unchanged=true");
         if(failed)
             failureLog.ReportFailure("RUNELITE_AUTOWALK",reason,diagnostic,
                 independentUserAttempt:true);

@@ -17,7 +17,10 @@ internal sealed class RuneLiteInputShield:IDisposable
     private readonly Action emergencyStop;
     private IntPtr mouseHook,keyboardHook,target;
     private bool queuedEmergencyStop;
+    private long blockedMouseEvents,blockedKeyboardEvents;
     internal bool Active=>mouseHook!=IntPtr.Zero&&keyboardHook!=IntPtr.Zero;
+    internal (long Mouse,long Keyboard) BlockedCounts=>(
+        Interlocked.Read(ref blockedMouseEvents),Interlocked.Read(ref blockedKeyboardEvents));
 
     internal RuneLiteInputShield(Action emergencyStop)
     {
@@ -28,6 +31,8 @@ internal sealed class RuneLiteInputShield:IDisposable
     internal (bool Enabled,string Reason) Enable(IntPtr runeLiteWindow)
     {
         Disable();
+        Interlocked.Exchange(ref blockedMouseEvents,0);
+        Interlocked.Exchange(ref blockedKeyboardEvents,0);
         if(runeLiteWindow==IntPtr.Zero||
            !BackgroundWindowInput.IsRuneLiteForeground(runeLiteWindow))
             return (false,"RUNELITE_NOT_FOREGROUND");
@@ -70,7 +75,10 @@ internal sealed class RuneLiteInputShield:IDisposable
                 bool inside=hit!=IntPtr.Zero&&
                     GetAncestor(hit,2)==GetAncestor(target,2);
                 if(ShouldBlockMouse(wParam.ToInt64(),data.Flags,inside))
+                {
+                    Interlocked.Increment(ref blockedMouseEvents);
                     return new IntPtr(1);
+                }
             }
         }
         catch{ /* Never let an input hook exception block system input. */ }
@@ -94,7 +102,10 @@ internal sealed class RuneLiteInputShield:IDisposable
                     emergencyStop();
                 }
                 if(ShouldBlockKeyboard(data.VirtualKey,data.Flags))
+                {
+                    Interlocked.Increment(ref blockedKeyboardEvents);
                     return new IntPtr(1);
+                }
             }
         }
         catch{ /* Fail open on any unexpected callback problem. */ }
