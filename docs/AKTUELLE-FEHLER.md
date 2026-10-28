@@ -1,4 +1,23 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.31
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.32
+
+**1.8.32 – Kein Buttondefekt, sondern fehlende frische
+Pluginposition:** Im 1.8.31-Live-Log (49 Zeilen) wurde
+`Lumbridge_Eichen` gewählt, anschließend `START_REQUIRES_PLUGIN_POSITION`
+um 22:04:54 ausgelöst. Die Position war beim Start
+**1347 Sekunden alt** (`HISTORICAL_POSITION_PREVIEW=3251,3229`)
+und durfte nicht zu einem Bewegungsklick führen.
+Die Fehlerbehandlung kopierte das komplette Log korrekt,
+aber der Benutzer sah keinen hilfreichen Wartemodus.
+1.8.32 lässt „Automatisch gehen (Test)“ einen Start
+vormerken. Erst ein **neues Post-Request-Pluginereignis**
+öffnet die Kalibrierung – **nicht** das Spiel selbst.
+Die wartende GUI ist auffällig markiert und abbrechbar.
+Nach maximal zwei Minuten, Ziel-/Fenster-/Sitzungswechsel
+oder Pause wird der Wartestatus verworfen; nach
+Zeitüberschreitung mit Fehler-Log-Kopie. Auch bereits
+akzeptierte, aber für den Erstklick >60 Sekunden alte
+API-Positionen erzeugen nur eine Vormerkung. Keine
+Aufweichung von Quellen-, Zoom- oder Vordergrundprüfungen.
 
 **1.8.31 – Konkrete Fehler aus dem v1.8.30-Live-Test (800 Zeilen):**
 Der automatische Update-Start war erfolgreich. In der ersten
