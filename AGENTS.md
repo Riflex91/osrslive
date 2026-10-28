@@ -15,11 +15,14 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   separater ausdrücklicher Nutzerfreigabe und sofortigem Fokus-/Ziel-
   Stopp. Der 1.8.24-Live-Test bestätigt echte SendInput-Bewegung und einen
   erreichten Wegpunkt. 1.8.25 korrigiert wiederholte API-Samples und die
-  tolerierte unmittelbare Endpunktüberschreitung, erkennt den kleinen
-  Spieler-Minimap-Ring nach Nutzer-Screenshot automatisch (mit manuellem
-  Fallback) und bietet ein ausdrücklich gewähltes 3D-Kamera-Wheel-Preset.
-  Numerischer Kamera-Zoom wird vom Plugin nicht geliefert; nur die
-  Windows-Eingabe ist prüfbar. Alle Schritte und Grenzen stehen
+  tolerierte unmittelbare Endpunktüberschreitung. Seine automatische
+  Ring-Erkennung bei x679/y138 **war falsch**: laut Nutzer liegt der
+  feste Spielerpunkt bei x665/y110 in Clientkoordinaten. 1.8.26 benutzt
+  diesen festen Mittelpunkt nur im bekannten RuneLite-Layout und setzt
+  **Minimap-** statt 3D-Kamera-Zoom über einen geprüften Minimap-
+  Rechtsklick auf RuneLites Standard 4 Pixel/Tile zurück. Die echte
+  Zoomstufe wird vom Exporter nicht mitgeliefert; nur der Input ist
+  prüfbar. Alle Schritte und Grenzen stehen
   in der Übergabe; keine automatische Konto-/Loginbedienung.
 - Alle Weltkoordinaten stammen vom geprüften lokalen Plugin-Hub-Export;
   keine Screenshot-Positionserkennung oder geratenen Ziffern freigeben.

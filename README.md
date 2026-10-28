@@ -1,6 +1,47 @@
-# OSRS Play 1.8.25 – Automatischer Minimap-Spielerpunkt und Kamera-Zoom
+# OSRS Play 1.8.26 – Fester Spielerpunkt und automatischer Minimap-Zoom
 
-## Neu in 1.8.25: Erstes echtes Gehen bestätigt und Setup vereinfacht
+## Neu in 1.8.26: Richtiger Minimap-Mittelpunkt und Zoom-Reset
+
+Der Test von 1.8.25 hat einen Fehler sichtbar gemacht: Der gelbe Kreis
+stand auf einem runden **Kartenicon** bei (679,138) anstelle des
+**stationären Spielerpunkts**. Auf dem vom Nutzer markierten echten
+RuneLite-Bild liegt der Spielerpunkt bei (665,137) einschließlich
+Fenster-Titelleiste, entsprechend (665,110) im Clientbild.
+
+Bei der bestätigten Standard-Fenstergeometrie 773×534 verwendet OSRS
+Play jetzt **diesen festen Minimap-Mittelpunkt**. Die Suche nach dunklen
+Ringen wurde entfernt; bewegliche Map-Icons werden nicht mehr mit dem
+Spieler verwechselt. Ein unpassend vergrößertes oder anders angeordnetes
+Fenster braucht weiterhin eine überprüfte manuelle Kalibrierung. Im
+bekannten Layout verhindert eine zusätzliche Plausibilitätsgrenze die
+zuvor falsch gewählten Punkte (644,113) und (679,138).
+
+OSRS Play stellt **nicht mehr den 3D-Kamera-Zoom** ein. Nach deiner
+ausdrücklichen Zustimmung wird RuneLite in den Vordergrund geholt,
+ein kontrollierter **Rechtsklick auf die Minimap** ausgeführt und ein
+mögliches Kontextmenü mit Escape geschlossen. RuneLites Minimap-
+Zoom-Plugin setzt beim Rechtsklick auf den **Standard von 4 Pixeln
+pro Weltkachel** zurück. Ohne aktive Minimap-Zoom-Option gilt ohnehin
+die normale Standard-Skalierung. Der installierte OSRS Toolkit Exporter
+liefert jedoch noch keinen tatsächlichen Minimap-Zoomwert; das Log
+unterscheidet ausdrücklich zwischen **gesendeter Reset-Eingabe** und
+**nicht messbarer tatsächlicher Zoomstufe**. Die Spielposition in
+Weltkacheln stammt weiterhin ausschließlich aus dem Plugin-Export.
+
+**So testen:** Aktuelle `v1.8.26` installieren (oder Update abwarten),
+RuneLite über den Jagex Launcher im Profil `auto` starten, einloggen,
+Minimap auf Norden ausrichten, einen Schritt manuell gehen und im
+OSRS Play „Automatisch gehen (Test)“ wählen. Prüfe den gelben Kreis
+**genau auf dem Spielerpunkt in der Minimap** und bestätige die
+Nordaustrichtung sowie die Vordergrund-Mausfreigabe. Im neuen Log
+stehen `MINIMAP_ANCHOR_CALIBRATED`, `ZOOM_RESET_INPUT_SENT` und
+anschließend nur bei echtem Plugin-Fortschritt die Wegpunktmeldungen.
+Bei einem Fehler erscheint weiterhin die rote Verbesserungsmeldung
+und das vollständige Protokoll wird in die Zwischenablage kopiert.
+
+## Vorherige Version: 1.8.25 (fehlerhafte Ring- und 3D-Zoom-Erkennung)
+
+## Historisch: 1.8.25 – echte Bewegung bestätigt, Kalibrierung nachträglich widerlegt
 
 Das neue 1.8.24-Live-Log belegt erstmals tatsächliche
 automatische Schritte im regulären RuneLite:
@@ -24,7 +65,9 @@ Auf deinem markierten Screenshot sitzt der kleine
 runde Spielerindikator etwa bei **x666/y137 im Fenster**
 und ungefähr **x666/y111 im Clientbild**. Die bisher
 manuell gewählten x643–645 lagen deutlich daneben.
-1.8.25 findet dieses **15-Pixel-Ringmuster automatisch**
+1.8.25 **versuchte** dieses **15-Pixel-Ringmuster automatisch** zu finden;
+der Folgetest widerlegte die Annahme, siehe 1.8.26 oben. Die damalige
+Erkennung wurde entfernt. Historisch wurde das Ringmuster
 auf einer frischen, nur im RAM angezeigten Aufnahme.
 Der gelbe Kreis wird zur Kontrolle gezeigt. Erkennt
 die Suche nichts Eindeutiges, kannst du weiterhin
@@ -43,7 +86,7 @@ welche wir momentan RuneLites Standard **4 px/Tile**
 verwenden. Minimap-Norden oben und Standard-Zoom
 müssen weiterhin bestätigt werden.
 
-**Nächster Spieltest:** OSRS Play auf 1.8.25
+**Historische, durch 1.8.26 ersetzte Testanweisung:** OSRS Play auf 1.8.25
 aktualisieren, RuneLite im Profil `auto` geöffnet lassen,
 einmal eine Kachel bewegen, Lumbridge auswählen,
 „Automatisch gehen (Test)“ starten. Prüfe den automatisch

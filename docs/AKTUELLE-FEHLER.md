@@ -1,4 +1,27 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.25
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.26
+
+**1.8.26 – Live-Fehler 1.8.25:** Der automatische 15px-Ring-
+Detektor sah einen Kartenmarker bei x679/y138 als Spielerpunkt.
+Der Charakter steht aber dauerhaft im Mittelpunkt der Minimap,
+laut Nutzer-Screenshot bei x665/y137 inklusive Titelleiste, also
+Client-x665/y110. Manuelle x644–645 waren ebenfalls falsch.
+Der neue feste Layoutanker wird bei bekanntem 768–773×528–534-
+Client verwendet; unbekannte Fensteranordnungen benötigen manuelle
+Kalibrierung und im bekannten Layout dürfen falsche manuelle
+Positionen nicht mehr übernommen werden. Eine echte Zoom-
+Steuerung per 3D-Kamera-Mausrad wurde vom Nutzer nicht verlangt:
+1.8.26 setzt stattdessen mit einem streng geprüften Minimap-
+Rechtsklick RuneLites Standard 4 Pixel/Kachel zurück und schließt
+ein mögliches Kontextmenü mit Escape. Ein echter Minimap-Zoom-
+Export fehlt bislang: Der Reset-Input ist überprüfbar, aber die
+Zoomstufe **nicht unabhängig messbar**. Die neue Kombination muss
+im Spiel getestet werden, bevor der Weg bis zum Ziel als verifiziert
+gelten darf. Das Log aus 1.8.25 enthält unter anderem den Fehler
+`CAMERA_ZOOM_NOT_COMPLETED` nach 33 Eingabeereignissen; diese
+3D-Wheel-Schleife ist entfernt.
+
+Die folgenden 1.8.25-Notizen sind historische, teilweise durch den
+Nutzertest widerlegte Annahmen.
 
 **1.8.25 – neue Echtdaten aus 1.8.24:** RuneLite reagiert
 jetzt nachweislich auf die gezielte Vordergrund-Mauseingabe:
