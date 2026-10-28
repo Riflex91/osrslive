@@ -321,6 +321,8 @@ internal sealed class RuneLiteWindow:Form
                         "Automatik: RuneLite-API-Fortschritt bestätigt · prüfe neue Kollisionsroute.":
                         feedback.Status=="TRANSITION_DETOUR_OBSERVED"?
                         "Automatik: Spiel geht Umweg · beobachte den laufenden Klick, keine neue Eingabe.":
+                        feedback.Status=="NEAR_WAYPOINT_LATERAL_OBSERVED"?
+                        "Automatik: seitliche Abweichung nahe Wegpunkt · beobachte ohne neuen Klick.":
                         "Automatik: echte Kachelbewegung bestätigt · warte auf Wegpunkt.";
                 }
             }
@@ -337,7 +339,9 @@ internal sealed class RuneLiteWindow:Form
                     else
                     {
                         log.Add(Severity.INFO,"RUNELITE_AUTOWALK",quiet.Status,quiet.Diagnostic);
-                        autoWalkDescription="Automatik: Pause nahe Wegpunkt · prüfe neu geplante Kollisionsroute.";
+                        autoWalkDescription=quiet.Status=="WAYPOINT_LATERAL_QUIET_REPLAN"?
+                            "Automatik: seitlicher Spielumweg · neue Kollisionsroute aus frischer Plugin-Kachel prüfen.":
+                            "Automatik: Pause nahe Wegpunkt · prüfe neu geplante Kollisionsroute.";
                         refreshQuietWaypointRoute=true;
                     }
                 }

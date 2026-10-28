@@ -1,4 +1,41 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.32
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.33
+
+**1.8.33 – Zwei echte v1.8.32-Frühstopps vor dem Wegpunkt:**
+Das 461-Zeilen-Log vom 28.10.2026, 22:21:58–22:23:14
+beweist, dass die veröffentlichte v1.8.32 (`build_run=40770678261`)
+automatisch installiert wurde. Ein aus altem Export vorgemerkter
+`Varrock_Westbank`-Start öffnete nach neuem Positionsevent korrekt
+die Kalibrierung. Vier `FOREGROUND_INPUT_INSERTED`-Klicks
+erzeugten echten RuneLite-Positionsfortschritt. Der vierte Klick
+hatte das Kollisionspräfix bis `(3241,3271)`; nach dem exakten
+Tile `(3240,3269)` meldete der Exporter `(3239,3269)` –
+**eine Kachel seitlich, zwei vor Wegpunkt**, mit Restdistanz 2.
+Der alte `after<before`- und Achsenkorridortest stoppte
+`UNEXPECTED_API_TILE`, obwohl die Bewegung ansonsten echt war.
+Bei einem weiteren Ziel `Grand_Exchange` passierte dasselbe:
+nach zwei Klicks und dem echten beobachteten `(3238,3295)` kam
+`(3237,3296)` vor Wegpunkt `(3239,3297)`, wieder nur ein
+seitlicher Tilewechsel bei gleicher Restdistanz. Der zweite
+`Lumbridge_Hühner`-Test bestätigte zwei Klicks und
+API-Fortschritt, endete aber mit `RUNELITE_FOREGROUND_LOST` –
+dieser Schutz ist richtig und wird nicht aufgeweicht.
+
+Die v1.8.33-Erweiterung `NEAR_WAYPOINT_LATERAL_OBSERVED`
+beobachtet maximal **ein** neues seitliches Tile pro Klick,
+nur nach langem bereits bestätigtem Präfix, bei Tile-Sprung 1,
+Wegpunktdistanz genau 2 vorher/nachher, maximal zwei Tile
+Entfernung vom Kollisionspräfix, maximal fünf Sekunden nach
+Klick und maximal zwei Sekunden Eventabstand. Das Tile gilt
+**nicht** als Ziel-/Routenbestätigung und löst keinen neuen
+Spielinput aus. Erst ein späteres wirklich verifiziertes
+Wegpunkt-Event oder die bestehende beschränkte 1,6s-/3s-
+Ruhe- und API-Aktualitätsprüfung mit neuem Kollisionsweg
+(`WAYPOINT_LATERAL_QUIET_REPLAN`) ermöglicht eine
+Fortsetzung. Der Wiederaufnahme-Zähler bleibt auf zwei;
+weitere Seitwärtsbewegungen, lange Sprünge, falsche Ebenen,
+alte API-Daten und Fokusverlust bleiben harte Stopper.
+Exakte Live-Tiles und Negativfälle sind in den Selbsttests
+enthalten. Echte Ankunft am gewählten Ziel ist noch offen.
 
 **1.8.32 – Kein Buttondefekt, sondern fehlende frische
 Pluginposition:** Im 1.8.31-Live-Log (49 Zeilen) wurde
