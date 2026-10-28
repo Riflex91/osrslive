@@ -50,7 +50,7 @@ internal static class RuneLitePositionExportSourceTests
             Require(RuneLitePositionExportSource.Read(now,"RuneLite – FixtureCharacter",root)
                     .Data is null,
                 "the export's private account name must match the filename and trusted RuneLite title");
-            File.WriteAllText(path,"{ invalid JSON");
+            File.WriteAllText(path,"{ invalid JSON with enough bytes to exercise the parser");
             var malformed=RuneLitePositionExportSource.Read(now,"RuneLite – FixtureCharacter",root);
             Require(malformed.Data is null&&malformed.Diagnostic.Contains("READ_UNAVAILABLE")&&
                     !malformed.Diagnostic.Contains("FixtureCharacter"),
