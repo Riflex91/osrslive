@@ -1,4 +1,62 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.23
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.24
+
+## 1.8.24 – Erster echter RuneLite-Mausklick statt PostMessage
+
+Das Nutzerlog von OSRS Play 1.8.23 am 28.10.2026,
+19:23:01–19:24:18 Europe/Berlin (268 Zeilen), belegt
+erfolgreiche Updateinstallation, direktes Plugin-Tile
+3214/3197/0, gültige A*-Routen nach Lumbridge und
+**drei `CLICK_INTENT`/`WINDOW_MESSAGES_POSTED`**.
+Klick 1 um 19:23:34 an 677/106 (Wegpunkt 3222/3198)
+führte nach 9 s zu `POSITION_EVENT_TIMEOUT`;
+Klick 2 um 19:23:56 an 676/108 auf denselben Wegpunkt
+erhielt 5 s später ein neues API-Tile 3215/3197/0,
+das **nicht** auf dem gesendeten Route-Prefix lag.
+Es wurde korrekt als `UNEXPECTED_API_TILE` geblockt;
+das ist kein Beweis, dass der vorherige Klick wirkte.
+Ein dritter Klick um 19:24:15 an 677/111 für Wegpunkt
+3223/3197 war beim manuellen Kopieren des Logs erst
+3,3 Sekunden alt; daraus lässt sich kein Ausgang
+ableiten. Beide vollständigen Fehlerlogs wurden
+automatisch kopiert und die rote Warnung ausgelöst.
+
+Der nachgewiesene Unterschied: Windows `PostMessage`
+akzeptiert das Einreihen von Fensternachrichten,
+belegt aber nicht die Annahme durch RuneLites Java/AWT-
+Mausverarbeitung. Der bisherige Weg meldete diese
+Nachrichten zutreffend nur als unbestätigt. **1.8.24
+wechselt ausschließlich beim manuell freigegebenen
+Autowalk-Test zu echtem Windows-`SendInput` im RuneLite-
+Vordergrund.** Der Kalibrierungsdialog fordert neben
+Nord-/Zoom-Bestätigung jetzt eine separate Einwilligung
+zur sichtbaren Maussteuerung. Beim ersten Klick darf
+die App RuneLite in den Vordergrund holen; jeder weitere
+Klick verlangt, dass RuneLite bereits im Vordergrund
+bleibt. Vor DOWN/UP werden die geprüfte RuneLite-HWND,
+unveränderte Clientgröße, Fensterzuordnung des konkreten
+Bildschirmpixels, virtuelle Multi-Monitor-Koordinaten,
+physisch nicht gedrückte Maustasten und unverändert
+aktiver Benutzerauftrag kontrolliert. Ein verweigerter
+Fokus, verdecktes Ziel, falsche Cursorposition oder
+anderes Programm stoppen ohne neuen Spielklick mit
+vollständigem Clipboard-Log und rotem GUI-Fehler.
+
+`FOREGROUND_INPUT_INSERTED` ist **immer noch keine
+bestätigte Bewegung**. Erst `PROGRESS_CONFIRMED`/
+`WAYPOINT_CONFIRMED` nach einem späteren RuneLite-API-
+Tile beweist fortgesetzte Routenbewegung. Die alte
+Erstklick-Ausnahme <=60s nur binnen 12s nach Kalibrierung,
+alle späteren <=3s-Events, 9s Timeout, 40 Klicks/5 min,
+Kollisionspfad und Transportverbot bleiben. Diese
+Eingabevariante ist vor dem nächsten Nutzer-Live-Test
+**nicht bestätigt**. Test: RuneLite aus dem Jagex Launcher
+mit Profil `auto` eingeloggt, einmal Tile bewegen,
+Lumbridge wählen, minimapkalibrieren und Einwilligung
+ankreuzen. Danach RuneLite im Vordergrund lassen,
+Maus nicht selbst bedienen. Auf `FOREGROUND_INPUT_INSERTED`
+und nachfolgende bestätigte API-Bewegung achten. Bei
+`FOREGROUND_CLICK_NOT_SENT` liefert `reason=` die genaue
+fehlgeschlagene Sicherheitsvorbedingung.
 
 ## 1.8.23 – Automatik-Startblockade aus echtem 1.8.22-Lauf beheben
 

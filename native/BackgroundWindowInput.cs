@@ -4,6 +4,101 @@ namespace OSRSLiveDiagnostics;
 
 internal static class BackgroundWindowInput
 {
+    internal sealed record ForegroundClickResult(bool Inserted,string Reason,int InputEvents);
+
+    // RuneLite is a Java/AWT application. PostMessage success only shows that
+    // Win32 queued messages, not that the AWT canvas accepted a game click.
+    // For this explicitly armed RuneLite-only test use real Windows input,
+    // never while another application owns the foreground or covers the tile.
+    internal static async Task<ForegroundClickResult> ClickRuneLiteForegroundAsync(
+        IntPtr window,Point position,Size expectedSize,bool activateAfterCalibration,
+        Func<bool> shouldStop,CancellationToken ct)
+    {
+        if(shouldStop()||!TryClientSize(window,out var size)||size!=expectedSize||
+            !GetClientRect(window,out var bounds)||position.X<0||position.Y<0||
+            position.X>=bounds.Right||position.Y>=bounds.Bottom)
+            return new(false,"WINDOW_OR_GEOMETRY_CHANGED",0);
+        GetWindowThreadProcessId(window,out uint expectedPid);
+        if(expectedPid==0)return new(false,"WINDOW_PID_UNAVAILABLE",0);
+        if(activateAfterCalibration&&!SameForegroundRoot(window))
+        {
+            if(!SetForegroundWindow(window))return new(false,"FOREGROUND_ACTIVATION_DENIED",0);
+            await Task.Delay(120,ct);
+        }
+        if(shouldStop()||!SameForegroundRoot(window))
+            return new(false,"RUNELITE_NOT_FOREGROUND",0);
+        var screen=new POINT{X=position.X,Y=position.Y};
+        if(!ClientToScreen(window,ref screen))return new(false,"SCREEN_MAPPING_FAILED",0);
+        var original=screen;
+        if(!HitBelongsToExpectedWindow(window,expectedPid,screen))
+            return new(false,"MINIMAP_OCCLUDED_BY_OTHER_WINDOW",0);
+        if((GetAsyncKeyState(0x01)&0x8000)!=0||
+           (GetAsyncKeyState(0x02)&0x8000)!=0)
+            return new(false,"PHYSICAL_MOUSE_BUTTON_HELD",0);
+        int virtualX=GetSystemMetrics(76),virtualY=GetSystemMetrics(77);
+        int virtualWidth=GetSystemMetrics(78),virtualHeight=GetSystemMetrics(79);
+        if(!TryNormalizeAbsolute(screen.X,screen.Y,virtualX,virtualY,virtualWidth,
+                virtualHeight,out int absoluteX,out int absoluteY))
+            return new(false,"VIRTUAL_SCREEN_BOUNDS_INVALID",0);
+        var move=new INPUT[]{Mouse(absoluteX,absoluteY,0x0001|0x8000|0x4000)};
+        if(shouldStop()||!SameForegroundRoot(window))
+            return new(false,"FOREGROUND_LOST_BEFORE_MOVE",0);
+        uint moved=SendInput(1,move,Marshal.SizeOf<INPUT>());
+        if(moved!=1)return new(false,"SENDINPUT_MOVE_REJECTED",(int)moved);
+        if(!GetCursorPos(out var actual)||Math.Abs(actual.X-original.X)>1||
+           Math.Abs(actual.Y-original.Y)>1)
+            return new(false,"CURSOR_POSITION_NOT_CONFIRMED",(int)moved);
+        if(shouldStop()||!SameForegroundRoot(window)||
+            !TryClientSize(window,out size)||size!=expectedSize||
+            !HitBelongsToExpectedWindow(window,expectedPid,screen))
+            return new(false,"FOREGROUND_OR_TARGET_LOST_BEFORE_CLICK",(int)moved);
+        ct.ThrowIfCancellationRequested();
+        // A single SendInput batch guarantees ordered DOWN and UP without
+        // the user seeing a held synthetic button if an await gets cancelled.
+        var click=new INPUT[]{Mouse(0,0,0x0002),Mouse(0,0,0x0004)};
+        uint inserted=SendInput(2,click,Marshal.SizeOf<INPUT>());
+        if(inserted!=2)
+        {
+            // Release defensively even if the partial batch inserted DOWN.
+            SendInput(1,[Mouse(0,0,0x0004)],Marshal.SizeOf<INPUT>());
+            return new(false,"SENDINPUT_BUTTON_SEQUENCE_INCOMPLETE",(int)(moved+inserted));
+        }
+        return new(true,"INPUT_STREAM_INSERTED_AWAIT_PLUGIN_MOVEMENT",(int)(moved+inserted));
+    }
+
+    internal static bool TryNormalizeAbsolute(int x,int y,int left,int top,int width,int height,
+        out int normalizedX,out int normalizedY)
+    {
+        normalizedX=normalizedY=0;
+        if(width<2||height<2||x<left||y<top||
+            (long)x>=((long)left+width)||(long)y>=((long)top+height))return false;
+        normalizedX=(int)((long)(x-left)*65535/(width-1));
+        normalizedY=(int)((long)(y-top)*65535/(height-1));
+        return true;
+    }
+
+    internal static int MouseInputStructSize()=>Marshal.SizeOf<INPUT>();
+    internal static bool IsRuneLiteForeground(IntPtr window)=>
+        window!=IntPtr.Zero&&IsWindow(window)&&SameForegroundRoot(window);
+    private static INPUT Mouse(int dx,int dy,uint flags)=>new(){Type=0,MouseData=new(){
+        X=dx,Y=dy,Flags=flags}};
+    private static bool SameForegroundRoot(IntPtr window)
+    {
+        IntPtr foreground=GetForegroundWindow();
+        return foreground!=IntPtr.Zero&&GetAncestor(foreground,2)==GetAncestor(window,2);
+    }
+    private static bool HitBelongsToExpectedWindow(IntPtr window,uint expectedPid,POINT screen)
+    {
+        IntPtr hit=WindowFromPoint(screen);
+        if(hit==IntPtr.Zero||GetAncestor(hit,2)!=GetAncestor(window,2))return false;
+        GetWindowThreadProcessId(hit,out uint hitPid);
+        return hitPid==expectedPid;
+    }
+    [StructLayout(LayoutKind.Sequential)]private struct MOUSEINPUT
+    {internal int X,Y;internal uint Data,Flags,Time;internal IntPtr ExtraInfo;}
+    [StructLayout(LayoutKind.Sequential)]private struct INPUT
+    {internal uint Type;internal MOUSEINPUT MouseData;}
+
     internal static bool TryClientSize(IntPtr window,out Size size)
     {
         size=Size.Empty;
@@ -127,5 +222,12 @@ internal static class BackgroundWindowInput
     [DllImport("user32.dll")]private static extern IntPtr ChildWindowFromPointEx(IntPtr parent,POINT point,uint flags);
     [DllImport("user32.dll")]private static extern int MapWindowPoints(IntPtr from,IntPtr to,ref POINT point,uint count);
     [DllImport("user32.dll")]private static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
+    [DllImport("user32.dll")]private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")]private static extern IntPtr WindowFromPoint(POINT point);
+    [DllImport("user32.dll")]private static extern bool GetCursorPos(out POINT point);
+    [DllImport("user32.dll")]private static extern short GetAsyncKeyState(int virtualKey);
+    [DllImport("user32.dll")]private static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll",SetLastError=true)]private static extern uint SendInput(uint count,[In] INPUT[] inputs,int structSize);
     [DllImport("user32.dll",EntryPoint="PostMessageW",SetLastError=true)]private static extern bool PostMessage(IntPtr window,uint message,IntPtr wParam,IntPtr lParam);
 }

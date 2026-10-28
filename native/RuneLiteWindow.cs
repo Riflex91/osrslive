@@ -59,7 +59,7 @@ internal sealed class RuneLiteWindow:Form
         detail.Font=new("Segoe UI",9);failureBanner.Font=new("Segoe UI",11,FontStyle.Bold);
         failureBanner.ForeColor=Color.FromArgb(255,105,105);
         failureBanner.Text="VERBESSERUNG MUSS EINGEBAUT WERDEN, wenn ein Bewegungstest scheitert. " +
-            "Automatische Bewegung ist zunächst AUS und noch nicht live bestätigt.";
+            "Automatische Bewegung ist AUS, bis du sie ausdrücklich freigibst.";
         panel.Controls.Add(status,0,1);panel.Controls.Add(position,0,2);
         panel.Controls.Add(detail,0,3);panel.Controls.Add(failureBanner,0,4);
         logPreview.Dock=DockStyle.Fill;logPreview.ReadOnly=true;
@@ -156,8 +156,8 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.INFO,"CORE","STARTED",
             $"version={Diagnostics.Version} {BuildIdentity.Log} backend=RUNELITE_COMPANION profile_expected=auto");
         log.Add(Severity.INFO,"CORE","CAPABILITIES",
-            "read_only_by_default=true automated_game_actions=OPT_IN_FIRST_WALK_TEST "+
-            "input_transport=VERIFIED_RUNELITE_HWND_WINDOW_MESSAGES "+
+            "read_only_by_default=true automated_game_actions=EXPLICIT_FOREGROUND_MOUSE_OPT_IN "+
+            "input_transport=WIN32_SENDINPUT_VERIFIED_RUNELITE_FOREGROUND "+
             "clicks_require_fresh_api_events=true source=PLUGIN_HUB_POSITION_EVENTS "+
             "plugin_required=true plugin_install_manual=true screen_captures_for_position=false "+
             "navigation=API_EVENT_COLLISION_ROUTE_AND_SHORT_WAYPOINTS "+
@@ -279,6 +279,10 @@ internal sealed class RuneLiteWindow:Form
         {
             if(autoWalkWindowTitle!=source.TrustedWindowTitle)
                 StopAutoWalk("RUNELITE_TITLE_CHANGED",true,"player_title_changed=true no_more_input=true");
+            else if(autoWalk.Clicks>0&&!clickInProgress&&
+                !BackgroundWindowInput.IsRuneLiteForeground(source.TrustedWindowHandle))
+                StopAutoWalk("RUNELITE_FOREGROUND_LOST",true,
+                    "active_user_window_changed=true no_more_clicks=true input_not_targeted_elsewhere=true");
             else if(state.Status is "RUNELITE_NOT_RUNNING" or "MULTIPLE_RUNELITE_CLIENTS" or
                 "PLUGIN_EXPORT_UNAVAILABLE" or "PLUGIN_EXPORT_INVALID" or "INTERNAL_ERROR")
                 StopAutoWalk("API_SOURCE_LOST",true,$"sample={sequence} state={state.Status}");
@@ -473,7 +477,7 @@ internal sealed class RuneLiteWindow:Form
                 autoWalk.Start(goal,geometry,DateTimeOffset.UtcNow);
                 autoWalkWindowTitle=source.TrustedWindowTitle;
                 stopWalk.Enabled=true;
-                autoWalkDescription="Automatik: AKTIV · warte auf frisches RuneLite-API-Ereignis.";
+                autoWalkDescription="Automatik: AKTIV · Vordergrund-RuneLite und bestätigte Bewegung erforderlich.";
                 log.Add(Severity.INFO,"RUNELITE_AUTOWALK","ARMED",
                     $"target={goal.Id.Replace(' ','_')} minimap_center={center.X},{center.Y} "+
                     $"pixels_per_tile={setup.PixelsPerTile:0.0} client={size.Width}x{size.Height} "+
@@ -481,6 +485,7 @@ internal sealed class RuneLiteWindow:Form
                     "first_calibrated_click_last_known_api_max_age_s=60 first_click_window_s=12 "+
                     "later_clicks_require_event_age_s_at_most=3 "+
                     "click_limit=40 runtime_limit_s=300 verify_each_waypoint=true "+
+                    "foreground_mouse_consent=true sendinput_not_postmessage=true "+
                     "source=PLUGIN_API no_screenshot_saved=true");
                 _=RefreshRouteAsync();
             }
@@ -554,26 +559,29 @@ internal sealed class RuneLiteWindow:Form
             $"waypoint_index={plan.WaypointIndex} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
             $"api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"manually_calibrated_first_click={manuallyAttestedFirstClick.ToString().ToLowerInvariant()} "+
-            "input_not_yet_verified=true screenshot_position_estimation=false");
+            "transport=SENDINPUT_FOREGROUND_ONLY input_not_yet_verified=true screenshot_position_estimation=false");
         try
         {
-            bool posted=await BackgroundWindowInput.ClickAsync(geometry.Window,plan.Pixel,
+            var sent=await BackgroundWindowInput.ClickRuneLiteForegroundAsync(
+                geometry.Window,plan.Pixel,geometry.ClientSize,autoWalk.Clicks==1,
                 ()=>!autoWalk.Active||paused||closing.IsCancellationRequested||
                     source.TrustedWindowHandle!=geometry.Window||
                     autoWalkWindowTitle!=source.TrustedWindowTitle,
                 closing.Token);
             if(!autoWalk.Active)return;
-            if(!posted)
+            if(!sent.Inserted)
             {
-                StopAutoWalk("WINDOW_CLICK_NOT_POSTED",true,
+                StopAutoWalk("FOREGROUND_CLICK_NOT_SENT",true,
                     $"command={autoWalk.Clicks} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
-                    "input_not_verified=true no_position_claim=true");
+                    $"reason={sent.Reason} input_events={sent.InputEvents} "+
+                    "input_not_verified=true no_position_claim=true window_focus_required=true");
                 return;
             }
-            autoWalkDescription="Automatik: Klick gesendet · überprüfe Bewegung über RuneLite-API.";
-            log.Add(Severity.INFO,"RUNELITE_AUTOWALK","WINDOW_MESSAGES_POSTED",
-                $"command={autoWalk.Clicks} awaiting_newer_api_event=true "+
-                "postmessage_is_not_proof_of_game_input=true click_status=UNVERIFIED");
+            autoWalkDescription="Automatik: Windows-Mauseingabe gesendet · überprüfe RuneLite-API-Bewegung.";
+            log.Add(Severity.INFO,"RUNELITE_AUTOWALK","FOREGROUND_INPUT_INSERTED",
+                $"command={autoWalk.Clicks} input_events={sent.InputEvents} transport=WIN32_SENDINPUT "+
+                "foreground_and_target_checked=true awaiting_newer_api_event=true "+
+                "injection_is_not_proof_of_game_movement=true click_status=UNVERIFIED");
         }
         catch(OperationCanceledException) when(closing.IsCancellationRequested){}
         catch(Exception ex)
