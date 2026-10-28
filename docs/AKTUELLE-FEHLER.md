@@ -1,4 +1,24 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.22
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.23
+
+**1.8.23 – live bestätigte Autowalk-Startblockade:**
+Die echte Sitzung 19:07–19:09 Uhr am 28.10.2026
+bestätigte erfolgreiche autoaktualisierte 1.8.22,
+Plugin-Koordinaten, A*-Routen und zwei akzeptierte
+Minimap-Kalibrierungen. Es wurde **kein** Gameklick
+versucht, weil bei beiden `ARMED`-Ereignissen das
+letzte akzeptierte Exportereignis 12/33 Sekunden alt
+war. `CanDispatch <=3s` verhinderte den Erstklick
+trotz Nutzerbestätigung. 1.8.23 erlaubt binnen zwölf
+Sekunden nach manueller Kalibrierung einen einzigen
+ersten Kurz-Wegpunkt-Klick von einem in der aktuellen
+Session bereits akzeptierten höchstens 60s alten
+API-Tile. Danach bleibt jedes weitere Kommando ohne
+neues <=3s-Plugin-Ereignis verboten. Der eigentliche
+Inputtransport nach RuneLite ist weiter **live offen**;
+ein erfolgreicher Windows-CI-Build kann das nicht
+ersetzen. Erste ungültige Startanfrage ohne
+Sessionposition wurde im Log korrekt blockiert und
+das Fehlerprotokoll automatisch kopiert.
 
 **1.8.22 – erster automatischer Bewegungsklick eingebaut,
 noch nicht live bestätigt:** Der 1.8.21-Nutzerlauf bestätigte

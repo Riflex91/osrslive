@@ -73,10 +73,23 @@ internal sealed class RuneLiteAutoWalk
         return chosen;
     }
 
+    // A successful, explicit on-screen minimap calibration provides a narrow
+    // one-shot starting attestation. The official exporter has no heartbeat:
+    // a stationary player may have a correct, older last API tile. We allow
+    // ONE first click, promptly after calibration, from an API event already
+    // accepted in this running companion session. No further click can use
+    // this exception; every subsequent click requires a <=3-second API tile.
+    internal bool CalibratedFirstClickAllowed(DateTimeOffset now,DateTimeOffset eventAt)=>
+        Active&&clicks==0&&now-started<=TimeSpan.FromSeconds(12)&&
+        eventAt!=default&&now-eventAt>=TimeSpan.Zero&&
+        now-eventAt<=TimeSpan.FromSeconds(60);
+
     internal bool CanDispatch(DateTimeOffset now,DateTimeOffset eventAt)=>
         Active&&pending is null&&clicks<MaxClicks&&
         now-started<TimeSpan.FromMinutes(5)&&eventAt!=default&&
-        now-eventAt>=TimeSpan.Zero&&now-eventAt<=TimeSpan.FromSeconds(3);
+        now-eventAt>=TimeSpan.Zero&&
+        (now-eventAt<=TimeSpan.FromSeconds(3)||
+         CalibratedFirstClickAllowed(now,eventAt));
 
     internal void Sent(ClickPlan plan,DateTimeOffset eventAt,DateTimeOffset now)
     {
@@ -157,8 +170,13 @@ internal static class RuneLiteAutoWalkTests
         }
         var walk=new RuneLiteAutoWalk();var now=DateTimeOffset.UtcNow;
         walk.Start(goal,geom,now);
-        Require(!walk.CanDispatch(now,now.AddSeconds(-4)),"an old event never authorizes a click");
-        walk.Sent(plan,now,now);
+        Require(walk.CalibratedFirstClickAllowed(now,now.AddSeconds(-33))&&
+                walk.CanDispatch(now,now.AddSeconds(-33)),
+            "explicit manual minimap calibration allows exactly one carefully bounded first click from a same-session last-known API tile");
+        Require(!walk.CanDispatch(now,now.AddSeconds(-61))&&
+                !walk.CanDispatch(now.AddSeconds(13),now.AddSeconds(-4)),
+            "no override for events older than a minute or more than 12 seconds after calibration");
+        walk.Sent(plan,now.AddSeconds(-33),now);
         Require(!walk.CanDispatch(now,now),"never send a second click before event confirmation");
         Require(walk.Observe(new(3202,3200),now.AddMilliseconds(650),now.AddMilliseconds(700)).Status=="PROGRESS_CONFIRMED",
             "API must verify incremental on-path progress");
@@ -166,6 +184,9 @@ internal static class RuneLiteAutoWalkTests
             "API tile near the selected waypoint enables replanning");
         Require(walk.CanDispatch(now.AddSeconds(2),now.AddSeconds(2)),
             "a fresh new event authorizes only a new independently planned click");
+        Require(!walk.CalibratedFirstClickAllowed(now.AddSeconds(2),now.AddSeconds(-7))&&
+                !walk.CanDispatch(now.AddSeconds(2),now.AddSeconds(-7)),
+            "after first dispatch, an old event can never authorize another click");
         walk.Sent(plan,now.AddSeconds(2),now.AddSeconds(2));
         Require(walk.Observe(new(3202,3200),now.AddSeconds(2),now.AddSeconds(2)).Status=="IGNORED",
             "a pre-click event cannot corroborate a new input");
