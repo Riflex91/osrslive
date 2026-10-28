@@ -16,9 +16,14 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   Stopp. Der 1.8.24-Live-Test bestätigt echte SendInput-Bewegung und einen
   erreichten Wegpunkt. 1.8.25 korrigiert wiederholte API-Samples und die
   tolerierte unmittelbare Endpunktüberschreitung. Seine automatische
-  Ring-Erkennung bei x679/y138 **war falsch**: laut Nutzer liegt der
-  feste Spielerpunkt bei x665/y110 in Clientkoordinaten. 1.8.26 benutzt
-  diesen festen Mittelpunkt nur im bekannten RuneLite-Layout und setzt
+  Ring-Erkennung bei x679/y138 **war falsch**. Auch 1.8.26 hatte noch
+  den falschen Mittelpunkt x665/y110, weil die roten Linien im
+  Nutzerbild falsch abgelesen wurden. Sie kreuzen sich tatsächlich
+  bei x640/y110 (Bildbreite 768); im 773 Pixel breiten Client ist der
+  weiße Punkt bei ungefähr x645/y111. 1.8.27 verwendet width-128/y111
+  und verlangt zusätzlich einen weißen Spielerpunkt im überprüften
+  Bild; selbst manuelle Abweichungen sind dort auf drei Pixel
+  begrenzt. Das Update setzt weiterhin
   **Minimap-** statt 3D-Kamera-Zoom über einen geprüften Minimap-
   Rechtsklick auf RuneLites Standard 4 Pixel/Tile zurück. Die echte
   Zoomstufe wird vom Exporter nicht mitgeliefert; nur der Input ist

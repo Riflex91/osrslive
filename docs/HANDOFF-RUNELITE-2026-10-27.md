@@ -1,4 +1,54 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.26
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.27
+
+## 1.8.27 – rote Linien richtig interpretiert, sichtbaren weißen Spielerpunkt verifizieren
+
+Der Nutzer meldete nach dem 1.8.26-Release erneut: Der gelbe Kreis
+sitzt **nicht** auf dem Charakterpunkt. Eingereicht wurden das reale
+Live-Log vom 28.10.2026, 20:18–20:19 Europe/Berlin (224 Zeilen),
+und ein Screenshot des Kalibrierungsdialogs mit dem neuen falschen
+gelben Ring. Die bisherige Dokumentation hat den ersten annotierten
+Screenshot **falsch abgelesen**. Vergrößerung beider Originalbilder
+liefert folgende eindeutige Zuordnung:
+
+- Die **roten Linien schneiden sich bei (640,110)** im ursprünglich
+  768 Pixel breiten, vollständig sichtbaren RuneLite-Screenshot.
+  Nicht (665,137) – das war ein Analysefehler.
+- Im aktuellen Screenshot mit dem 773×534-WGC-Client liegt der
+  **kleine weiße Spielerpunkt nahe (645,111)**. Der 1.8.26-
+  Kalibrierungsring bei (665,110), im Log nach manueller Korrektur
+  (666,114), liegt etwa **20 Pixel rechts** vom weißen Spielerpunkt.
+  Die Titelzeile ist in der bereitgestellten Anzeige bereits
+  enthalten; ein zweiter Titelleistenabzug war unbegründet.
+- Um 20:19:36 wurden `MINIMAP_ANCHOR_CALIBRATED center_x=666
+  center_y=114`, `ZOOM_RESET_INPUT_SENT` (5 Eingaben), danach
+  `FOREGROUND_INPUT_INSERTED` für Klick x690/y90 protokolliert.
+  0,9 Sekunden später meldete der verifizierte Exporter
+  (3240,3184,0) statt des erwarteten Nordost-Wegpunkts
+  (3244,3190,0): korrekter Safety-Stopp `UNEXPECTED_API_TILE`.
+  Der erste Export war zu diesem Zeitpunkt ca. 47 Sekunden alt;
+  die Nachbeobachtung bestätigt keine erfolgreiche Route.
+
+Der korrekte Fix verwendet beim bekannten klassischen Layout
+`playerCenter=(clientWidth-128,111)` – für 768 Pixel also (640,111),
+für den aktuellen 773-Pixel-Client (645,111). Zusätzlich muss die
+aktuelle Minimap-Aufnahme um diesen fest berechneten Punkt **mindestens
+zwei helle Pixel eines kleinen weißen Spielerindikators** enthalten.
+Nur diese im Bildschirm sichtbare geometrische Validierung darf den
+automatischen gelben Ring anzeigen. Falls die Dot-Prüfung scheitert,
+wird die Automatik nicht freigegeben; manuelle Auswahl im bekannten
+Layout ist nur innerhalb ±3 Pixel zum erwarteten Punkt **und mit
+sichtbarem weißen Dot-Nachweis** gestattet. Ein anderer Kreismarker,
+eine Login-Oberfläche oder grüne Landschaft darf nicht als Beweis
+dienen. Synthetische Tests prüfen das, das falsche x666 und das
+historische x679. Die echten Weltkacheln bleiben Plugin-exklusiv.
+
+Der separierte RuneLite-Minimap-Zoom-Reset per geprüftem Rechtsklick
+und Escape aus 1.8.26 bleibt. Kein 3D-Zoom. Der Exporter übermittelt
+den Zoomwert weiterhin nicht; API-Zoom-Skala bleibt unbestätigt.
+Neuer User-Ingame-Test erforderlich, vor allem die Position des Rings.
+
+Die unten stehende 1.8.26-Aussage (665,137 als rote Kreuzung) ist
+historisch **falsch und widerlegt**.
 
 ## 1.8.26 – Nutzerkorrektur: Spielerpunkt bleibt mittig, Minimap-Zoom statt Kamera
 

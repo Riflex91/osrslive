@@ -1,4 +1,39 @@
-# OSRS Play 1.8.26 – Fester Spielerpunkt und automatischer Minimap-Zoom
+# OSRS Play 1.8.27 – Weißer Spielerpunkt statt fehlgedeuteter Bildschirmmarkierung
+
+## 1.8.27: Nutzerbild erneut vermessen und Kalibrierung abgesichert
+
+**Korrektur eines Fehlers in 1.8.26:** Ich hatte die roten Linien im
+Originalbild falsch gelesen. Sie schneiden sich **bei etwa x640/y110**
+in der 768 Pixel breiten Originalaufnahme, **nicht bei x665/y137**.
+Im neuen 773×534-RuneLite-Client liegt der kleine **weiße
+Spielerpunkt etwa bei x645/y111**. Die falsche gelbe Markierung
+in 1.8.26 lag etwa 20 Pixel zu weit rechts. Der von dir eingereichte
+Live-Log bestätigt `MINIMAP_ANCHOR_CALIBRATED center_x=666` und einen
+`UNEXPECTED_API_TILE`-Stopp nach dem ersten Eingabeklick.
+
+Der Minimap-Mittelpunkt wird nun beim bekannten Layout aus der
+Fensterbreite berechnet (**x = Breite − 128, y = 111**). Anders als
+zuvor muss zusätzlich der **kleine weiße Spielerpunkt** innerhalb
+weniger Pixel dieser Position in der aktuellen Aufnahme sichtbar sein.
+Ohne diesen Nachweis darf die Automatik **nicht starten**. Auch bei
+manueller Auswahl muss im bekannten Layout der weiße Punkt getroffen
+werden und die Wahl darf höchstens 3 Pixel vom festen Mittelpunkt
+abweichen. Kartenicons, das früher fehlgedeutete Ringsymbol und die
+falschen Punkte x665–679 werden abgewiesen. Die Aufnahme dient
+weiterhin ausschließlich der Klickgeometrie; die Weltkoordinaten
+kommen nur aus dem RuneLite-Plugin.
+
+Der automatische **Minimap-Reset auf 4 Pixel/Kachel** aus 1.8.26
+bleibt bestehen; die 3D-Kamera bleibt unverändert. Der tatsächliche
+Zoomwert kann mangels Plugin-Export noch nicht direkt gemessen werden.
+
+**Spieltest:** Nach Update auf `v1.8.27` soll der gelbe Ring direkt
+auf dem **kleinen weißen Punkt** in der Mitte der Minimap sitzen.
+Kontrolliere vor der Einwilligung. Wenn er abweicht, nicht starten,
+sondern den Screenshot und das neue Log senden. Live-Erfolg einer
+kompletten Route ist noch nicht bestätigt.
+
+## Vorherige Version: 1.8.26 – falsch vermessener fester Mittelpunkt
 
 ## Neu in 1.8.26: Richtiger Minimap-Mittelpunkt und Zoom-Reset
 

@@ -18,7 +18,7 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
 
     internal Point? PlayerCenter=>DialogResult==DialogResult.OK?selected:null;
     internal double PixelsPerTile=>(double)pixelsPerTile.Value;
-    internal string SelectionSource=>selectedAutomatically?"AUTO_FIXED_LAYOUT":"USER_SELECTED";
+    internal string SelectionSource=>selectedAutomatically?"AUTO_FIXED_LAYOUT_WHITE_DOT":"USER_SELECTED_WHITE_DOT";
     internal string MarkerDiagnostic=>markerDiagnostic;
 
     internal RuneLiteMinimapSetupDialog(Bitmap currentWindow)
@@ -34,16 +34,14 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
         layout.RowStyles.Add(new(SizeType.Absolute,145));
         layout.RowStyles.Add(new(SizeType.Absolute,50));
         layout.Controls.Add(new Label{Dock=DockStyle.Fill,AutoSize=false,
-            Text="Der Spielerpunkt ist immer mittig auf der Minimap. Der gelbe Kreis markiert den " +
-                 "Mittelpunkt aus deinem Screenshot (RuneLite: x=665, y=110 ohne Titelleiste). " +
-                 "Bitte prüfen; bei abweichendem Layout manuell auf den Spielerpunkt klicken. " +
-                 "RuneLite muss im Spiel sein und die Minimap muss Norden oben zeigen. " +
-                 "OSRS Play setzt anschließend den MINIMAP-Zoom per Rechtsklick auf " +
-                 "RuneLites Standard von 4 Pixeln pro Kachel zurück, nicht den 3D-Kamera-Zoom. " +
-                 "Das Bild dient nur zur Eingabegeometrie, nicht zur Positionserkennung. " +
-                 "Nach Bestätigung wird RuneLite in den Vordergrund geholt und die echte Windows-Maus " +
-                 "für kurze, einzeln überwachte Spielklicks bewegt. Andere Programme dürfen den Fokus " +
-                 "nicht übernehmen; andernfalls stoppt die Automatik.",
+            Text="Der Spielerpunkt ist der KLEINE WEISSE PUNKT mittig auf der Minimap – " +
+                 "kein gelbes Kartenicon. Die roten Linien deines Originalbildes kreuzen sich bei " +
+                 "x≈640/y≈110; im aktuell 773 Pixel breiten RuneLite-Bild bei x≈645/y≈111. " +
+                 "Der gelbe Kreis muss genau den WEISSEN PUNKT umschließen. " +
+                 "Ohne sichtbaren weißen Punkt kann der Test nicht starten. " +
+                 "Minimap muss Norden oben zeigen. Der MINIMAP-Zoom wird per Rechtsklick " +
+                 "auf 4 Pixel pro Kachel zurückgesetzt; die 3D-Kamera bleibt unverändert. " +
+                 "Nach Zustimmung erfolgt eine kontrollierte Eingabe nur im Vordergrund-RuneLite.",
             Font=new("Segoe UI",10,FontStyle.Bold)},0,0);
         preview.Dock=DockStyle.Fill;preview.SizeMode=PictureBoxSizeMode.Zoom;
         preview.Image=screenshot;preview.BackColor=Color.Black;
@@ -58,8 +56,10 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
             if(x<0||y<0||x>=screenshot.Width||y>=screenshot.Height)return;
             selected=new(x,y);selectedAutomatically=false;
             hint.Text=$"Manuell gewählt: x={x}, y={y} · " +
-                (ValidSelection()?"Mittelpunkt plausibel – bitte prüfen":
-                    "nicht der feste Spielerpunkt – bitte x=665, y=110 prüfen");
+                (ValidSelection()?"WEISSER Spielerpunkt bestätigt":
+                    verifiedFixedCenter is Point point?
+                        $"NICHT DER WEISSE SPIELERPUNKT – bitte bei x≈{point.X}, y≈{point.Y} klicken":
+                        "KEIN WEISSER SPIELERPUNKT – bitte dort anklicken");
             hint.ForeColor=ValidSelection()?Color.LightYellow:Color.OrangeRed;
             accept.Enabled=CanAccept();preview.Invalidate();
         };
@@ -76,16 +76,17 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
             e.Graphics.DrawLine(pen,x+5,y,x+13,y);
         };
         layout.Controls.Add(preview,0,1);
+        if(RuneLiteMinimapMarker.TryFixedCenter(screenshot.Size,out var expected,out _))
+            verifiedFixedCenter=expected;
         bool foundAutomatically=RuneLiteMinimapMarker.TryLocate(screenshot,out var found,out var detected);
         markerDiagnostic=detected;
         if(foundAutomatically)
         {
-            verifiedFixedCenter=found;
             selected=found;selectedAutomatically=true;
         }
         hint.AutoSize=true;hint.Text=foundAutomatically?
-            $"Fester Minimap-Spielerpunkt: x={found.X}, y={found.Y} · gelben Kreis prüfen.":
-            "Unbekanntes RuneLite-Layout – bitte den echten Minimap-Spielerpunkt manuell anklicken.";
+            $"Weißer Minimap-Spielerpunkt bei x={found.X}, y={found.Y} bestätigt · gelben Kreis prüfen.":
+            "Weißer Spielerpunkt nicht sicher erkannt – bitte echten WEISSEN PUNKT manuell anklicken.";
         hint.ForeColor=Color.LightYellow;
         var hintRow=new FlowLayoutPanel{Dock=DockStyle.Top,Height=28};hintRow.Controls.Add(hint);
         var controls=new FlowLayoutPanel{Dock=DockStyle.Fill,WrapContents=true};
@@ -121,7 +122,8 @@ internal sealed class RuneLiteMinimapSetupDialog:Form
     private bool ValidSelection()=>selected is Point point&&
         RuneLiteAutoWalk.ValidGeometry(new(new IntPtr(1),screenshot.Size,point,(double)pixelsPerTile.Value))&&
         (verifiedFixedCenter is Point anchor?
-            RuneLiteMinimapMarker.WithinVerifiedCentre(point,anchor):
+            RuneLiteMinimapMarker.WithinVerifiedCentre(point,anchor)&&
+            IsWhitePlayerMark(screenshot,point):
             point.Y is >=70 and <=165&&point.X>=screenshot.Width-360&&
             point.X<=screenshot.Width-60&&IsWhitePlayerMark(screenshot,point));
     private bool CanAccept()=>north.Checked&&foregroundConsent.Checked&&ValidSelection();

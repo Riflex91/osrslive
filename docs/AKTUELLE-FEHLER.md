@@ -1,4 +1,23 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.26
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.27
+
+**1.8.27 – schwerer Koordinatenfehler in 1.8.26:** Der gelbe
+Kalibrierungsring traf den kleinen weißen Spielerpunkt **erneut nicht**.
+Das ursprüngliche Kreuz der roten Linien liegt bei (640,110), nicht
+bei den zuvor angegebenen (665,137). Der derzeitige 773×534-Client
+benötigt etwa (645,111), nicht (665,110). Der 1.8.26-Live-Log vom
+28.10.2026, 20:19, bestätigt den falschen Mittelpunkt x666/y114
+und einen nicht zur A*-Route passenden Tile-Fortschritt nach dem
+ersten Klick (`UNEXPECTED_API_TILE`). 1.8.27 korrigiert die
+Layoutgeometrie auf `width-128,111`, fordert für automatische und
+manuelle Kalibrierung den sichtbaren **weißen Spielerpunkt** und
+begrenzt manuelle Abweichungen auf 3 Pixel. Das Programm darf mit
+einer leeren/falsch ausgerichteten Minimap **keine neuen
+Autowalk-Klicks** senden. Der Minimap-Rechtsklickreset bleibt; der
+tatsächliche Zoomwert bleibt mangels Exporter-Feld unverifiziert.
+Ein erneuter **Spieltest** ist zwingend erforderlich, bevor die
+Bewegungsprojektion als live-geprüft gelten darf.
+
+Die folgende 1.8.26-Beschreibung ist historisch widerlegt.
 
 **1.8.26 – Live-Fehler 1.8.25:** Der automatische 15px-Ring-
 Detektor sah einen Kartenmarker bei x679/y138 als Spielerpunkt.
