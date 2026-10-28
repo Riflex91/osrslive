@@ -1,4 +1,55 @@
-# OSRS Play 1.8.30 – Wegpunkt-Wiederaufnahme, Startpositions-Vorschau und Eingabeschutz
+# OSRS Play 1.8.31 – Zielradius-Abschluss und beobachtete RuneLite-Umwege
+
+## 1.8.31: Realer 1.8.30-Test mit mehreren erfolgreichen Gehstrecken
+
+Der 800-Zeilen-Live-Log vom 28.10.2026 (21:40–21:42 Uhr)
+belegt: **v1.8.30 wurde automatisch installiert**, der
+Minimap-Spielerpunkt `(645,111)` stimmte, der optionale
+Vordergrund-Eingabeschutz war aktiv und hat bei der zweiten
+Sitzung **zehn physische Mausereignisse** herausgefiltert.
+`Esc` beendete diese Sitzung und gab die Hooks frei.
+Der erste Gehtest nach Lumbridge setzte sieben echte
+SendInput-Klicks ab, mehrere Wegpunkte wurden vom Plugin
+bestätigt. Die neuen **zweimaligen** `WAYPOINT_QUIET_REPLAN`-
+Wiederaufnahmen lösten beide einen weiteren bestätigten
+Gehfortschritt aus; anschließend war nur noch **ein**
+Kollisionsschritt bis zum Zielradius übrig. Der bisherige
+allgemeine Projektor verweigerte genau diesen letzten
+Schritt, weil die Projektion 4–6 statt mindestens 7 Pixel
+vom weißen Minimap-Spielerpunkt entfernt ist:
+`WAYPOINT_PROJECTION_UNAVAILABLE`.
+
+**Fix:** Nur wenn die frisch berechnete Kollisionsroute
+**genau einen benachbarten, erlaubten Schritt** enthält, der
+den ausgewählten Zielradius erreicht, darf dieser 4–6-Pixel-
+Minimap-Klick jetzt ausgeführt werden. Es werden keine
+zusätzlichen oder geratenen Kacheln hinter dem Ziel angeklickt.
+Zielerfolg erfordert weiterhin ein neues Plugin-Positionsereignis.
+
+Ein späterer Live-Test zeigte zusätzlich, warum manche
+Routen trotz korrekter Pluginposition scheitern: Nach dem
+bestätigten Wegpunkt `(3257,3227)` wurde der nächste Klick
+nach `(3249,3226)` gesendet, RuneLite lief zunächst aber
+über `(3258,3229)`, `(3257,3230)`, `(3253,3230)` und
+`(3251,3229)` – ein echter Umweg gegenüber dem öffentlichen
+Kollisionspräfix. 1.8.30 stoppte bereits beim **ersten**
+Umweg-Tile. 1.8.31 darf nach einem **zuvor bestätigten
+Wegpunkt** maximal fünf örtlich begrenzte Plugin-Kacheln
+als `TRANSITION_DETOUR_OBSERVED` nur beobachten. Das
+autorisiert **keinen weiteren Klick** und verlängert den
+9-Sekunden-Timeout nicht. Erst die später wirklich per
+Plugin bestätigte Wegpunktposition erlaubt eine neue Route;
+zu große Sprünge, entfernte Abweichungen und ein anhaltender
+Umweg bleiben Fehler. Beide Änderungen enthalten
+synthetische Negativ- und Livepfad-Regressionstests.
+
+**Unverändert offen:** Der Plugin-Hub-Exporter aktualisiert
+die Startposition nur bei einem neuen Tile-Ereignis. Eine
+alte Position bleibt `UNBESTÄTIGT`; echte Hintergrund-
+Spielklicks sind mit Windows-`SendInput` nicht möglich.
+Ein vollständiger Live-Zielabschluss mit v1.8.31 ist noch
+ausstehend. Fehler kopieren weiter die gesamte Logdatei und
+zeigen die rote Verbesserungsaufforderung.
 
 ## 1.8.30: Neue Liveprobe von 1.8.29, zwei weitere Tests vorbereitet
 

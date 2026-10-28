@@ -1,4 +1,82 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.30
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.31
+
+## 1.8.31 – Tatsächlicher 1.8.30-Erfolg und zwei neue Stopper
+
+Neuer 800-Zeilen-Live-Log vom 28.10.2026, 21:40:05–21:42:26:
+
+1. `build_run=40764663189`, `version=1.8.30` und
+   `UPDATER PREVIOUS_UPDATE` bestätigen den **wirklichen
+   automatischen Upgradevorgang**. `ALREADY_CURRENT` bestätigt
+   danach das Release-Manifest. Am Start lag lediglich ein
+   **1496 Sekunden** alter `position.json`-Export vor.
+   `HISTORICAL_POSITION_PREVIEW` zeigte `(3235,3182)` nur
+   `UNBESTÄTIGT`; ein frisches Plugin-Tile kam erst nach
+   manueller Bewegung. Kein Fehler der Start-UI, sondern
+   fehlender Exporter-Heartbeat/On-Login-Snapshot.
+2. Die Eingabeschutz-Option war dreimal aktiv. Beim zweiten
+   Lauf werden `suppressed_physical_mouse_events=10`,
+   `suppressed_physical_keyboard_events=0` und
+   `USER_ESCAPE_EMERGENCY_STOP` mit `RELEASED` protokolliert.
+   Das belegt auf dieser echten Windows-Maschine die
+   Hookfreigabe und abgefangene Mausereignisse, nicht ein
+   generell unüberwindbares OS-Level-Sicherheitsversprechen.
+3. **Erster AutoWalk nach Lumbridge:** sieben aufeinander
+   folgende `SendInput`-Klicks, viele echte Plugin-Meldungen,
+   bestätigte Wegpunkte, dann zwei erfolgreiche
+   `WAYPOINT_QUIET_REPLAN`-Auslöser (21:40:43 und 21:40:49)
+   mit jeweils neuem Klick und weiterem Wegfortschritt.
+   Um 21:40:54 stand der Spieler laut Plugin bei
+   `(3227,3219)`, und der frische A*-Pfad enthielt nur noch
+   `(3226,3218)` als letzten Schritt in Lumbridges
+   Zielradius4 um `(3222,3218)`. Der allgemeine Klickprojektor
+   verlangte mindestens sieben Pixel Radius, die diagonal
+   benachbarte Tile liegt bei 4 px/Tile aber nur 5,7 Pixel
+   vom weißen Minimap-Punkt. Der Fehler war daher
+   `WAYPOINT_PROJECTION_UNAVAILABLE`, obwohl ein einziger
+   erlaubter Schritt aus dem echten Kollision-Pfad übrig war.
+   1.8.31 führt `ProjectFinalGoalStep` ein: nur bei **genau
+   einer** direkten, transportfreien Kollision-Tile, die den
+   gewählten Zielradius erreicht, darf der verifizierte
+   4–6-Pixel-Klick gesendet werden. Kein Durchklicken über
+   Ziel oder unbekannte Kollision hinaus, kein Erfolg ohne
+   neues API-Event. Vollständige Zielankunft weiterhin offen.
+4. **Zweiter Test Richtung Varrock:** zwei Klicks, erster
+   Wegpunkt bestätigt, zweiter Folgeklick, dann eine längere
+   Pause und bewusster `Esc`-Stopp. Kein neuer Fix für diesen
+   absichtlich gestoppten Test, keine Simulation eines Fehlers.
+5. **Dritter Test Richtung Lumbridge:** erster Wegpunkt
+   `(3257,3227)` bestätigt, Klick 2 nach `(3249,3226)`
+   mit Präfix `3256,3226;...;3249,3226` wurde gesendet.
+   Das nächste Tile `(3258,3229)` war drei Kacheln vom
+   Präfix entfernt und zunächst eine Kachel **weiter** vom
+   Ziel; 1.8.30 stoppte `UNEXPECTED_API_TILE` sofort.
+   Aber weitere echte Events nach dem Stop belegen, dass der
+   schon gesendete Spielklick weiterlief: `(3257,3230)`,
+   `(3253,3230)`, `(3251,3229)` – offensichtlich nimmt
+   RuneLite einen Umweg, den die öffentliche A*-Kollision
+   nicht exakt vorhersagte. 1.8.31 unterscheidet daher
+   `TRANSITION_DETOUR_OBSERVED`: Nur nach einem zuvor per
+   Plugin bestätigten Wegpunkt, für maximal fünf
+   räumlich (bis vier Prefix-Tiles und höchstens acht vom
+   Klickstart) sowie zeitlich (maximal vier Sekunden nach
+   Klick) begrenzte Plugin-Events, ohne weitere Klicks.
+   Keine Akzeptanz als Zielerfolg; höchstens ein späterer
+   tatsächlich bestätigter Waypoint erlaubt neue Eingaben.
+   9-Sekunden-Timeout bleibt unverändert. Falsche Ebene,
+   Sprung >4, weit entfernter oder anhaltender Umweg stoppt.
+
+Beide v1.8.31-Fixes sind mit positiven und negativen
+synthetischen Regressionstests nach exakt diesen neuen
+Spielkoordinaten verknüpft. Die bestehende Maximalzahl
+von zwei vorzeitigen Replans und die strenge
+`RUNELITE_FOREGROUND_LOST`-Sperre bleiben.
+
+**Offen und ausdrücklich nicht behauptet:**
+Echte Hintergrund-Autowalk-Klicks und aktualisierte
+Weltkoordinaten beim reinen App-/Loginstart ohne neues
+Plugin-Event. Diese erfordern eine zusätzliche geprüfte
+RuneLite-Schnittstelle. Keine Spielspeicheranalyse,
+keine Screenshot-basierte Positionsfreigabe.
 
 ## 1.8.30 – 1.8.29-Live-Beweis und Grenzen von Startup, Hooks und Hintergrund
 
