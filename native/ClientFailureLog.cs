@@ -168,6 +168,7 @@ internal static class FailureLogPolicy
         finally{if(File.Exists(failedFile))File.Delete(failedFile);}
         if(!FailureLogPolicy.RuneLiteBlocked("GRID_INFO_NOT_READABLE")||
            FailureLogPolicy.RuneLiteBlocked("WAITING_FOR_SECOND_FRAME")||
+           FailureLogPolicy.RuneLiteBlocked("WAITING_FOR_EXPORT_FRAME")||
            FailureLogPolicy.RuneLiteBlocked("PAUSED")||
            !FailureLogPolicy.LegacyFailure(new(1,DateTimeOffset.Now,0,Severity.WARN,"NAV","BLOCKED_MAP",""))||
            FailureLogPolicy.LegacyFailure(new(2,DateTimeOffset.Now,0,Severity.INFO,"CORE","STARTED","")))

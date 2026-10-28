@@ -1,4 +1,32 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.17
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.18
+
+**1.8.18 – 1.8.17-RuneLite-Plugin-Hub-Integration live bestätigt:**
+Das echte Nutzerprotokoll vom 28.10.2026 um 17:12:48–17:13:29 Uhr
+Europe/Berlin dokumentiert die automatische Installation der 1.8.17
+(`PREVIOUS_UPDATE`), erfolgreiche release-/manifest-Prüfung
+(`ALREADY_CURRENT`), 36 direkte API-Lesungen und 30 zweifach bestätigte
+Positionsproben von 52; zehn echte Tilewechsel sind im Motion-Log.
+Bei älteren Positionsexporten kommen zusätzliche OCR-/Pixelprüfungen
+zum Einsatz und wurden fünfmal erfolgreich bestätigt. Viermal
+erschien kurzzeitig `GRID_INFO_NOT_READABLE`, weil der offizielle
+Exporter seine Kachel bereits gewechselt hatte, das angeforderte
+WGC-Bild aber noch den früheren Zustand zeigen konnte.
+
+1.8.18 gibt in genau diesem Fall den benannten Wartezustand
+`WAITING_FOR_EXPORT_FRAME` aus, setzt die bisherige Zweibildprüfung
+zurück und lässt die OCR des nachweislich veralteten Bildes weg.
+Live-Diagnose und Release-Hinweis bleiben strikt getrennt:
+keine Positionsfreigabe für unverifizierte Zeitstempel, keine
+automatische Spieleingabe. Neu hinzu kommen wählbare F2P-Luftlinien-
+Ziele aus bestätigter Position und lokal gehaltene, schema-/zeit-
+geprüfte Aggregatübersichten der neun offiziell exportierten
+JSON-Dateien. Ältere Bank-/Questdateien dürfen nicht als frische
+Spielzustände ausgegeben werden. Kein persönlicher Rohdatenexport
+in Log/Clipboard. Der erste Live-Test von 1.8.18 steht aus.
+
+**Weiterhin offen:** Kollisionen und Navigationstransporte wurden im
+RuneLite-Companion noch nicht mit live Spielerpositionen verknüpft;
+kein laufendes Pathfinding und keine RuneLite-Spieleingaben.
 
 **1.8.17 – bestätigter OCR-Ausfall trotz erfolgreichem 1.8.16-Fix:**
 Das echte 1.8.16-Live-Protokoll bestätigt siebenmal die neue
