@@ -531,7 +531,7 @@ internal static class RuneLitePixelGridReaderTests
             Require(!RuneLitePixelGridReader.CorroborateClientExport(wrongChunk,
                     exportedTile,out _),
                 "a full mismatching Chunk ID must veto the export even if other Chunk rows are damaged");
-            var wrongPlane=exportedTile with{Tile:new WorldTile(3155,3186,2)};
+            var wrongPlane=exportedTile with{Tile=new WorldTile(3155,3186,2)};
             Require(RuneLitePixelGridReader.Read(stoppedBitmap,
                     Array.Empty<RuneLitePixelGridReader.Observation>(),out _,
                     clientExport:wrongPlane) is null,
