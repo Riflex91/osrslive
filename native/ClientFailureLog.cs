@@ -113,7 +113,8 @@ internal static class FailureLogPolicy
     internal static bool RuneLiteBlocked(string status)=>status is
         "GRID_INFO_NOT_READABLE" or "STALE_FRAME" or "RUNELITE_NOT_RUNNING" or
         "CAPTURE_UNAVAILABLE" or "OCR_LANGUAGE_UNAVAILABLE" or
-        "MULTIPLE_RUNELITE_CLIENTS" or "INTERNAL_ERROR";
+        "MULTIPLE_RUNELITE_CLIENTS" or "PLUGIN_EXPORT_UNAVAILABLE" or
+        "PLUGIN_EXPORT_INVALID" or "INTERNAL_ERROR";
 
     internal static bool LegacyFailure(LogEvent ev)
     {

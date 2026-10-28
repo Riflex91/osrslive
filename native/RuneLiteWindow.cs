@@ -1,12 +1,12 @@
 using System.Diagnostics;
-using System.Text.RegularExpressions;
 
 namespace OSRSLiveDiagnostics;
 
 internal sealed class RuneLiteWindow:Form
 {
-    private readonly RuneLitePositionSource source=new();
+    private readonly RuneLiteApiPositionSource source=new();
     private readonly RuneLiteMotionTrace movement=new();
+    private readonly SemaphoreSlim routingSemaphore=new(1,1);
     private readonly Diagnostics log=new();
     private readonly ClientFailureLog failureLog;
     private readonly Label status=new(),position=new(),detail=new(),failureBanner=new(),updateStatus=new();
@@ -26,7 +26,12 @@ internal sealed class RuneLiteWindow:Form
     private DateTimeOffset lastConfirmedUtc=DateTimeOffset.UtcNow;
     private DateTimeOffset lastExportSummaryLoggedUtc;
     private WorldTile? lastVerifiedTile;
+    private DateTimeOffset lastMotionEventUtc;
     private string latestPositionDescription="Noch keine bestätigte Position";
+    private string routeDescription="Route: Ziel wählen und neue RuneLite-Position abwarten.";
+    private Task<WorldMapData>? routeLoad;
+    private WorldMapData? routeData;
+    private long routeGeneration;
 
     internal RuneLiteWindow()
     {
@@ -69,7 +74,7 @@ internal sealed class RuneLiteWindow:Form
             log.Add(Severity.INFO,"RUNELITE_NAV","TARGET_SELECTED",
                 $"target={(selected is null?"NONE":selected.Id.Replace(' ','_'))} "+
                 "advice_only=true movement_input=false collision_route_calculated=false");
-            UpdateDetailText();RefreshLogPreview();
+            _=RefreshRouteAsync();UpdateDetailText();RefreshLogPreview();
         };
         var launcher=new Button{Text="Jagex Launcher öffnen",AutoSize=true};
         launcher.Click+=(_,_)=>
@@ -87,10 +92,13 @@ internal sealed class RuneLiteWindow:Form
         var pause=new Button{Text="Verbindung pausieren",AutoSize=true};
         pause.Click+=(_,_)=>
         {
-            paused=!paused;generation++;source.Reset();movement.Reset();position.Text="Position unbekannt";
+            paused=!paused;generation++;source.Reset();movement.Reset();
+            lastMotionEventUtc=default;lastRouteEventUtc=default;
+            position.Text="Position unbekannt";
             lastVerifiedTile=null;latestPositionDescription="Verbindung pausiert";
+            routeGeneration++;routeDescription="Route: Verbindung pausiert.";
             if(!paused)lastConfirmedUtc=DateTimeOffset.UtcNow;
-            status.Text=paused?"Verbindung pausiert":"Warte auf neue Positionsbilder";
+            status.Text=paused?"Verbindung pausiert":"Warte auf neues RuneLite-Positionsereignis";
             log.Add(Severity.INFO,"RUNELITE",paused?"USER_PAUSED":"USER_RESUMED",
                 $"generation={generation} old_position_discarded=true");
             pause.Text=paused?"Verbindung fortsetzen":"Verbindung pausieren";
@@ -128,9 +136,9 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.INFO,"CORE","STARTED",
             $"version={Diagnostics.Version} {BuildIdentity.Log} backend=RUNELITE_COMPANION profile_expected=auto");
         log.Add(Severity.INFO,"CORE","CAPABILITIES",
-            "read_only=true automated_game_actions=false sources=PLUGIN_HUB_POSITION_EXPORT,WORLD_LOCATION_GRID_INFO "+
-            "plugin_optional=true plugin_install_manual=true fresh_frames_required=2 "+
-            "navigation=CONFIRMED_COORDINATE_GUIDANCE_ONLY extra_exports=LOCAL_SUMMARY_ONLY "+
+            "read_only=true automated_game_actions=false source=PLUGIN_HUB_POSITION_EVENTS "+
+            "plugin_required=true plugin_install_manual=true screen_captures_for_position=false "+
+            "navigation=API_EVENT_COLLISION_ROUTE_GUIDANCE extra_exports=LOCAL_SUMMARY_ONLY "+
             "no_memory_access=true no_screenshots_written=true");
         log.Add(Severity.INFO,"CORE","PRIVACY",
             "credentials_and_authentication_handled_by_jagex=true local_log_only=true clipboard_on_failure=true");
@@ -223,17 +231,9 @@ internal sealed class RuneLiteWindow:Form
         RuneLitePositionState state;
         try
         {
-            int pass=0;
             state=paused?new("PAUSED",Diagnostic:"user_requested_pause=true"):
-                await source.ReadAsync(closing.Token,rows=>
-                {
-                    pass++;
-                    string variant=pass switch{1=>"nearest_2x",2=>"nearest_3x",3=>"bicubic_4x",_=>"contrast_4x"};
-                    var gridRows=rows.Where(r=>Regex.IsMatch(r,@"^(Tile|Chunk\s+ID|Region\s+ID)",RegexOptions.IgnoreCase)).Take(4).ToArray();
-                    log.Add(Severity.DEBUG,"RUNELITE_OCR","PASS",
-                        $"sample={sequence} variant={variant} grid_rows={gridRows.Length} "+
-                        $"exact_panel_valid={RuneLiteGridReader.Parse(rows) is not null} text={string.Join(" || ",gridRows)}");
-                },details=>log.Add(Severity.DEBUG,"RUNELITE_PIXEL","VERIFICATION",
+                await source.ReadAsync(closing.Token,pixelDiagnostic:details=>
+                    log.Add(Severity.DEBUG,"RUNELITE_API","EVENT_VALIDATION",
                     $"sample={sequence} {details}"));
         }
         catch(OperationCanceledException){return;}
@@ -256,26 +256,32 @@ internal sealed class RuneLiteWindow:Form
             log.Add(Severity.INFO,"RUNELITE_EXPORTS","SUMMARY_SCAN",
                 $"sample={sequence} {source.AdditionalExports.Diagnostic}");
         }
-        // Movement telemetry is strictly downstream of the pixel and
-        // independent-frame confirmation. No unconfirmed OCR is tracked.
+        // A RuneLite API event is counted exactly once. Re-reading an
+        // unchanged position.json must not create synthetic motion frames.
         if(state.Tile is WorldTile confirmedTile)
         {
-            string? observation=movement.Observe(confirmedTile,state.ObservedUtc,sequence);
+            string? observation=null;
+            if(state.ObservedUtc>lastMotionEventUtc)
+            {
+                observation=movement.Observe(confirmedTile,state.ObservedUtc,sequence);
+                lastMotionEventUtc=state.ObservedUtc;
+            }
             if(observation is not null)
                 log.Add(Severity.INFO,"RUNELITE_MOTION","OBSERVATION",observation);
             var guidance=RuneLiteNavigationAdvisor.FromConfirmed(confirmedTile,SelectedDestination());
             if(guidance is not null&&observation is not null)
-                log.Add(Severity.INFO,"RUNELITE_NAV","VERIFIED_TILE_GUIDANCE",
+                log.Add(Severity.INFO,"RUNELITE_NAV","API_EVENT_GUIDANCE",
                     $"sample={sequence} {guidance.Diagnostic}");
         }
         else if(state.Status is "RUNELITE_NOT_RUNNING" or "MULTIPLE_RUNELITE_CLIENTS" or
-            "CAPTURE_UNAVAILABLE" or "STALE_FRAME" or "INTERNAL_ERROR" or "OCR_LANGUAGE_UNAVAILABLE")
+            "PLUGIN_EXPORT_UNAVAILABLE" or "PLUGIN_EXPORT_INVALID" or "INTERNAL_ERROR")
         {
             if(movement.Statistics.ConfirmedFrames>0)
             {
                 log.Add(Severity.INFO,"RUNELITE_MOTION","RESET",
-                    $"reason={state.Status} verified_position_history_discarded=true");
+                    $"reason={state.Status} api_event_history_discarded=true");
                 movement.Reset();
+                lastMotionEventUtc=default;
             }
         }
         if(lastStatus!=state.Status)
@@ -285,7 +291,8 @@ internal sealed class RuneLiteWindow:Form
             lastStatus=state.Status;blockedSince=DateTimeOffset.UtcNow;
         }
         if(state.Tile is not null)lastConfirmedUtc=DateTimeOffset.UtcNow;
-        else if(!paused&&DateTimeOffset.UtcNow-lastConfirmedUtc>=TimeSpan.FromSeconds(10))
+        else if(!paused&&state.Status!="API_WAITING_FOR_NEW_EVENT"&&
+            DateTimeOffset.UtcNow-lastConfirmedUtc>=TimeSpan.FromSeconds(10))
             failureLog.ReportFailure("RUNELITE","POSITION_NOT_CONFIRMED_TIMEOUT",
                 $"sample={sequence} latest_status={state.Status} "+
                 $"unconfirmed_s={(DateTimeOffset.UtcNow-lastConfirmedUtc).TotalSeconds:0} {state.Diagnostic}");
@@ -299,7 +306,11 @@ internal sealed class RuneLiteWindow:Form
 
         status.Text=state.Status switch
         {
-            "OVERLAY_CONFIRMED"=>"RuneLite-Spielerposition in zwei Aufnahmen bestätigt",
+            "API_POSITION_UPDATED"=>"RuneLite-API · neue Position empfangen",
+            "API_POSITION_LAST_KNOWN"=>"RuneLite-API · letzter Positionsstand (kein Heartbeat)",
+            "API_WAITING_FOR_NEW_EVENT"=>"RuneLite-API · bitte im Spiel eine Kachel bewegen",
+            "PLUGIN_EXPORT_UNAVAILABLE"=>"RuneLite-Plugin-Export nicht erreichbar",
+            "PLUGIN_EXPORT_INVALID"=>"RuneLite-Positionsereignis ungültig",
             "PAUSED"=>"Verbindung pausiert",
             "GRID_INFO_NOT_READABLE"=>"World Location · Grid Info konnte nicht gelesen werden",
             "WAITING_FOR_EXPORT_FRAME"=>"Neuer Positions-Export erkannt · warte auf aktuelles RuneLite-Bild",
@@ -313,21 +324,94 @@ internal sealed class RuneLiteWindow:Form
             _=>"Positionsdaten konnten nicht bestätigt werden"
         };
         position.Text=state.Tile is WorldTile p?$"X {p.X}    Y {p.Y}    Ebene {p.Plane}":"Position unbekannt";
+        if(state.Tile is null&&lastVerifiedTile is not null)
+        {
+            routeGeneration++;lastRouteEventUtc=default;
+            routeDescription="Route: Position aus dieser Sitzung nicht verfügbar.";
+        }
         lastVerifiedTile=state.Tile;
         latestPositionDescription=state.Tile is not null?
-            "Quelle: "+(state.Diagnostic.Contains("source=PLUGIN_HUB_EXPORT",StringComparison.Ordinal)?
-                "offizielle RuneLite-API":"aktuelle Bildschirm- und Pixelprüfung")+
-            " · Zweibildbestätigung; keine automatischen Spieleingaben.":
-            state.Status=="WAITING_FOR_EXPORT_FRAME"?
-                "Neuer Tile-Export ist aktueller als das Bild · warte ohne Positionsschätzung.":
-                "Offizielles RuneLite über Jagex Launcher; Plugin Hub: OSRS Toolkit Exporter aktivieren.";
+            (state.Status=="API_POSITION_UPDATED"?
+                "Quelle: offizielles RuneLite-API-Ereignis · kürzlich aktualisiert.":
+                "Quelle: letzter RuneLite-API-Stand · Plugin meldet im Stillstand keine Heartbeats.")+
+            " Keine Screenshotprüfung und keine Spieleingaben.":
+            state.Status=="API_WAITING_FOR_NEW_EVENT"?
+                "Export stammt möglicherweise aus einer früheren Sitzung · einmal im Spiel bewegen.":
+                "RuneLite über Jagex Launcher starten · Plugin Hub: OSRS Toolkit Exporter aktivieren.";
         UpdateDetailText();
+        if(state.Tile is not null&&state.ObservedUtc!=default&&
+            state.ObservedUtc==lastMotionEventUtc&&
+            state.Status=="API_POSITION_UPDATED"&&
+            lastRouteEventUtc!=state.ObservedUtc)
+        {
+            lastRouteEventUtc=state.ObservedUtc;
+            _=RefreshRouteAsync();
+        }
         UpdateFailureBanner();RefreshLogPreview();
     }
 
     private NavigationDestination? SelectedDestination()=>
         navigationTarget.SelectedIndex is >0&&navigationTarget.SelectedIndex<=navigationChoices.Length?
             navigationChoices[navigationTarget.SelectedIndex-1]:null;
+
+    private DateTimeOffset lastRouteEventUtc;
+
+    private async Task RefreshRouteAsync()
+    {
+        long request=++routeGeneration;
+        var destination=SelectedDestination();
+        var tile=lastVerifiedTile;
+        if(paused||destination is null||tile is null)
+        {
+            routeDescription=destination is null?"Route: Ziel auswählen.":
+                "Route: Warte auf ein neues RuneLite-API-Positionsereignis.";
+            UpdateDetailText();
+            return;
+        }
+        routeDescription="Route: lade geprüfte Kollisionsdaten und plane Weg …";
+        UpdateDetailText();
+        try
+        {
+            routeLoad??=WorldMapData.LoadRoutingOnly(s=>
+                log.Add(Severity.INFO,"RUNELITE_ROUTE","MAP",s),closing.Token);
+            var data=await routeLoad;
+            if(IsDisposed||closing.IsCancellationRequested||request!=routeGeneration)return;
+            routeData=data;
+            await routingSemaphore.WaitAsync(closing.Token);
+            PathStep[]? path;
+            try
+            {
+                path=await Task.Run(()=>data.FindPath(tile,destination.Tile,
+                    destination.Radius,closing.Token),closing.Token);
+            }
+            finally{routingSemaphore.Release();}
+            if(IsDisposed||closing.IsCancellationRequested||request!=routeGeneration)return;
+            if(path is null)
+            {
+                routeDescription="Route: Kein geprüfter Weg in den verfügbaren F2P-Kollisionsdaten.";
+                log.Add(Severity.WARN,"RUNELITE_ROUTE","NO_ROUTE",
+                    $"target={destination.Id.Replace(' ','_')} from={tile.X},{tile.Y},{tile.Plane} "+
+                    "manual_walking_only=true no_unverified_shortcut=true");
+            }
+            else
+            {
+                var guide=RuneLiteRouteCoach.FromPath(tile,destination,path);
+                routeDescription=guide.Display;
+                log.Add(Severity.INFO,"RUNELITE_ROUTE","ROUTE_RECALCULATED",
+                    guide.Diagnostic+" source=PLUGIN_HUB_EXPORT");
+            }
+            UpdateDetailText();RefreshLogPreview();
+        }
+        catch(OperationCanceledException) when(closing.IsCancellationRequested){}
+        catch(Exception ex)
+        {
+            if(IsDisposed||closing.IsCancellationRequested||request!=routeGeneration)return;
+            routeLoad=null;routeDescription="Route: geprüfte Kartendaten derzeit nicht verfügbar.";
+            failureLog.ReportFailure("RUNELITE_ROUTE","ROUTE_DATA_UNAVAILABLE",
+                ExceptionDiagnostic.Describe(ex));
+            UpdateDetailText();UpdateFailureBanner();RefreshLogPreview();
+        }
+    }
 
     private void UpdateDetailText()
     {
@@ -340,6 +424,7 @@ internal sealed class RuneLiteWindow:Form
             .Select(e=>e.Display+(e.Recent?"":" (älterer Stand)"));
         string others=string.Join(" · ",summaries);
         detail.Text=latestPositionDescription+Environment.NewLine+navigation+Environment.NewLine+
+            routeDescription+Environment.NewLine+
             (others.Length>0?"Lokale Exportdaten: "+others:
                 "Lokale Exportdaten: noch keine verifizierten Zusatzdateien.");
     }
@@ -384,6 +469,7 @@ internal sealed class RuneLiteWindow:Form
         if(disposing)
         {
             closing.Cancel();timer.Dispose();healthTimer.Dispose();updateTimer.Dispose();
+            routeData?.Dispose();routingSemaphore.Dispose();
             log.Add(Severity.INFO,"CORE","SHUTDOWN","no_game_process_terminated=true");
             failureLog.Dispose();source.Dispose();closing.Dispose();
         }

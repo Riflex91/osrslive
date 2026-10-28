@@ -11,6 +11,18 @@ internal static class WorldNavigationDataTests
             using var timeout=new CancellationTokenSource(TimeSpan.FromMinutes(3));
             var data=await WorldMapData.Load(Console.WriteLine,timeout.Token);
             using var navigator=new WorldNavigator(data);
+            using(var readOnlyRoutes=await WorldMapData.LoadRoutingOnly(
+                Console.WriteLine,timeout.Token))
+            {
+                var first=readOnlyRoutes.FindPath(new(3222,3218),
+                    new(3164,3487),3,timeout.Token);
+                if(readOnlyRoutes.Regions.Count<30||
+                   readOnlyRoutes.References.Count!=0||
+                   readOnlyRoutes.MinimapReferences.Count!=0||
+                   first is null||first.Length==0)
+                    throw new Exception("RuneLite companion must load usable routing without image references");
+                Console.WriteLine($"RUNELITE ROUTING ONLY PASS: {first.Length} steps, no image downloads");
+            }
             foreach(var pair in new[]{(new WorldTile(3222,3218),new WorldTile(3164,3487)),
                 (new WorldTile(3092,3243),new WorldTile(3269,3167)),(new WorldTile(3185,3436),new WorldTile(3012,3356)),
                 (new WorldTile(3209,3220,2),new WorldTile(3092,3243))})

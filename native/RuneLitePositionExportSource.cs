@@ -99,9 +99,10 @@ internal static class RuneLitePositionExportSource
                 $"matching_title_dirs={bound} files={files} invalid={invalid} valid={candidates.Count} "+
                 "path_and_account_name_redacted=true fallback=SCREEN_OCR");
         var selected=candidates[0];
-        return (selected,$"stage=POSITION_EXPORT result={(selected.Fresh?"FRESH_CLIENT_COORDINATE":"STALE_REQUIRES_LIVE_SCREEN_CROSSCHECK")} "+
+        return (selected,$"stage=POSITION_EXPORT result={(selected.Fresh?"FRESH_CLIENT_COORDINATE":"LAST_RECORDED_POSITION_EVENT")} "+
             $"file_age_ms={selected.AgeMs:0} matching_title_dirs={bound} "+
-            "source=OFFICIAL_RUNELITE_PLUGIN_HUB client_api=true player_name_redacted=true "+
+            "source=OFFICIAL_RUNELITE_PLUGIN_HUB client_api=true event_driven=true "+
+            "old_event_is_not_proof_of_current_login=true screen_fallback=false player_name_redacted=true "+
             "network_transfer=false game_input=false");
     }
 

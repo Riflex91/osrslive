@@ -1,7 +1,7 @@
 namespace OSRSLiveDiagnostics;
 
-// Read-only telemetry for confirmed positions. It consumes ONLY WorldTiles
-// that passed bitmap verification AND the separate fresh-frame gate.
+// Read-only telemetry for genuine RuneLite position-change events. The
+// current companion passes the exported event time, not a screenshot time.
 // Motion between samples is OBSERVED, never inferred as a traversed route:
 // the player can walk several tiles, teleport, or change planes in gaps.
 internal sealed class RuneLiteMotionTrace
@@ -22,8 +22,8 @@ internal sealed class RuneLiteMotionTrace
 
     internal string? Observe(WorldTile tile,DateTimeOffset capturedAt,long sample)
     {
-        // The source normally enforces these prerequisites already. Keep
-        // this secondary ledger unable to accumulate untrusted timestamps.
+        // The source enforces player binding, event checksum and monotonicity.
+        // This ledger also refuses duplicate and reversed event timestamps.
         if(capturedAt==default||sample<=previousSample||
            (previous is not null&&capturedAt<=previousFrame))
             return $"result=REJECTED_NON_MONOTONIC sample={sample} "+
@@ -37,7 +37,7 @@ internal sealed class RuneLiteMotionTrace
         if(old is null)
             return $"result=FIRST_CONFIRMED sample={sample} "+
                 $"x={tile.X} y={tile.Y} plane={tile.Plane} "+
-                "source=TWO_FRAME_PIXEL_VERIFIED autonomous_input=false";
+                "source=RUNELITE_PLUGIN_API_EVENT autonomous_input=false";
 
         if(old==tile)
         {

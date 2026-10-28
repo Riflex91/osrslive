@@ -1,4 +1,50 @@
-# OSRS Play 1.8.19 – Exakte Wiedererkennung bereits bestätigter Grid-Pixel
+# OSRS Play 1.8.20 – RuneLite-API-Ereignisse und im Spiel prüfbare Routen
+
+## Neu in 1.8.20: Keine Bildschirmprüfung mehr für RuneLite-Positionen
+
+Die echte 1.8.19-Sitzung vom 28.10.2026, 17:56–17:58 Uhr,
+zeigte **44** direkte API-Auswertungen, aber **89** zu alten
+Positionsdateien, **91** Vierfach-OCR-Versuche und **46** nicht
+lesbare Grid-Info-Positionen. Das bestätigte den Architekturfehler:
+Der offizielle RuneLite-Plugin-Hub-Exporter schreibt `position.json`
+bei **jedem Kachelwechsel**, nicht beim Stillstehen. Das Alter des
+letzten Positionsereignisses ist kein Beweis für eine falsche Kachel.
+Die temporäre Pixel-Fingerprint-Umgehung aus 1.8.19 war im Live-Test
+keine zuverlässige Dauerlösung.
+
+Die RuneLite-GUI und der Positions-Probe-Modus benutzen deshalb jetzt
+`RuneLiteApiPositionSource` statt Bildschirm-Capture/OCR: exakt an den
+Fenstertitel gebundene, prüfsummengeprüfte JSON-Koordinaten werden
+unmittelbar als **API-Positionsereignis** verarbeitet. Ein neuer
+Zeitstempel löst genau ein Bewegungsereignis aus; die wiederholte
+Abfrage derselben Datei erfindet keine weiteren Bewegungen.
+Nach drei Sekunden Stillstand heißt der Zustand sichtbar
+`API_POSITION_LAST_KNOWN` und behält die zuletzt gemeldeten X/Y bei.
+Der Client nennt dies **nicht** einen unabhängigen Live-Beweis:
+Der unveränderte Drittanbieter-Exporter stellt noch keinen Heartbeat
+für Logout-/Plugin-Ausfall-Erkennung bereit. Beim Programmstart muss
+ein API-Ereignis höchstens zehn Sekunden alt sein; liegt nur eine
+alte Datei aus einer möglichen früheren RuneLite-Sitzung vor, zeigt
+OSRS Play `API_WAITING_FOR_NEW_EVENT`: **bitte im Spiel ein Feld
+bewegen**. Falsche Zuordnung, ungültige Prüfsummen oder nicht
+monotone Zeitstempel bleiben gesperrt. Keine Screenshots/OCR,
+keine Manipulation des Jagex-Launchers.
+
+**Nächste Entwicklung direkt im Spiel testen:** Wähle im RuneLite-
+Begleitfenster ein F2P-Navigationsziel und gehe manuell ein paar
+Kacheln. Zusätzlich zur Luftlinie lädt OSRS Play nur die an
+verifizierte Commits gebundenen öffentlichen Kollisionsdaten
+(keine Kartenbild-Downloads) und zeigt die Länge einer tatsächlich
+berechneten A*-Route sowie die **nächste begehbare Kachel**.
+Bei jeder echten Positionsänderung wird neu gerechnet, am Ziel wird
+der Zielradius gemeldet. Es werden weiterhin **keine Spielaktionen
+ausgeführt**; Türen/Treppen werden nur angezeigt. Nicht vorhandene
+Kollisionen oder Netzwerkfehler bleiben sichtbar, ohne einen Weg
+zu erfinden. Automatische Spielführung und ein direkter RuneLite-
+Heartbeat erfordern weitere Entwicklung bzw. eine Aktualisierung
+des separat installierten Plugin-Hub-Plugins.
+
+## Vorherige Version: 1.8.19 – Pixel-Fallback (durch API-Ereignisse ersetzt)
 
 ## Neu in 1.8.19: Stationäre Position ohne unbekannte Ziffern zu erraten
 

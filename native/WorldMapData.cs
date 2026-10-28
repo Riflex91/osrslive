@@ -100,6 +100,61 @@ internal sealed class WorldMapData:IDisposable
         }
         catch{data.Dispose();throw;}
     }
+
+    // A RuneLite companion only needs collision flags and unconditional
+    // transports for read-only walking instructions. Do not download the
+    // large image/reference-map set needed by visual localisation.
+    internal static async Task<WorldMapData> LoadRoutingOnly(Action<string> report,
+        CancellationToken ct)
+    {
+        var data=new WorldMapData();
+        try
+        {
+            using var client=new HttpClient{Timeout=TimeSpan.FromSeconds(20),
+                MaxResponseContentBufferSize=4*1024*1024};
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "OSRS-Play/1.8.20 (+https://github.com/Riflex91/osrslive)");
+            string root=Path.Combine(Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData),"OSRSPlay","maps");
+            async Task<byte[]> Get(string filename,string? expectedSha=null)
+            {
+                string relative=CollisionCommit+"/"+filename;
+                string path=Path.Combine(root,relative.Replace('/',
+                    Path.DirectorySeparatorChar));
+                if(File.Exists(path))
+                {
+                    var bytes=await File.ReadAllBytesAsync(path,ct);
+                    if(bytes.Length<4*1024*1024&&(expectedSha is null||
+                        Convert.ToHexString(SHA256.HashData(bytes))==expectedSha))
+                        return bytes;
+                }
+                string url=$"https://raw.githubusercontent.com/Skretzo/shortest-path/{CollisionCommit}/src/main/resources/{filename}";
+                using var response=await client.GetAsync(url,ct);
+                response.EnsureSuccessStatusCode();
+                var downloaded=await response.Content.ReadAsByteArrayAsync(ct);
+                if(expectedSha is not null&&
+                   Convert.ToHexString(SHA256.HashData(downloaded))!=expectedSha)
+                    throw new RoutineBlockedException("NAVIGATION_DATA_HASH_MISMATCH");
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                string temporary=path+"."+Guid.NewGuid().ToString("N")+".tmp";
+                try
+                {
+                    await File.WriteAllBytesAsync(temporary,downloaded,ct);
+                    File.Move(temporary,path,true);
+                }
+                finally{if(File.Exists(temporary))File.Delete(temporary);}
+                return downloaded;
+            }
+            report("ROUTING_COLLISION_LOADING");
+            data.ReadCollision(await Get("collision-map.zip",CollisionHash));
+            data.ReadTransports(System.Text.Encoding.UTF8.GetString(
+                await Get("transports/transports.tsv")));
+            report($"ROUTING_ONLY_READY regions={data.Regions.Count} transports={data.Transports.Count} "+
+                "reference_images=0 source=PINNED_PUBLIC_COLLISION_DATA");
+            return data;
+        }
+        catch{data.Dispose();throw;}
+    }
     internal void ReadCollision(byte[] bytes)
     {
         using var zip=new ZipArchive(new MemoryStream(bytes),ZipArchiveMode.Read);
