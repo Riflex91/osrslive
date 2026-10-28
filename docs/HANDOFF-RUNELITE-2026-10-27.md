@@ -1,4 +1,36 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.17
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.18
+
+## Live-Bestätigung von 1.8.17 und nächster lesender Ausbau (1.8.18)
+
+Der Benutzer hat am 28.10.2026 den offiziellen `OSRS Toolkit Exporter`
+aus dem Plugin Hub in RuneLite installiert und **alle** Exportarten
+aktiviert. Das echte Log 17:12:48–17:13:29 Uhr bestätigt
+`version=1.8.17`, den automatischen Download/Neustart mit
+`PREVIOUS_UPDATE` und `ALREADY_CURRENT`, 36 direkte
+`DIRECT_CLIENT_API`-Lesungen, 30 bestätigte Positionen von 52
+und zehn erkannte Bewegungen. Bei älteren Exportdateien wurden
+fünf Positionen erneut mit `OCR_CORROBORATED` und Pixelvergleich
+bestätigt. Vier `GRID_INFO_NOT_READABLE`-Proben traten nur unmittelbar
+bei Bewegung auf. Der Export-Dateizeitstempel war teils neuer als
+das zuletzt erhaltene WGC-Bild. Das ist eine normale asynchrone
+Reihenfolge, kein Grund, die Position zu raten oder den OCR-Fallback
+auf einem vorherigen Bild zu erzwingen.
+
+1.8.18 behandelt diesen Fall als `WAITING_FOR_EXPORT_FRAME`, bis
+das nächste unabhängige Bild **nach** dem JSON-Export entstanden
+ist. Die Zweibildfreigabe bleibt zwingend. Der RuneLite-Companion
+erhält eine rein lesende Navigationsempfehlung: ausgewähltes Ziel
+aus `NavigationDestinations.All`, bestätigtes X/Y, Ebenenvergleich,
+Chebyshev-Luftlinie und Zielradius. Keine tatsächliche Route,
+keine Kollisionsevaluierung auf jedem Tile, kein Input an den
+Spielclient. Zusätzlich liest ein formatbegrenzter, pfadgebundener,
+lokaler Adapter die neun offiziellen Zusatzexporte alle zehn Sekunden.
+Gezeigt werden ausschließlich Zähler/Gesamtlevel, keine
+Gegenstand-IDs, Namen, Mengen, Preise, Bank-Rohdaten oder Accountnamen
+in GUI-Logs/Clipboard. Alte Exporte werden als ältere Snapshots
+kenntlich gemacht, nicht als Livezustand verwendet. Tests simulieren
+fremde Profile, beschädigte Daten, falsche Zähler, historische
+Bankstände und Ebenenkonflikte. .NET-10-Windows-CI steht noch aus.
 
 ## Client-API über bereits geprüften Plugin Hub gefunden (1.8.17)
 

@@ -11,7 +11,9 @@ internal sealed class RuneLiteWindow:Form
     private readonly ClientFailureLog failureLog;
     private readonly Label status=new(),position=new(),detail=new(),failureBanner=new(),updateStatus=new();
     private readonly TextBox logPreview=new();
-    private readonly Button copyLog=new(),checkUpdate=new();
+    private readonly Button copyLog=new(),checkUpdate=new(),showExports=new();
+    private readonly ComboBox navigationTarget=new();
+    private readonly NavigationDestination[] navigationChoices=RuneLiteNavigationAdvisor.AvailableDestinations();
     private readonly System.Windows.Forms.Timer timer=new(){Interval=800};
     private readonly System.Windows.Forms.Timer healthTimer=new(){Interval=10000};
     private readonly System.Windows.Forms.Timer updateTimer=new(){Interval=30*60*1000};
@@ -22,6 +24,9 @@ internal sealed class RuneLiteWindow:Form
     private string? lastStatus;
     private DateTimeOffset blockedSince;
     private DateTimeOffset lastConfirmedUtc=DateTimeOffset.UtcNow;
+    private DateTimeOffset lastExportSummaryLoggedUtc;
+    private WorldTile? lastVerifiedTile;
+    private string latestPositionDescription="Noch keine bestätigte Position";
 
     internal RuneLiteWindow()
     {
@@ -32,14 +37,14 @@ internal sealed class RuneLiteWindow:Form
         BackColor=Color.FromArgb(18,25,38);ForeColor=Color.WhiteSmoke;
         var panel=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new(20),ColumnCount=1,RowCount=8};
         panel.RowStyles.Add(new(SizeType.Absolute,42));panel.RowStyles.Add(new(SizeType.Absolute,42));
-        panel.RowStyles.Add(new(SizeType.Absolute,60));panel.RowStyles.Add(new(SizeType.Absolute,85));
+        panel.RowStyles.Add(new(SizeType.Absolute,60));panel.RowStyles.Add(new(SizeType.Absolute,110));
         panel.RowStyles.Add(new(SizeType.Absolute,76));panel.RowStyles.Add(new(SizeType.Percent,100));
         panel.RowStyles.Add(new(SizeType.Absolute,76));panel.RowStyles.Add(new(SizeType.Absolute,42));
         panel.Controls.Add(new Label{Text="OSRS PLAY · RUNELITE · DIAGNOSE",Dock=DockStyle.Fill,
             Font=new("Segoe UI",16,FontStyle.Bold)},0,0);
         status.Dock=position.Dock=detail.Dock=failureBanner.Dock=DockStyle.Fill;
         status.Font=new("Segoe UI",12,FontStyle.Bold);position.Font=new("Segoe UI",20,FontStyle.Bold);
-        detail.Font=new("Segoe UI",10);failureBanner.Font=new("Segoe UI",11,FontStyle.Bold);
+        detail.Font=new("Segoe UI",9);failureBanner.Font=new("Segoe UI",11,FontStyle.Bold);
         failureBanner.ForeColor=Color.FromArgb(255,105,105);
         failureBanner.Text="VERBESSERUNG MUSS EINGEBAUT WERDEN: RuneLite-Automatik ist noch nicht implementiert.";
         panel.Controls.Add(status,0,1);panel.Controls.Add(position,0,2);
@@ -52,6 +57,20 @@ internal sealed class RuneLiteWindow:Form
         panel.Controls.Add(logPreview,0,5);
 
         var buttons=new FlowLayoutPanel{Dock=DockStyle.Fill};
+        navigationTarget.DropDownStyle=ComboBoxStyle.DropDownList;
+        navigationTarget.Width=182;
+        navigationTarget.AccessibleName="Leseziel für die RuneLite-Positionsnavigation";
+        navigationTarget.Items.Add("Navigationsziel wählen");
+        foreach(var destination in navigationChoices)navigationTarget.Items.Add(destination.Id);
+        navigationTarget.SelectedIndex=0;
+        navigationTarget.SelectedIndexChanged+=(_,_)=>
+        {
+            var selected=SelectedDestination();
+            log.Add(Severity.INFO,"RUNELITE_NAV","TARGET_SELECTED",
+                $"target={(selected is null?"NONE":selected.Id.Replace(' ','_'))} "+
+                "advice_only=true movement_input=false collision_route_calculated=false");
+            UpdateDetailText();RefreshLogPreview();
+        };
         var launcher=new Button{Text="Jagex Launcher öffnen",AutoSize=true};
         launcher.Click+=(_,_)=>
         {
@@ -69,19 +88,35 @@ internal sealed class RuneLiteWindow:Form
         pause.Click+=(_,_)=>
         {
             paused=!paused;generation++;source.Reset();movement.Reset();position.Text="Position unbekannt";
+            lastVerifiedTile=null;latestPositionDescription="Verbindung pausiert";
             if(!paused)lastConfirmedUtc=DateTimeOffset.UtcNow;
             status.Text=paused?"Verbindung pausiert":"Warte auf neue Positionsbilder";
             log.Add(Severity.INFO,"RUNELITE",paused?"USER_PAUSED":"USER_RESUMED",
                 $"generation={generation} old_position_discarded=true");
             pause.Text=paused?"Verbindung fortsetzen":"Verbindung pausieren";
-            _=RefreshPosition();RefreshLogPreview();
+            UpdateDetailText();_=RefreshPosition();RefreshLogPreview();
         };
         copyLog.Text="Gesamte Logdatei kopieren";copyLog.AutoSize=true;
         copyLog.Click+=(_,_)=>{failureLog.CopyToClipboard();UpdateFailureBanner();RefreshLogPreview();};
         checkUpdate.Text="Jetzt Updates prüfen";checkUpdate.AutoSize=true;
         checkUpdate.Click+=async(_,_)=>await CheckForUpdatesAsync("MANUAL");
+        showExports.Text="Zusatzdaten ansehen";showExports.AutoSize=true;
+        showExports.Click+=(_,_)=>
+        {
+            var entries=source.AdditionalExports.Entries;
+            string shown=entries.Count==0?
+                "Noch keine passenden lokalen JSON-Snapshots gefunden. RuneLite muss eingeloggt sein.":
+                string.Join(Environment.NewLine,entries.Select(e=>
+                    $"{e.Display} · {Math.Max(0,e.AgeMinutes):0} Minuten alt"+
+                    (e.Recent?"":" (historischer Stand)")));
+            log.Add(Severity.INFO,"RUNELITE_EXPORTS","LOCAL_SUMMARY_OPENED",
+                $"categories={entries.Count} raw_items_names_prices_and_json_excluded=true");
+            MessageBox.Show(this,shown,"RuneLite · lokale Zusatzdaten",
+                MessageBoxButtons.OK,MessageBoxIcon.Information);
+            RefreshLogPreview();
+        };
         buttons.Controls.Add(launcher);buttons.Controls.Add(pause);buttons.Controls.Add(copyLog);
-        buttons.Controls.Add(checkUpdate);
+        buttons.Controls.Add(checkUpdate);buttons.Controls.Add(navigationTarget);buttons.Controls.Add(showExports);
         panel.Controls.Add(buttons,0,6);
         updateStatus.Text="Automatische Updateprüfung beim Start und alle 30 Minuten · RuneLite bleibt geöffnet.\n"+
             "Sitzungslog: "+Path.GetFileName(failureLog.FilePath);
@@ -95,6 +130,7 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.INFO,"CORE","CAPABILITIES",
             "read_only=true automated_game_actions=false sources=PLUGIN_HUB_POSITION_EXPORT,WORLD_LOCATION_GRID_INFO "+
             "plugin_optional=true plugin_install_manual=true fresh_frames_required=2 "+
+            "navigation=CONFIRMED_COORDINATE_GUIDANCE_ONLY extra_exports=LOCAL_SUMMARY_ONLY "+
             "no_memory_access=true no_screenshots_written=true");
         log.Add(Severity.INFO,"CORE","PRIVACY",
             "credentials_and_authentication_handled_by_jagex=true local_log_only=true clipboard_on_failure=true");
@@ -213,6 +249,13 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.DEBUG,"RUNELITE","POSITION_SAMPLE",
             $"sample={sequence} result={state.Status} {state.Diagnostic} "+
             (state.Tile is WorldTile tile?$"x={tile.X} y={tile.Y} plane={tile.Plane}":"position=NOT_RELEASED"));
+        if(source.LastExportScanUtc!=default&&
+           source.LastExportScanUtc!=lastExportSummaryLoggedUtc)
+        {
+            lastExportSummaryLoggedUtc=source.LastExportScanUtc;
+            log.Add(Severity.INFO,"RUNELITE_EXPORTS","SUMMARY_SCAN",
+                $"sample={sequence} {source.AdditionalExports.Diagnostic}");
+        }
         // Movement telemetry is strictly downstream of the pixel and
         // independent-frame confirmation. No unconfirmed OCR is tracked.
         if(state.Tile is WorldTile confirmedTile)
@@ -220,6 +263,10 @@ internal sealed class RuneLiteWindow:Form
             string? observation=movement.Observe(confirmedTile,state.ObservedUtc,sequence);
             if(observation is not null)
                 log.Add(Severity.INFO,"RUNELITE_MOTION","OBSERVATION",observation);
+            var guidance=RuneLiteNavigationAdvisor.FromConfirmed(confirmedTile,SelectedDestination());
+            if(guidance is not null&&observation is not null)
+                log.Add(Severity.INFO,"RUNELITE_NAV","VERIFIED_TILE_GUIDANCE",
+                    $"sample={sequence} {guidance.Diagnostic}");
         }
         else if(state.Status is "RUNELITE_NOT_RUNNING" or "MULTIPLE_RUNELITE_CLIENTS" or
             "CAPTURE_UNAVAILABLE" or "STALE_FRAME" or "INTERNAL_ERROR" or "OCR_LANGUAGE_UNAVAILABLE")
@@ -252,9 +299,10 @@ internal sealed class RuneLiteWindow:Form
 
         status.Text=state.Status switch
         {
-            "OVERLAY_CONFIRMED"=>"RuneLite-Koordinatenanzeige aus zwei Bildern bestätigt",
+            "OVERLAY_CONFIRMED"=>"RuneLite-Spielerposition in zwei Aufnahmen bestätigt",
             "PAUSED"=>"Verbindung pausiert",
             "GRID_INFO_NOT_READABLE"=>"World Location · Grid Info konnte nicht gelesen werden",
+            "WAITING_FOR_EXPORT_FRAME"=>"Neuer Positions-Export erkannt · warte auf aktuelles RuneLite-Bild",
             "WAITING_FOR_SECOND_FRAME"=>"Warte auf ein zweites unabhängiges Bild",
             "RUNELITE_NOT_RUNNING"=>"RuneLite ist nicht gestartet oder nicht eindeutig erkannt",
             "STALE_FRAME"=>"Positionsbild ist nicht mehr aktuell",
@@ -265,11 +313,35 @@ internal sealed class RuneLiteWindow:Form
             _=>"Positionsdaten konnten nicht bestätigt werden"
         };
         position.Text=state.Tile is WorldTile p?$"X {p.X}    Y {p.Y}    Ebene {p.Plane}":"Position unbekannt";
-        detail.Text=state.Tile is not null?
-            "Quelle: World Location · eigene Spielerposition mit Chunk-/Region-Prüfung. Noch keine autonome Ausführung.":
-            "RuneLite über den offiziellen Jagex Launcher starten. World Location: Grid Info aktiv, Type = Unique ID.\n"+
-            "Alle OCR-Varianten, Aufnahmeinformationen und Ablehnungsgründe stehen im Sitzungslog.";
+        lastVerifiedTile=state.Tile;
+        latestPositionDescription=state.Tile is not null?
+            "Quelle: "+(state.Diagnostic.Contains("source=PLUGIN_HUB_EXPORT",StringComparison.Ordinal)?
+                "offizielle RuneLite-API":"aktuelle Bildschirm- und Pixelprüfung")+
+            " · Zweibildbestätigung; keine automatischen Spieleingaben.":
+            state.Status=="WAITING_FOR_EXPORT_FRAME"?
+                "Neuer Tile-Export ist aktueller als das Bild · warte ohne Positionsschätzung.":
+                "Offizielles RuneLite über Jagex Launcher; Plugin Hub: OSRS Toolkit Exporter aktivieren.";
+        UpdateDetailText();
         UpdateFailureBanner();RefreshLogPreview();
+    }
+
+    private NavigationDestination? SelectedDestination()=>
+        navigationTarget.SelectedIndex is >0&&navigationTarget.SelectedIndex<=navigationChoices.Length?
+            navigationChoices[navigationTarget.SelectedIndex-1]:null;
+
+    private void UpdateDetailText()
+    {
+        var guide=RuneLiteNavigationAdvisor.FromConfirmed(lastVerifiedTile,SelectedDestination());
+        string navigation=guide?.Display??(SelectedDestination() is null?
+            "Navigation: Ziel unten auswählen; Entfernung nur Luftlinie, keine Route.":
+            "Navigation: Warte auf bestätigte RuneLite-Spielerposition.");
+        var summaries=source.AdditionalExports.Entries.Where(e=>e.Kind is
+            "INVENTORY" or "BANK" or "QUESTS" or "GE" or "CHARACTER").Take(5)
+            .Select(e=>e.Display+(e.Recent?"":" (älterer Stand)"));
+        string others=string.Join(" · ",summaries);
+        detail.Text=latestPositionDescription+Environment.NewLine+navigation+Environment.NewLine+
+            (others.Length>0?"Lokale Exportdaten: "+others:
+                "Lokale Exportdaten: noch keine verifizierten Zusatzdateien.");
     }
 
     private void UpdateFailureBanner()
@@ -300,6 +372,8 @@ internal sealed class RuneLiteWindow:Form
         if(!failureBanner.Text.Contains("VERBESSERUNG MUSS EINGEBAUT WERDEN")||
            failureBanner.ForeColor!=Color.FromArgb(255,105,105)||
            !logPreview.ReadOnly||!logPreview.Multiline||copyLog.Text.Length==0||
+           navigationTarget.DropDownStyle!=ComboBoxStyle.DropDownList||navigationChoices.Length<10||
+           showExports.Text.Length==0||
            checkUpdate.Text.Length==0||!updateTimer.Enabled||updateTimer.Interval!=30*60*1000||
            !updateStatus.Text.Contains("Updateprüfung"))
             throw new Exception("RuneLite GUI lacks diagnostics or automatic/manual updater controls");

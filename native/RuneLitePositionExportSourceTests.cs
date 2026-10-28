@@ -32,6 +32,14 @@ internal static class RuneLitePositionExportSourceTests
                     detail.Contains("FRESH_CLIENT_COORDINATE")&&
                     !detail.Contains("FixtureCharacter"),
                 "the official Plugin Hub position.json contains an independent checksum-valid coordinate: "+detail);
+            Require(RuneLitePositionExportSource.FrameDecision(now,
+                    now.AddMilliseconds(-200))=="AWAIT_NEW_FRAME"&&
+                    RuneLitePositionExportSource.FrameDecision(now,now)=="DIRECT"&&
+                    RuneLitePositionExportSource.FrameDecision(now,
+                        now.AddSeconds(3))=="DIRECT"&&
+                    RuneLitePositionExportSource.FrameDecision(now,
+                        now.AddSeconds(7))=="SCREEN_CROSSCHECK",
+                "a newer export needs a newer frame; an old frame is never a Grid Info OCR failure");
             var (mismatch,titleDiagnostic)=RuneLitePositionExportSource.Read(now,
                 "RuneLite – AnotherCharacter",root);
             Require(mismatch is null&&titleDiagnostic.Contains("NO_VERIFIED_FILE")&&

@@ -1,4 +1,55 @@
-# OSRS Play 1.8.17 – Direkte RuneLite-Position mit offiziellem Plugin-Hub
+# OSRS Play 1.8.18 – Live-Positionswechsel, Lese-Navigation und lokale Exportdaten
+
+## Neu in 1.8.18: Positionsnavigation und Zusatzdaten aus dem echten Client
+
+Der echte Benutzer-Live-Test von **1.8.17** am 28.10.2026,
+17:12:48–17:13:29 Uhr Europe/Berlin, belegt ein funktionierendes
+automatisches Release-Update (`PREVIOUS_UPDATE`, `ALREADY_CURRENT`),
+36 direkte RuneLite-API-Lesungen (`DIRECT_CLIENT_API`),
+30 bestätigte Positionsproben von 52 sowie zehn tatsächlich beobachtete
+Positionswechsel. Bei fünf alten Positionsexporten wurde zusätzlich
+`POSITION_EXPORT_SCREEN_CROSSCHECK OCR_CORROBORATED` mit echten Pixeln
+erfolgreich verwendet. Bei vier Proben kam `GRID_INFO_NOT_READABLE`
+unmittelbar während eines Tilewechsels. Diese Fehler waren zeitlich
+begrenzt und bedeuteten nicht, dass der Plugin-Hub-Exporter fehlte.
+
+**Neuer Übergangsschutz:** Ist ein gültiger, höchstens drei Sekunden
+alter `position.json`-Export neuer als die letzte Windows-Grafikaufnahme,
+wartet der Client bewusst auf das nächste Bild (`WAITING_FOR_EXPORT_FRAME`)
+und führt **keine** OCR-Prüfung auf dem veralteten Bild durch.
+Der bewährte Schutz aus zwei zeitlich unabhängigen Aufnahmen und
+der Vergleich der Zeitstempel bleiben unverändert. Es werden keine
+vermuteten Zwischenpositionen erzeugt.
+
+**Neue lesende Navigation:** Die RuneLite-GUI bietet eine Auswahl der
+bereits im Projekt bekannten F2P-Orte. Erst für eine bestätigte
+Spielerposition werden X/Y-Differenz und die maximale Koordinatenabweichung
+angezeigt, ausdrücklich als **Luftlinie, nicht als begehbare Route**.
+Die echten Hindernisse und Transportwege sind in diesem Companion
+noch nicht mit dem Nutzerziel verbunden; es werden keine Klicks oder
+Bewegungen an RuneLite gesendet.
+
+**Optionale lokale Datenansicht:** Da der Benutzer im offiziellen
+`OSRS Toolkit Exporter` alle Exporte aktiviert hat, liest OSRS Play nun
+auch dessen `character.json`, `quests.json`, `diaries.json`,
+`combat_achievements.json`, `inventory.json`, `equipment.json`,
+`bank.json`, `ge_offers.json` und `game_quests.json`. Die Übersicht
+zeigt nur kleine, anhand des tatsächlichen Pluginformats geprüfte
+Zusammenfassungen (beispielsweise Gesamtlevel, Quest- und
+Inventarzähler). Sie unterscheidet jüngere und ältere gespeicherte
+Snapshots. Bankdaten sind **nicht automatisch ein aktuelles
+Inventar**. Private Namen, Gegenstand-IDs, Mengen, Guthaben,
+Angebotspreise und die JSON-Inhalte werden weder in das Log noch in
+die Zwischenablage übernommen. Die Zuordnung erfolgt weiterhin nur
+zum exakt passenden offiziellen RuneLite-Fenster. Kein Netzwerk-Upload,
+kein fremder Account, keine Spielautomatisierung.
+
+Windows-Selbsttests decken ungültige/fremde/alte Exportdateien,
+Feld-Prüfsummen, das Warten auf neuere Aufnahmen, Ziel-Ebenen,
+Navigation ohne Spieleingaben und Datenschutz ab. Die reale
+1.8.18-Runde mit deinem laufenden RuneLite steht noch aus.
+
+## Vorherige Version: 1.8.17 – Direkte RuneLite-Position
 
 ## Neu in 1.8.17: Präzise Koordinaten ohne modifizierten RuneLite-Client
 

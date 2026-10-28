@@ -163,7 +163,17 @@ internal sealed class RuneLitePositionSource:IDisposable
     private readonly RuneLitePixelGridReader.ConfirmedGlyphHistory history=new();
     private IntPtr historyWindow;
     private Size historySize;
-    internal void Reset(){confirmation.Reset();history.Clear();historyWindow=default;historySize=default;}
+    private DateTimeOffset lastExportScanUtc;
+    private string? lastExportTitle;
+    internal RuneLiteExportSummarySource.Result AdditionalExports{get;private set;}=
+        new([],"stage=ADDITIONAL_EXPORTS result=NOT_SCANNED redacted=true");
+    internal DateTimeOffset LastExportScanUtc=>lastExportScanUtc;
+    internal void Reset()
+    {
+        confirmation.Reset();history.Clear();historyWindow=default;historySize=default;
+        lastExportScanUtc=default;lastExportTitle=null;
+        AdditionalExports=new([],"stage=ADDITIONAL_EXPORTS result=RESET redacted=true");
+    }
     private string CaptureDiagnostic=>$"capture_state={capture.State} frame_events={capture.FrameEvents} "+
         $"frame_copies={capture.FrameCopies} capture_error={capture.LastFrameError} "+
         $"geometry={capture.Geometry} alpha={capture.AlphaState}";
@@ -199,6 +209,21 @@ internal sealed class RuneLitePositionSource:IDisposable
                 history.Clear();historyWindow=windows[0].Handle;historySize=frame.Image.Size;
             }
             history.Expire(frame.CapturedUtc);
+            // Only the exact same trusted HWND/title used for positioning may
+            // provide private, optional character-export summaries. Poll no
+            // more than every 10 seconds, never log their raw contents.
+            if(lastExportTitle!=windows[0].Title)
+            {
+                lastExportTitle=windows[0].Title;
+                lastExportScanUtc=default;
+                AdditionalExports=new([],"stage=ADDITIONAL_EXPORTS result=PROFILE_CHANGED redacted=true");
+            }
+            if(lastExportScanUtc==default||DateTimeOffset.UtcNow-lastExportScanUtc>=TimeSpan.FromSeconds(10))
+            {
+                lastExportScanUtc=DateTimeOffset.UtcNow;
+                AdditionalExports=RuneLiteExportSummarySource.Read(lastExportScanUtc,
+                    windows[0].Title);
+            }
             var (export,exportDiagnostic)=RuneLitePositionExportSource.Read(
                 DateTimeOffset.UtcNow,windows[0].Title);
             pixelDiagnostic?.Invoke(exportDiagnostic);
@@ -206,14 +231,28 @@ internal sealed class RuneLitePositionSource:IDisposable
             // window and can only confirm against a frame captured AFTER the
             // export. The normal two-independent-fresh-frame gate still runs.
             if(export is {Fresh:true} recent&&
-               recent.ExportedAtUtc<=frame.CapturedUtc&&
-               frame.CapturedUtc-recent.ExportedAtUtc<=TimeSpan.FromSeconds(6))
+               RuneLitePositionExportSource.FrameDecision(recent.ExportedAtUtc,
+                   frame.CapturedUtc)=="AWAIT_NEW_FRAME")
+            {
+                confirmation.Reset();
+                pixelDiagnostic?.Invoke("stage=POSITION_EXPORT result=AWAIT_NEW_FRAME "+
+                    $"captured_before_export_ms={(recent.ExportedAtUtc-frame.CapturedUtc).TotalMilliseconds:0} "+
+                    "ocr_skipped=true false_grid_error_avoided=true");
+                return new("WAITING_FOR_EXPORT_FRAME",Diagnostic:windowDiagnostic+" "+
+                    CaptureDiagnostic+$" client={frame.Image.Width}x{frame.Image.Height} "+
+                    $"export_age_ms={recent.AgeMs:0} frame_before_export_ms="+
+                    $"{(recent.ExportedAtUtc-frame.CapturedUtc).TotalMilliseconds:0} "+
+                    "source=PLUGIN_HUB_EXPORT candidate_consistent=false frame_confirmed=false");
+            }
+            if(export is {Fresh:true} recentReady&&
+               RuneLitePositionExportSource.FrameDecision(recentReady.ExportedAtUtc,
+                   frame.CapturedUtc)=="DIRECT")
             {
                 var nowDirect=DateTimeOffset.UtcNow;
                 var direct=confirmation.Observe(windows[0].Handle,frame.Image.Size,
-                    frame.CapturedUtc,nowDirect,recent.Position);
+                    frame.CapturedUtc,nowDirect,recentReady.Position);
                 pixelDiagnostic?.Invoke("stage=POSITION_EXPORT result=DIRECT_CLIENT_API "+
-                    $"export_age_ms={recent.AgeMs:0} source=PLUGIN_HUB_EXPORT "+
+                    $"export_age_ms={recentReady.AgeMs:0} source=PLUGIN_HUB_EXPORT "+
                     "render_ocr_bypassed=true independent_capture_gate=true");
                 return direct with{Diagnostic=windowDiagnostic+" "+CaptureDiagnostic+
                     $" client={frame.Image.Width}x{frame.Image.Height} "+

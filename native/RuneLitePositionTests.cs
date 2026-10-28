@@ -67,6 +67,8 @@ internal static class RuneLitePositionTests
             "user pause, lost client or source reset starts an isolated movement session");
         RuneLitePixelGridReaderTests.Run();
         RuneLitePositionExportSourceTests.Run();
+        RuneLiteExportSummarySourceTests.Run();
+        RuneLiteNavigationAdvisorTests.Run();
         Console.WriteLine("RUNELITE GRID PASS: player panel only, chunk/region checks, fresh independent frames, window changes, missing/stale rejection; no game input");
     }
     internal static async Task OcrFixture(OcrEngine engine)

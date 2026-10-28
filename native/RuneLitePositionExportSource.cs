@@ -14,6 +14,18 @@ internal static class RuneLitePositionExportSource
     private static readonly TimeSpan FreshFor=TimeSpan.FromSeconds(3);
     private static readonly TimeSpan MaxCorroborationAge=TimeSpan.FromHours(24);
 
+    // WGC may return a buffered image captured shortly BEFORE the plugin
+    // wrote the next tile. That is a normal transition, not unreadable Grid
+    // Info. Await a genuinely newer captured frame instead of OCR-reading
+    // an obsolete image or accidentally accepting the previous location.
+    internal static string FrameDecision(DateTimeOffset exportedAtUtc,
+        DateTimeOffset capturedAtUtc)
+    {
+        if(capturedAtUtc<exportedAtUtc)return "AWAIT_NEW_FRAME";
+        if(capturedAtUtc-exportedAtUtc<=TimeSpan.FromSeconds(6))return "DIRECT";
+        return "SCREEN_CROSSCHECK";
+    }
+
     internal static (Snapshot? Data,string Diagnostic) Read(DateTimeOffset now,
         string windowTitle,string? directoryOverride=null)
     {
