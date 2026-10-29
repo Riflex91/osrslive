@@ -5,6 +5,11 @@ namespace OSRSLiveDiagnostics;
 internal static class BackgroundWindowInput
 {
     internal sealed record ForegroundClickResult(bool Inserted,string Reason,int InputEvents);
+    // Explicit human mouse activity is a safe interruption, not a failed game move.
+    // Do not silently resume clicking after the button is released.
+    internal static bool IsManualMouseInterruption(ForegroundClickResult result)=>
+        !result.Inserted&&(result.Reason=="PHYSICAL_MOUSE_BUTTON_HELD"||
+            result.Reason=="PHYSICAL_MOUSE_BUTTON_HELD_BEFORE_CLICK");
     internal sealed record MinimapZoomResult(bool Inserted,string Reason,int InputEvents);
 
     // Right-clicking a RuneLite minimap with the Minimap plugin's Zoom option
@@ -124,6 +129,11 @@ internal static class BackgroundWindowInput
             !HitBelongsToExpectedWindow(window,expectedPid,screen))
             return new(false,"FOREGROUND_OR_TARGET_LOST_BEFORE_CLICK",(int)moved);
         ct.ThrowIfCancellationRequested();
+        // The user may press a physical button after the earlier preflight
+        // while the cursor moves. Never combine that press with our click.
+        if((GetAsyncKeyState(0x01)&0x8000)!=0||
+           (GetAsyncKeyState(0x02)&0x8000)!=0)
+            return new(false,"PHYSICAL_MOUSE_BUTTON_HELD_BEFORE_CLICK",(int)moved);
         // A single SendInput batch guarantees ordered DOWN and UP without
         // the user seeing a held synthetic button if an await gets cancelled.
         var click=new INPUT[]{Mouse(0,0,0x0002),Mouse(0,0,0x0004)};

@@ -82,6 +82,14 @@ Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.
   weiterhin streng begrenzte frische API-Quiet-Replan
   ist für die Fortsetzung nötig. Vollständige Ankunft
   bleibt weiterhin ungetestet.
+  Ein v1.8.33-Live-Test vom 29.10.2026 hat jetzt erstmals Lumbridges
+  Zielradius vollständig erreicht (10 tatsächliche SendInput-Klickfolgen).
+  Der erste Versuch stoppte sicher wegen einer bereits gedrückten
+  physischen Maustaste. 1.8.34 klassifiziert diese Nutzerunterbrechung
+  ohne automatisches Wiederaufnehmen oder Fehlalarm, prüft die
+  Maustaste vor jedem Click-Down erneut und protokolliert versuchte
+  und tatsächlich eingefügte Klickfolgen getrennt. Die reale Windows-
+  Validierung von 1.8.34 bleibt offen.
   Die strikte
   `RUNELITE_FOREGROUND_LOST`-Sperre bleibt bestehen. Alle Schritte
   und Grenzen stehen

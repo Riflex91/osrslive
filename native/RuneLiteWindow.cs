@@ -26,6 +26,7 @@ internal sealed class RuneLiteWindow:Form
     private readonly Stopwatch uptime=Stopwatch.StartNew();
     private readonly CancellationTokenSource closing=new();
     private bool paused,busy,updateRunning,updatePendingRestart,calibrating,clickInProgress;
+    private int insertedWalkClickBatches;
     private string? autoWalkWindowTitle;
     private long generation,samples;
     private string? lastStatus;
@@ -66,9 +67,8 @@ internal sealed class RuneLiteWindow:Form
         status.Dock=position.Dock=detail.Dock=failureBanner.Dock=DockStyle.Fill;
         status.Font=new("Segoe UI",12,FontStyle.Bold);position.Font=new("Segoe UI",20,FontStyle.Bold);
         detail.Font=new("Segoe UI",9);failureBanner.Font=new("Segoe UI",11,FontStyle.Bold);
-        failureBanner.ForeColor=Color.FromArgb(255,105,105);
-        failureBanner.Text="VERBESSERUNG MUSS EINGEBAUT WERDEN, wenn ein Bewegungstest scheitert. " +
-            "Automatische Bewegung ist AUS, bis du sie ausdrücklich freigibst.";
+        failureBanner.ForeColor=Color.Khaki;
+        failureBanner.Text="Automatik standardmäßig AUS. Nur ausdrücklich freigegebene Vordergrundtests senden Spieleingaben.";
         panel.Controls.Add(status,0,1);panel.Controls.Add(position,0,2);
         panel.Controls.Add(detail,0,3);panel.Controls.Add(failureBanner,0,4);
         logPreview.Dock=DockStyle.Fill;logPreview.ReadOnly=true;
@@ -651,6 +651,7 @@ internal sealed class RuneLiteWindow:Form
                 }
                 var geometry=new RuneLiteAutoWalk.Calibration(window,size,center,setup.PixelsPerTile);
                 autoWalk.Start(goal,geometry,DateTimeOffset.UtcNow);
+                insertedWalkClickBatches=0;
                 autoWalkWindowTitle=source.TrustedWindowTitle;
                 inputShieldChoice.Enabled=false;
                 stopWalk.Enabled=true;
@@ -764,12 +765,16 @@ internal sealed class RuneLiteWindow:Form
             if(!autoWalk.Active)return;
             if(!sent.Inserted)
             {
-                StopAutoWalk("FOREGROUND_CLICK_NOT_SENT",true,
+                bool manualMouse=BackgroundWindowInput.IsManualMouseInterruption(sent);
+                StopAutoWalk(manualMouse?"USER_MOUSE_INPUT_INTERRUPTED":"FOREGROUND_CLICK_NOT_SENT",
+                    !manualMouse,
                     $"command={autoWalk.Clicks} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
                     $"reason={sent.Reason} input_events={sent.InputEvents} "+
-                    "input_not_verified=true no_position_claim=true window_focus_required=true");
+                    "input_not_verified=true no_position_claim=true window_focus_required=true "+
+                    "no_automatic_resume=true");
                 return;
             }
+            insertedWalkClickBatches++;
             autoWalkDescription="Automatik: Windows-Mauseingabe gesendet · überprüfe RuneLite-API-Bewegung.";
             log.Add(Severity.INFO,"RUNELITE_AUTOWALK","FOREGROUND_INPUT_INSERTED",
                 $"command={autoWalk.Clicks} input_events={sent.InputEvents} transport=WIN32_SENDINPUT "+
@@ -813,15 +818,21 @@ internal sealed class RuneLiteWindow:Form
         }
         if(!autoWalk.Active)return;
         int commands=autoWalk.Clicks;
-        bool pending=autoWalk.WaitingForMovement;
+        int inserted=insertedWalkClickBatches;
+        bool pending=autoWalk.WaitingForMovement&&inserted==commands;
         autoWalk.Stop();
+        insertedWalkClickBatches=0;
         autoWalkWindowTitle=null;
         stopWalk.Enabled=false;startWalk.Enabled=!calibrating;
         autoWalkDescription=reason=="TARGET_REACHED"?
             "Automatik: Zielradius laut RuneLite-API erreicht!":
+            reason=="USER_MOUSE_INPUT_INTERRUPTED"?
+                "Automatik: durch gedrückte Maustaste gestoppt – zum Fortsetzen neu starten.":
             failed?"Automatik: FEHLER – gestoppt; bitte rotes Diagnosefeld beachten.":
                 "Automatik: gestoppt · eventuelle letzte Spielbewegung manuell abbrechen.";
-        string diagnostic=$"reason={reason} commands_posted_or_attempted={commands} "+
+        string diagnostic=$"reason={reason} commands_attempted={commands} "+
+            $"input_stream_click_batches_inserted={inserted} "+
+            $"unsent_attempts={Math.Max(0,commands-inserted)} "+
             $"pending_verification={pending} no_more_clicks=true in_game_last_click_may_continue=true {details}";
         log.Add(failed?Severity.WARN:Severity.INFO,"RUNELITE_AUTOWALK",
             failed?"SAFETY_STOP":"STOPPED",diagnostic);
@@ -939,11 +950,13 @@ internal sealed class RuneLiteWindow:Form
         string? reason=failureLog.LastFailureCode;
         if(reason is null)
         {
-            failureBanner.Text="VERBESSERUNG MUSS EINGEBAUT WERDEN, falls der erste " +
-                "automatische Bewegungstest scheitert. Noch nicht live bestätigt.";
+            failureBanner.ForeColor=Color.Khaki;
+            failureBanner.Text="Automatik nur nach ausdrücklichem Start im RuneLite-Vordergrund. " +
+                "Bei manueller Eingabe bleibt sie sicher gestoppt.";
             copyLog.Text="Gesamte Logdatei kopieren";
             return;
         }
+        failureBanner.ForeColor=Color.FromArgb(255,105,105);
         string copied=failureLog.ClipboardStatus=="COPIED"?
             "Log wurde in die Zwischenablage kopiert.":
             "Log-Kopie ausstehend/fehlgeschlagen – bitte Kopierknopf nutzen.";
@@ -966,8 +979,8 @@ internal sealed class RuneLiteWindow:Form
 
     internal void VerifyDiagnosticLayout()
     {
-        if(!failureBanner.Text.Contains("VERBESSERUNG MUSS EINGEBAUT WERDEN")||
-           failureBanner.ForeColor!=Color.FromArgb(255,105,105)||
+        if(!failureBanner.Text.Contains("Automatik")||
+           failureBanner.ForeColor!=Color.Khaki||
            !logPreview.ReadOnly||!logPreview.Multiline||copyLog.Text.Length==0||
            navigationTarget.DropDownStyle!=ComboBoxStyle.DropDownList||navigationChoices.Length<10||
            startWalk.Text.Length==0||stopWalk.Text.Length==0||stopWalk.Enabled||

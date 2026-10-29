@@ -1,4 +1,36 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.33
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.34
+
+## 1.8.34 – Live v1.8.33: erster vollständiger Zielradius-Erfolg und Maus-Eingabekonflikt
+
+Der Nutzerlog vom **29.10.2026, 17:30:54–17:31:56** belegt eine
+vollständige, API-verifizierte Ankunft im Lumbridge-Zielradius. Im ersten
+Anlauf wurden zwei Vordergrund-SendInput-Klickfolgen erfolgreich in den
+Windows-Eingabestrom eingefügt und als Bewegung beobachtet. Der dritte
+Versuch wurde noch vor dem Klick wegen `PHYSICAL_MOUSE_BUTTON_HELD`
+gestoppt (null Input-Events); das ist ein korrekter Benutzereingabe-Schutz,
+kein Nachweis eines Defekts oder eines erfolglosen Game-Klicks.
+
+Nach erneutem ausdrücklichem Start wurden **zehn** Klickfolgen eingefügt;
+die RuneLite-API bestätigte den Weg fortlaufend, einschließlich eng
+begrenzter Korridorbeobachtungen und zwei Quiet-Replans. Um 17:31:52
+wurde `TARGET_REACHED` bei `(3226,3220,0)` gemeldet; die nächste
+API-Position `(3226,3222,0)` blieb im Zielradius 4 um `(3222,3218)`.
+Der Lauf beweist keine Zielpunkt-Exaktheit jenseits des gewählten Radius
+und keine Hintergrundsteuerung.
+
+**Korrektur 1.8.34:** Eine manuell bereits gedrückte Maustaste beendet
+den Test weiterhin sofort ohne automatische Wiederaufnahme, erscheint
+aber als verständliche Benutzerunterbrechung statt als Softwarefehler.
+Ein zweiter Guard direkt vor der SendInput-Maustaste verhindert eine
+Kollision, falls der Benutzer die Taste erst nach der Cursorbewegung
+drückt. Der Diagnoseabschluss trennt nun angeforderte Klicks von
+wirklich in den Windows-Eingabestrom eingefügten Klickfolgen und setzt
+`pending_verification` bei nicht gesendeten Befehlen nicht fälschlich.
+Selbsttests rekonstruieren die echte letzte Lumbridge-Korridorbewegung
+und die beiden möglichen Maus-Unterbrechungszeitpunkte.
+
+**Nicht behaupten:** Ohne Windows-Runner keine lokal bestätigte
+Kompilierung und ohne neuen Nutzerlauf keine Live-Validierung von 1.8.34.
 
 ## 1.8.33 – Echter v1.8.32-Test: Bewegung klappt, früher Seitenstopp zweimal falsch
 
