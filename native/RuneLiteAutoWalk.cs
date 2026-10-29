@@ -1240,6 +1240,85 @@ internal static class RuneLiteAutoWalkTests
                     now.AddSeconds(.6),now.AddSeconds(3.4)) is null&&
                 walk.WaitingForMovement,
             "one exact-prefix event without corridor movement is insufficient for three-tile retry");
+        // Closed-loop replay of actual 1.8.37 failure (29 October,
+        // 18:49:27-30): the game did NOT follow the A* intermediate
+        // prefix, but independently exported a bounded 2-tile
+        // westward step which decreased Manhattan distance to
+        // Lumbridge. Chebyshev distance to the clicked waypoint
+        // remained 2, so previous controller rejected valid progress.
+        PathStep[] gameClientPrefix=[
+            new(new(3244,3192)),new(new(3244,3193)),
+            new(new(3243,3193)),new(new(3242,3193)),
+            new(new(3242,3194)),new(new(3241,3195)),
+            new(new(3242,3196)),new(new(3241,3197)),
+            new(new(3240,3197))];
+        var clientPlan=RuneLiteAutoWalk.Project(
+            new(3244,3191),gameClientPrefix,geom)!;
+        Require(clientPlan.Waypoint==new WorldTile(3240,3197)&&
+                clientPlan.WaypointIndex==9,
+            "exact nine-step 1.8.37 collision prefix reproduced");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(clientPlan,now,now);
+        Require(walk.Observe(new(3244,3193),now.AddSeconds(.7),now.AddSeconds(.8)).Status==
+                "PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3241,3195),now.AddSeconds(1.5),now.AddSeconds(1.6)).Status==
+                "PROGRESS_CONFIRMED",
+            "API must confirm real in-prefix movement before divergence");
+        var clientAlternative=walk.Observe(new(3239,3195),
+            now.AddSeconds(2.2),now.AddSeconds(2.3));
+        Require(clientAlternative.Status=="CLIENT_ROUTE_PROGRESS_OBSERVED"&&
+                clientAlternative.Continue&&walk.WaitingForMovement&&
+                walk.Clicks==1&&walk.CorridorReplans==0&&
+                !walk.CanDispatch(now.AddSeconds(2.3),now.AddSeconds(2.2)),
+            "two-tile client-path divergence, same Chebyshev waypoint distance, nearer final goal cannot hard stop or instantly click");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3239,3195),
+                    now.AddSeconds(2.2),now.AddSeconds(3.2)) is null&&
+                walk.WaitingForMovement,
+            "no new click without independently quiet plugin event");
+        var clientRetry=walk.RecoverNearWaypointAfterQuietPeriod(new(3239,3195),
+            now.AddSeconds(2.2),now.AddSeconds(4.2));
+        Require(clientRetry?.Status=="CLIENT_ROUTE_QUIET_REPLAN"&&
+                clientRetry.Continue&&!walk.WaitingForMovement&&
+                walk.ShortNextClick&&walk.CorridorReplans==1&&
+                walk.CanDispatch(now.AddSeconds(4.2),now.AddSeconds(2.2)),
+            "fresh, quiet game-selected movement can replan from last observed tile");
+        PathStep[] clientRecoveryPrefix=Enumerable.Range(1,8)
+            .Select(i=>new PathStep(new WorldTile(3239-i,3195+i))).ToArray();
+        var clientRecoveryClick=RuneLiteAutoWalk.Project(new(3239,3195),
+            clientRecoveryPrefix,geom,RuneLiteAutoWalk.RecoveryPrefixSteps)!;
+        Require(clientRecoveryClick.WaypointIndex==RuneLiteAutoWalk.RecoveryPrefixSteps,
+            "closed-loop retry is at most six checked collision steps");
+        walk.Sent(clientRecoveryClick,now.AddSeconds(2.2),now.AddSeconds(4.2));
+        Require(walk.WaitingForMovement&&!walk.ShortNextClick&&
+                !walk.CanDispatch(now.AddSeconds(4.3),now.AddSeconds(2.2)),
+            "one-shot recovered click again waits for real API movement");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(clientPlan,now,now);
+        walk.Observe(new(3244,3193),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3241,3195),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3239,3195),
+                    now.AddSeconds(2.2),now.AddSeconds(4.2)) is null,
+            "unknown later client position must not seed a new click");
+        walk.Observe(new(3239,3195),now.AddSeconds(2.2),now.AddSeconds(2.3));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3239,3195),
+                    now.AddSeconds(2.2),now.AddSeconds(5.3)) is null&&
+                walk.WaitingForMovement,
+            "stale event beyond three seconds never unlocks automated movement");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(clientPlan,now,now);
+        Require(walk.Observe(new(3239,3195),now.AddSeconds(.7),now.AddSeconds(.8)).Status==
+                "OFF_PATH",
+            "a two-tile plateau without earlier verified prefix movement remains invalid");
+        var awayGoal=new NavigationDestination("Away","safe",new(3300,3190),1);
+        walk.Stop();walk.Start(awayGoal,geom,now);walk.Sent(clientPlan,now,now);
+        walk.Observe(new(3244,3193),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3241,3195),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        Require(walk.Observe(new(3239,3195),now.AddSeconds(2.2),now.AddSeconds(2.3)).Status==
+                "OFF_PATH",
+            "client-path deviation increasing distance to selected destination remains a safety stop");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(clientPlan,now,now);
+        walk.Observe(new(3244,3193),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3241,3195),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        Require(walk.Observe(new(3236,3195),now.AddSeconds(2.2),now.AddSeconds(2.3)).Status==
+                "OFF_PATH",
+            "unbounded five-tile exporter jump still stops");
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
     }
