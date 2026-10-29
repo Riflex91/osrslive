@@ -128,7 +128,13 @@ internal sealed class RuneLiteWindow:Form
             UpdateDetailText();_=RefreshPosition();RefreshLogPreview();
         };
         copyLog.Text="Gesamte Logdatei kopieren";copyLog.AutoSize=true;
-        copyLog.Click+=(_,_)=>{failureLog.CopyToClipboard();UpdateFailureBanner();RefreshLogPreview();};
+        copyLog.Click+=(_,_)=>
+        {
+            if(autoWalk.Active)StopAutoWalk("USER_LOG_COPY",false,
+                "user_requested_diagnostics_during_active_walk=true "+
+                "no_more_clicks=true no_automatic_resume=true");
+            failureLog.CopyToClipboard();UpdateFailureBanner();RefreshLogPreview();
+        };
         checkUpdate.Text="Jetzt Updates prüfen";checkUpdate.AutoSize=true;
         checkUpdate.Click+=async(_,_)=>await CheckForUpdatesAsync("MANUAL");
         showExports.Text="Zusatzdaten ansehen";showExports.AutoSize=true;
@@ -303,8 +309,10 @@ internal sealed class RuneLiteWindow:Form
                 StopAutoWalk("RUNELITE_TITLE_CHANGED",true,"player_title_changed=true no_more_input=true");
             else if(autoWalk.Clicks>0&&!clickInProgress&&
                 !BackgroundWindowInput.IsRuneLiteForeground(source.TrustedWindowHandle))
-                StopAutoWalk("RUNELITE_FOREGROUND_LOST",true,
-                    "active_user_window_changed=true no_more_clicks=true input_not_targeted_elsewhere=true");
+                StopAutoWalk("RUNELITE_FOREGROUND_LOST",false,
+                    "intentional_foreground_only_safety_interruption=true "+
+                    "active_user_window_changed=true no_more_clicks=true "+
+                    "input_not_targeted_elsewhere=true no_automatic_resume=true");
             else if(state.Status is "RUNELITE_NOT_RUNNING" or "MULTIPLE_RUNELITE_CLIENTS" or
                 "PLUGIN_EXPORT_UNAVAILABLE" or "PLUGIN_EXPORT_INVALID" or "INTERNAL_ERROR")
                 StopAutoWalk("API_SOURCE_LOST",true,$"sample={sequence} state={state.Status}");
@@ -349,7 +357,9 @@ internal sealed class RuneLiteWindow:Form
                     else
                     {
                         log.Add(Severity.INFO,"RUNELITE_AUTOWALK",quiet.Status,quiet.Diagnostic);
-                        autoWalkDescription=quiet.Status=="CLIENT_ROUTE_QUIET_REPLAN"?
+                        autoWalkDescription=quiet.Status=="VERIFIED_PROGRESS_QUIET_REPLAN"?
+                            "Automatik: bestätigter Spielweg pausiert · kurze geprüfte Route aus frischer API-Position.":
+                            quiet.Status=="CLIENT_ROUTE_QUIET_REPLAN"?
                             "Automatik: echte Spielroute bestätigt · nach ruhiger Plugin-Position kurze geprüfte Route neu planen.":
                             quiet.Status=="CORRIDOR_THREE_TILE_QUIET_REPLAN"?
                             "Automatik: drei Kacheln vor Wegpunkt · kurze neue Route aus frischem Plugin-Tile.":
@@ -424,15 +434,25 @@ internal sealed class RuneLiteWindow:Form
         }
         if(state.Tile is not null)lastConfirmedUtc=DateTimeOffset.UtcNow;
         else if(!paused&&state.Status!="API_WAITING_FOR_NEW_EVENT"&&
+            state.Status!="RUNELITE_NOT_RUNNING"&&
+            !(state.Status=="PLUGIN_EXPORT_UNAVAILABLE"&&
+              DateTimeOffset.UtcNow-blockedSince<TimeSpan.FromSeconds(20))&&
             DateTimeOffset.UtcNow-lastConfirmedUtc>=TimeSpan.FromSeconds(10))
             failureLog.ReportFailure("RUNELITE","POSITION_NOT_CONFIRMED_TIMEOUT",
                 $"sample={sequence} latest_status={state.Status} "+
                 $"unconfirmed_s={(DateTimeOffset.UtcNow-lastConfirmedUtc).TotalSeconds:0} {state.Diagnostic}");
         bool stalledSecondFrame=state.Status=="WAITING_FOR_SECOND_FRAME"&&
             DateTimeOffset.UtcNow-blockedSince>=TimeSpan.FromSeconds(8);
-        if(stalledSecondFrame||(FailureLogPolicy.RuneLiteBlocked(state.Status)&&
+        // No red failure while the user is simply launching RuneLite or
+        // while Plugin Hub's exporter has not yet initialized. Existing
+        // foreground opt-in movement still hard-stops if its source is lost.
+        if(stalledSecondFrame||
+           (FailureLogPolicy.RuneLiteBlocked(state.Status)&&
+            state.Status!="RUNELITE_NOT_RUNNING"&&
             (state.Status is "INTERNAL_ERROR" or "OCR_LANGUAGE_UNAVAILABLE" or "MULTIPLE_RUNELITE_CLIENTS"||
-             DateTimeOffset.UtcNow-blockedSince>=TimeSpan.FromSeconds(4))))
+             DateTimeOffset.UtcNow-blockedSince>=
+                 (state.Status=="PLUGIN_EXPORT_UNAVAILABLE"?
+                     TimeSpan.FromSeconds(20):TimeSpan.FromSeconds(4)))))
             failureLog.ReportFailure("RUNELITE",state.Status,
                 $"sample={sequence} {state.Diagnostic} position_not_released=true stalled_second_frame={stalledSecondFrame}");
 
@@ -849,6 +869,10 @@ internal sealed class RuneLiteWindow:Form
         stopWalk.Enabled=false;startWalk.Enabled=!calibrating;
         autoWalkDescription=reason=="TARGET_REACHED"?
             "Automatik: Zielradius laut RuneLite-API erreicht!":
+            reason=="RUNELITE_FOREGROUND_LOST"?
+                "Automatik: angehalten, weil RuneLite nicht mehr im Vordergrund ist · kein automatisches Fortsetzen.":
+            reason=="USER_LOG_COPY"?
+                "Automatik: für die manuelle Logkopie sicher angehalten · kein automatisches Fortsetzen.":
             reason=="USER_MOUSE_INPUT_INTERRUPTED"?
                 "Automatik: durch gedrückte Maustaste gestoppt – zum Fortsetzen neu starten.":
             failed?"Automatik: FEHLER – gestoppt; bitte rotes Diagnosefeld beachten.":
