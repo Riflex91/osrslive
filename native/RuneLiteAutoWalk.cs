@@ -426,6 +426,15 @@ internal static class RuneLiteAutoWalkTests
                 RuneLiteAutoWalk.ProjectFinalGoalStep(finalFrom,finalPath,geom,
                     lumbridge with{Radius=2}) is null,
             "only one safe adjacent collision tile that actually enters the goal radius gets the close-click exception");
+        Require(BackgroundWindowInput.IsManualMouseInterruption(
+                    new(false,"PHYSICAL_MOUSE_BUTTON_HELD",0))&&
+                BackgroundWindowInput.IsManualMouseInterruption(
+                    new(false,"PHYSICAL_MOUSE_BUTTON_HELD_BEFORE_CLICK",1))&&
+                !BackgroundWindowInput.IsManualMouseInterruption(
+                    new(false,"RUNELITE_NOT_FOREGROUND",0))&&
+                !BackgroundWindowInput.IsManualMouseInterruption(
+                    new(true,"PHYSICAL_MOUSE_BUTTON_HELD",3)),
+            "mouse-held interruption must not be reported as an automated navigation defect");
         Require(BackgroundWindowInput.MouseInputStructSize()==(IntPtr.Size==8?40:28),
             "SendInput MOUSEINPUT and INPUT must match the native architecture layout");
         RuneLiteInputShield.SelfTest();
@@ -776,6 +785,30 @@ internal static class RuneLiteAutoWalkTests
         Require(walk.Observe(new(3236,3296),now.AddSeconds(2.4),now.AddSeconds(2.6)).Status==
                 "OFF_PATH",
             "a two-tile sideways jump may never use the one-tile lateral grace");
+        // Replay the actual v1.8.33 final Lumbridge click (29 October 2026):
+        // the first API sample is 1 tile off the prefix, then the exporter
+        // confirms the destination inside the configured four-tile radius.
+        var liveFrom=new WorldTile(3232,3219);
+        WorldTile[] livePrefix=[new(3231,3218),new(3230,3219),
+            new(3229,3218),new(3228,3218),new(3227,3219),new(3226,3220)];
+        var livePlan=RuneLiteAutoWalk.Project(liveFrom,
+            livePrefix.Select(t=>new PathStep(t)).ToArray(),geom)!;
+        Require(livePlan.Waypoint==new WorldTile(3226,3220)&&livePlan.WaypointIndex==6,
+            "real v1.8.33 final click uses a verified six-step collision prefix");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(livePlan,now,now);
+        var liveCorridor=walk.Observe(new(3228,3219),
+            now.AddMilliseconds(900),now.AddSeconds(1));
+        Require(liveCorridor.Status=="CORRIDOR_PROGRESS_CONFIRMED"&&
+                walk.WaitingForMovement&&
+                !walk.CanDispatch(now.AddSeconds(1),now.AddMilliseconds(900)),
+            "live off-prefix intermediate tile may not trigger an extra click");
+        var liveArrival=walk.Observe(new(3226,3220),
+            now.AddMilliseconds(1800),now.AddSeconds(1.9));
+        Require(liveArrival.Status=="WAYPOINT_CONFIRMED"&&
+                !walk.WaitingForMovement&&
+                new WorldTile(3226,3220).Distance(lumbridge.Tile)<=lumbridge.Radius&&
+                new WorldTile(3226,3222).Distance(lumbridge.Tile)<=lumbridge.Radius,
+            "real v1.8.33 route reaches and remains in the configured Lumbridge radius");
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
     }
