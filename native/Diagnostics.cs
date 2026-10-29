@@ -15,7 +15,7 @@ internal sealed record LogEvent(long Id, DateTimeOffset Timestamp, long Monotoni
 
 internal sealed class Diagnostics
 {
-    internal const string Version="1.8.36";
+    internal const string Version="1.8.37";
     private const int Capacity=10000;
     // Full pixel-grid decisions exceed 480 chars. Do not discard the final
     // full_matches/distinct_positions/result fields from the real file and

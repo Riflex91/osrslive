@@ -388,6 +388,24 @@ internal sealed class RuneLiteAutoWalk
         bool nearWaypoint=p.LastObserved.Distance(p.Plan.Waypoint)==2&&
             (p.LastIndex>=2||p.CorridorSamples>=2)&&
             now-p.LastProgressAt>=NearWaypointStallDelay;
+        // Real v1.8.36 live log: fourth injected click from (3234,3171)
+        // approached (3238,3178), and the exporter confirmed an exact
+        // prefix tile (3234,3173), then a valid corridor tile (3235,3175).
+        // The remaining waypoint distance was THREE tiles. A 2-tile-only
+        // quiet recovery left the controller pending until foreground loss.
+        // This narrowly covers a mixed exact+forward-corridor progression,
+        // never a first observation, unsupported detour or unknown position.
+        bool threeTileCorridorQuiet=p.LastObserved.Distance(p.Plan.Waypoint)==3&&
+            p.LastIndex>=2&&p.CorridorSamples>=1&&
+            !p.CorridorPlateauObserved&&p.TransitionDetourSamples==0&&
+            Destination is { } corridorDestination&&
+            tile.Plane==p.Plan.From.Plane&&
+            tile.Plane==corridorDestination.Tile.Plane&&
+            tile.Distance(p.Plan.Waypoint)<p.Plan.From.Distance(p.Plan.Waypoint)&&
+            tile.Distance(corridorDestination.Tile)<
+                p.Plan.From.Distance(corridorDestination.Tile)&&
+            now-p.LastProgressAt>=NearWaypointStallDelay&&
+            now-p.SentAt<=EventTimeout;
         // v1.8.34 live (29 Oct, 18:02): after a confirmed waypoint,
         // the game took three genuine off-prefix movement observations
         // 3255,3244 -> 3254,3240 -> 3255,3239. They progressed toward
@@ -407,7 +425,8 @@ internal sealed class RuneLiteAutoWalk
             tile.Distance(destination.Tile)<p.Plan.From.Distance(destination.Tile)&&
             now-eventAt>=NearWaypointStallDelay&&
             now-p.SentAt<=EventTimeout;
-        if(!nearWaypoint&&!transitionDetour&&!plateauRecovery)return null;
+        if(!nearWaypoint&&!transitionDetour&&!plateauRecovery&&
+           !threeTileCorridorQuiet)return null;
         string diagnostic=$"last_confirmed={tile.X},{tile.Y},{tile.Plane} "+
             $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
             $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
@@ -416,6 +435,7 @@ internal sealed class RuneLiteAutoWalk
             $"corridor_samples={p.CorridorSamples} "+
             $"transition_detour_samples={p.TransitionDetourSamples} "+
             $"corridor_lateral_plateau={plateauRecovery.ToString().ToLowerInvariant()} "+
+            $"three_tile_corridor_quiet={threeTileCorridorQuiet.ToString().ToLowerInvariant()} "+
             $"quiet_ms={(now-(transitionDetour?eventAt:p.LastProgressAt)).TotalMilliseconds:0} "+
             $"last_api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"time_since_click_ms={(now-p.SentAt).TotalMilliseconds:0} "+
@@ -427,8 +447,9 @@ internal sealed class RuneLiteAutoWalk
             return new("RECOVERY_LIMIT_REACHED",diagnostic+
                 "no_additional_input_permitted=true",false);
         corridorReplans++;pending=null;quietReplanRequestedAt=now;
-        shortNextClick=transitionDetour||plateauRecovery;
+        shortNextClick=transitionDetour||plateauRecovery||threeTileCorridorQuiet;
         return new(transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
+                threeTileCorridorQuiet?"CORRIDOR_THREE_TILE_QUIET_REPLAN":
                 plateauRecovery?"CORRIDOR_PLATEAU_QUIET_REPLAN":
                 p.NearEndpointLateralSamples>0?
                 "WAYPOINT_LATERAL_QUIET_REPLAN":"WAYPOINT_QUIET_REPLAN",diagnostic+
@@ -1074,6 +1095,72 @@ internal static class RuneLiteAutoWalkTests
         Require(walk.Observe(new(3229,3220),now.AddSeconds(2.4),now.AddSeconds(2.5)).Status==
                 "OFF_PATH",
             "a side step toward the clicked waypoint but farther from the selected destination is not a safe plateau");
+        // v1.8.36 live test, 29 Oct 18:37:41-18:37:50: verified
+        // (3234,3173) exact prefix followed by (3235,3175) bounded
+        // corridor progress. No further exporter tile arrived. A
+        // distance-3 stall used to wait indefinitely for (3238,3178).
+        PathStep[] threeTilePrefix=[
+            new(new(3233,3172)),new(new(3234,3173)),
+            new(new(3235,3174)),new(new(3236,3175)),
+            new(new(3237,3176)),new(new(3237,3177)),
+            new(new(3238,3178))];
+        var threeTilePlan=RuneLiteAutoWalk.Project(
+            new(3234,3171),threeTilePrefix,geom)!;
+        Require(threeTilePlan.Waypoint==new WorldTile(3238,3178)&&
+                threeTilePlan.WaypointIndex==7,
+            "real v1.8.36 fourth click and checked collision prefix");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(threeTilePlan,now,now);
+        Require(walk.Observe(new(3234,3173),now.AddSeconds(.6),now.AddSeconds(.8)).Status==
+                "PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3235,3175),now.AddSeconds(1.3),now.AddSeconds(1.7)).Status==
+                "CORRIDOR_PROGRESS_CONFIRMED",
+            "true API events must establish both exact and corridor progress");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3175),
+                    now.AddSeconds(1.3),now.AddSeconds(2.6)) is null&&
+                walk.WaitingForMovement&&!walk.ShortNextClick,
+            "no replan while quiet interval or click age is too short");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3175),
+                    now.AddSeconds(1.3),now.AddSeconds(3.4))?.Status==
+                "CORRIDOR_THREE_TILE_QUIET_REPLAN"&&
+                !walk.WaitingForMovement&&walk.CorridorReplans==1&&
+                walk.ShortNextClick&&
+                walk.CanDispatch(now.AddSeconds(3.4),now.AddSeconds(1.3)),
+            "real distance-3 quiet stall permits one short verified replan from fresh API tile");
+        PathStep[] threeTileNextPath=Enumerable.Range(1,8)
+            .Select(i=>new PathStep(new WorldTile(3235-i,3175+i))).ToArray();
+        var threeTileShort=RuneLiteAutoWalk.Project(new(3235,3175),
+            threeTileNextPath,geom,RuneLiteAutoWalk.RecoveryPrefixSteps)!;
+        Require(threeTileShort.WaypointIndex==RuneLiteAutoWalk.RecoveryPrefixSteps,
+            "next click is limited to six checked adjacent collision steps");
+        walk.Sent(threeTileShort,now.AddSeconds(1.3),now.AddSeconds(3.4));
+        Require(walk.WaitingForMovement&&!walk.ShortNextClick&&
+                !walk.CanDispatch(now.AddSeconds(3.5),now.AddSeconds(1.3)),
+            "replan remains single-shot and awaits independent new API feedback");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(threeTilePlan,now,now);
+        walk.Observe(new(3234,3173),now.AddSeconds(.6),now.AddSeconds(.8));
+        walk.Observe(new(3235,3175),now.AddSeconds(1.3),now.AddSeconds(1.7));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3175),
+                    now.AddSeconds(1.3),now.AddSeconds(4.4)) is null&&
+                walk.WaitingForMovement,
+            "older-than-3s exporter tile never authorizes three-tile recovery");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3174),
+                    now.AddSeconds(1.3),now.AddSeconds(3.4)) is null,
+            "a different, unverified tile cannot silently replace the last exporter observation");
+        walk.Stop();
+        var backwardGoal=new NavigationDestination("Backwards","safe",new(3200,3100),1);
+        walk.Start(backwardGoal,geom,now);walk.Sent(threeTilePlan,now,now);
+        walk.Observe(new(3234,3173),now.AddSeconds(.6),now.AddSeconds(.8));
+        walk.Observe(new(3235,3175),now.AddSeconds(1.3),now.AddSeconds(1.7));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3235,3175),
+                    now.AddSeconds(1.3),now.AddSeconds(3.4)) is null&&
+                walk.WaitingForMovement,
+            "progress toward click but away from selected destination must not unlock a new click");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(threeTilePlan,now,now);
+        walk.Observe(new(3234,3173),now.AddSeconds(.6),now.AddSeconds(.8));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3234,3173),
+                    now.AddSeconds(.6),now.AddSeconds(3.4)) is null&&
+                walk.WaitingForMovement,
+            "one exact-prefix event without corridor movement is insufficient for three-tile retry");
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
     }
