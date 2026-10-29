@@ -1194,8 +1194,12 @@ internal static class RuneLiteAutoWalkTests
             "a second lateral turn away from the clicked waypoint is still a hard stop");
         walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(secondPlateauPlan,now,now);
         Require(walk.Observe(new(3238,3180),now.AddSeconds(.8),now.AddSeconds(.9)).Status==
+                "CORRIDOR_PROGRESS_CONFIRMED"&&walk.WaitingForMovement,
+            "bounded first northward step closer to the final destination is now observed, rather than falsely stopped before any A* prefix match");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(secondPlateauPlan,now,now);
+        Require(walk.Observe(new(3239,3179),now.AddSeconds(.8),now.AddSeconds(.9)).Status==
                 "OFF_PATH",
-            "without prior exact or corridor progress a random early off-prefix tile remains blocked");
+            "early sideways one-tile movement not reducing final destination distance remains blocked");
         var oppositeGoal=new NavigationDestination("Opposite","safe",new(3300,3218),1);
         walk.Stop();walk.Start(oppositeGoal,geom,now);walk.Sent(firstPlateauPlan,now,now);
         walk.Observe(new(3232,3219),now.AddSeconds(.8),now.AddSeconds(.9));
@@ -1403,11 +1407,11 @@ internal static class RuneLiteAutoWalkTests
                 "CORRIDOR_PROGRESS_CONFIRMED"&&
                 walk.Observe(new(3236,3164),
                     now.AddSeconds(3.6),now.AddSeconds(3.7)).Status==
-                "PROGRESS_CONFIRMED"&&
+                "WAYPOINT_CONFIRMED"&&
+                !walk.WaitingForMovement&&walk.Clicks==1&&
                 walk.Observe(new(3237,3165),
                     now.AddSeconds(4.2),now.AddSeconds(4.3)).Status==
-                "WAYPOINT_CONFIRMED"&&
-                !walk.WaitingForMovement&&walk.Clicks==1,
+                "IGNORED",
             "entire REAL post-false-stop exporter series verifies only the original click");
         walk.Stop();walk.Start(lumbridge,geom,now);
         walk.Sent(firstClientPlan,now,now);
