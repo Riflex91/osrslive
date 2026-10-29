@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.8.37</Version>
+    <Version>1.8.38</Version>
     <AssemblyName>OSRS-Play</AssemblyName>
     <ApplicationTitle>OSRS Play</ApplicationTitle>
     <PublishSingleFile>true</PublishSingleFile>
