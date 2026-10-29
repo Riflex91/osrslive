@@ -154,6 +154,32 @@ internal sealed class RuneLiteAutoWalk
            eventAt<=pending.LastObservedEventAt)
             return new("IGNORED","no_post_click_api_event=true",false);
         var p=pending;
+        // Goal arrival is a property of the newly observed GAME tile,
+        // not of whether it matches the intermediary A* click waypoint.
+        // v1.8.38 RC2 live: the final single-tile click from (3227,3219)
+        // toward (3226,3218) was followed by real RuneLite API tile
+        // (3226,3217), inside the selected Lumbridge 4-tile radius.
+        // The old prefix verifier raised OFF_PATH before the route reader
+        // could report ARRIVED on the very same authenticated event.
+        //
+        // Keep the established freshness check above, same-plane and
+        // bounded jump checks; success cannot be inferred from pixels,
+        // from an old event, or from an unrelated far-away teleport.
+        if(Destination is { } goal&&tile.Plane==goal.Tile.Plane&&
+           tile.Distance(goal.Tile)<=goal.Radius&&
+           tile.Distance(p.LastObserved)<=MaxObservedTileJump)
+        {
+            pending=null;
+            return new("TARGET_REACHED",
+                $"observed={tile.X},{tile.Y},{tile.Plane} "+
+                $"destination={goal.Tile.X},{goal.Tile.Y},{goal.Tile.Plane} "+
+                $"destination_radius={goal.Radius} "+
+                $"previous={p.LastObserved.X},{p.LastObserved.Y},{p.LastObserved.Plane} "+
+                $"observed_jump={tile.Distance(p.LastObserved)}/{MaxObservedTileJump} "+
+                "newer_than_last_click=true source=NEW_PLUGIN_API_EVENT "+
+                "goal_verified_before_prefix_matching=true "+
+                "no_additional_click_required=true screenshot_position_estimation=false",true);
+        }
         int index=Array.FindIndex(p.Plan.PathPrefix,t=>t==tile)+1;
         // A reread of the same exporter event is NOT a new move. Even a
         // genuinely later event at the same tile is no backwards motion.
@@ -1428,6 +1454,54 @@ internal static class RuneLiteAutoWalkTests
         Require(walk.Observe(new(3233,3159),now.AddSeconds(3.5),
                     now.AddSeconds(3.6)).Status=="OFF_PATH",
             "a first off-prefix one-tile observation cannot be accepted arbitrarily late");
+        // End-to-end REAL 1.8.38 RC2 log, 29 October 19:20:56–57:
+        // The user-armed companion successfully walked ~60 route tiles
+        // with 11 actual foreground clicks. The final collision-verified
+        // click was from (3227,3219) to (3226,3218), but the game
+        // exported (3226,3217). It is within radius 4 of Lumbridge
+        // (3222,3218). The old observer reported UNEXPECTED_API_TILE
+        // BEFORE the route reader reported ARRIVED, remaining_steps=0.
+        // Arrival must take precedence over exact clicked-waypoint
+        // matching when the POST-CLICK API tile is both fresh and near.
+        var finalFrom=new WorldTile(3227,3219);
+        var finalPath=new PathStep[]{new(new WorldTile(3226,3218))};
+        var finalStepPlan=RuneLiteAutoWalk.ProjectFinalGoalStep(
+            finalFrom,finalPath,geom,lumbridge)!;
+        Require(finalStepPlan is not null&&
+                finalStepPlan.Waypoint==new WorldTile(3226,3218)&&
+                finalFrom.Distance(lumbridge.Tile)>lumbridge.Radius,
+            "reproduce real final goal-radius one-tile click without pre-existing arrival");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(finalStepPlan,now,now);
+        Require(walk.Observe(new(3226,3217),
+                    now.AddSeconds(.6),now.AddSeconds(.7)).Status==
+                "TARGET_REACHED"&&
+                !walk.WaitingForMovement&&walk.Clicks==1,
+            "actual in-goal-region RuneLite tile wins over divergent A* click endpoint");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(finalStepPlan,now,now);
+        Require(walk.Observe(new(3227,3219),
+                    now.AddSeconds(.6),now.AddSeconds(.7)).Status=="IGNORED"&&
+                walk.WaitingForMovement,
+            "unchanged post-click player tile does not prove the goal was reached");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(finalStepPlan,now,now);
+        Require(walk.Observe(new(3226,3217),
+                    now.AddSeconds(-.1),now.AddSeconds(.7)).Status=="IGNORED"&&
+                walk.WaitingForMovement,
+            "old pre-click API tile cannot falsely confirm arrival");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(finalStepPlan,now,now);
+        Require(walk.Observe(new(3226,3217,1),
+                    now.AddSeconds(.6),now.AddSeconds(.7)).Status!="TARGET_REACHED"&&
+                walk.WaitingForMovement,
+            "wrong-plane movement must not confirm Lumbridge arrival");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(finalStepPlan,now,now);
+        Require(walk.Observe(new(3218,3218),
+                    now.AddSeconds(.6),now.AddSeconds(.7)).Status!="TARGET_REACHED"&&
+                walk.WaitingForMovement,
+            "long unsupported jump into goal radius must not silently count as success");
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
     }
