@@ -531,6 +531,7 @@ internal sealed class RuneLiteAutoWalk
         // One early waypoint-1 observation is also not completion. The
         // same quiet rule covers this without preempting the in-game click.
         bool verifiedProgressQuiet=p.LastIndex>=2&&
+            p.NearEndpointLateralSamples==0&&!p.CorridorPlateauObserved&&
             (p.CorridorSamples>=1||
              p.LastIndex>=Math.Max(2,p.Plan.WaypointIndex-2))&&
             p.TransitionDetourSamples==0&&
