@@ -1650,6 +1650,77 @@ internal static class RuneLiteAutoWalkTests
                     now.AddSeconds(1.5),now.AddSeconds(4.6)) is null&&
                 walk.WaitingForMovement,
             "same legitimate detour still forbids a new click from a >3s old plugin event");
+        // Full RC4 29 Oct 20:05:42–43 final approach from the
+        // uploaded 712-line real RuneLite export:
+        // A successful 7th foreground click from (3227,3220)
+        // intended (3226,3219), a white-dot-adjacent diagonal
+        // 5.7 px away. RuneLite instead emitted (3227,3218).
+        // This is genuine progress (Manhattan goal distance 7->5)
+        // but still exactly ONE tile outside Lumbridge's radius 4.
+        // Hard-stopping OFF_PATH was false; reporting arrival would
+        // also be false. Replan only after a quiet, fresh client event.
+        var microFrom=new WorldTile(3227,3220);
+        PathStep[] microPath=[new(new WorldTile(3226,3219))];
+        var microClick=RuneLiteAutoWalk.ProjectFinalGoalStep(
+            microFrom,microPath,geom,lumbridge)!;
+        Require(microClick is not null&&
+                microClick.Waypoint==new WorldTile(3226,3219)&&
+                microFrom.Distance(lumbridge.Tile)==5,
+            "RC4 seventh click and out-of-goal starting position reconstructed");
+        PathStep[] innerGoalPrefix=[
+            new(new(3226,3219)),new(new(3225,3218)),
+            new(new(3224,3218))];
+        var deeperGoal=RuneLiteAutoWalk.ProjectDeepFinalApproach(
+            microFrom,lumbridge,innerGoalPrefix,geom);
+        Require(deeperGoal is not null&&
+                deeperGoal.Waypoint==new WorldTile(3224,3218)&&
+                deeperGoal.WaypointIndex==3&&
+                Math.Sqrt(Math.Pow(deeperGoal.Pixel.X-geom.PlayerCenter.X,2)+
+                    Math.Pow(deeperGoal.Pixel.Y-geom.PlayerCenter.Y,2))>=7,
+            "target deeper in goal via three independently checked steps instead of white-dot click");
+        Require(RuneLiteAutoWalk.ProjectDeepFinalApproach(
+                    microFrom,lumbridge,microPath,geom) is null&&
+                RuneLiteAutoWalk.ProjectDeepFinalApproach(microFrom,
+                    lumbridge,[new(new(3226,3219)),new(new(3215,3212))],geom) is null&&
+                RuneLiteAutoWalk.ProjectDeepFinalApproach(microFrom,
+                    lumbridge,[new(new(3226,3219)),new(new(3225,3218),
+                        new MapTransport(new(3226,3219),new(3225,3218),"Climb","ladder"))],geom) is null,
+            "no deeper click on one-tile plan, unverified map leap or transport");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(microClick,now,now);
+        var microMoved=walk.Observe(new(3227,3218),
+            now.AddSeconds(.6),now.AddSeconds(.7));
+        Require(microMoved.Status=="FINAL_APPROACH_PROGRESS_OBSERVED"&&
+                microMoved.Continue&&walk.WaitingForMovement&&walk.Clicks==1&&
+                !walk.CanDispatch(now.AddSeconds(.7),now.AddSeconds(.6)),
+            "real final-close-click (3227,3218) is client movement, NOT a failure or false goal");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3227,3218),
+                    now.AddSeconds(.6),now.AddSeconds(2)) is null&&
+                walk.WaitingForMovement,
+            "quiet final-stage movement cannot produce an immediate extra click");
+        var microQuiet=walk.RecoverNearWaypointAfterQuietPeriod(
+            new(3227,3218),now.AddSeconds(.6),now.AddSeconds(3.1));
+        Require(microQuiet?.Status=="FINAL_APPROACH_QUIET_REPLAN"&&
+                microQuiet.Continue&&walk.ShortNextClick&&
+                !walk.WaitingForMovement&&walk.CorridorReplans==1&&
+                walk.CanDispatch(now.AddSeconds(3.1),now.AddSeconds(.6)),
+            "RC4 final-stage client detour can resume ONLY from fresh verified API tile");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(microClick,now,now);
+        walk.Observe(new(3227,3218),now.AddSeconds(.6),now.AddSeconds(.7));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3227,3218),
+                    now.AddSeconds(.6),now.AddSeconds(3.7)) is null&&
+                walk.WaitingForMovement,
+            "stale last final-stage plugin event cannot authorize any replan");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(microClick,now,now);
+        Require(walk.Observe(new(3228,3221),
+                    now.AddSeconds(.6),now.AddSeconds(.7)).Status=="OFF_PATH"&&
+                walk.WaitingForMovement,
+            "final-stage wrong-way movement is still rejected");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(microClick,now,now);
+        Require(walk.Observe(new(3224,3218),
+                    now.AddSeconds(.6),now.AddSeconds(.7)).Status==
+                "TARGET_REACHED"&&!walk.WaitingForMovement,
+            "authentic bounded goal-radius API tile still completes safely");
+
         // End-to-end REAL 1.8.38 RC2 log, 29 October 19:20:56–57:
         // The user-armed companion successfully walked ~60 route tiles
         // with 11 actual foreground clicks. The final collision-verified
