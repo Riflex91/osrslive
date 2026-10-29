@@ -1,5 +1,24 @@
 # Weiterarbeit an OSRS Play
 
+- 1.8.36: Das v1.8.35-Live-Log vom 29.10.2026
+  (18:17–18:20) belegt trotz 7+5 tatsächlicher
+  Vordergrund-Klickfolgen zwei zu strikte
+  `UNEXPECTED_API_TILE`-Abbrüche: nach Korridorfortschritt
+  ein einzelner Seitwärtsschritt bei gleichbleibender
+  Wegpunktdistanz 2 bzw. 3, aber näher zum Endziel.
+  1.8.36 beobachtet höchstens einen solchen kleinen
+  `CORRIDOR_LATERAL_PLATEAU_OBSERVED`-Schritt
+  ohne zusätzlichen Input und erlaubt nur bei
+  höchstens 3 Sekunden alter API-Position,
+  1,6 Sekunden ohne neue Bewegungsbeobachtung
+  und weiter geprüfter Kollisionsroute ein
+  höchstens sechs Tiles langes
+  `CORRIDOR_PLATEAU_QUIET_REPLAN`.
+  Kumuliertes Replan-Limit bleibt 4,
+  nach Fokusverlust wird nie wiederaufgenommen.
+  Selbsttests modellieren beide echten Präfixe
+  und Negativfälle; neuer Live-Test erforderlich.
+
 - 1.8.35: Das echte v1.8.34-Log (29.10.2026, 18:02) zeigt nach
   vier eingefügten Vordergrund-Klickfolgen einen abweichenden,
   aber mehrfach API-bestätigten Spielweg: vom Klick
