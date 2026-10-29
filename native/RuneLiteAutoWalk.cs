@@ -1270,6 +1270,24 @@ internal static class RuneLiteAutoWalkTests
                 walk.Clicks==1&&walk.CorridorReplans==0&&
                 !walk.CanDispatch(now.AddSeconds(2.3),now.AddSeconds(2.2)),
             "two-tile client-path divergence, same Chebyshev waypoint distance, nearer final goal cannot hard stop or instantly click");
+        // Crucial evidence: the real exporter reported (3239,3196)
+        // ~0.8 seconds AFTER the old program stopped. That fresh tile is
+        // within one tile of the clicked waypoint. Had we not stopped
+        // prematurely, this observation would have confirmed the
+        // in-flight click and naturally unlocked a fresh collision route.
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(clientPlan,now,now);
+        walk.Observe(new(3244,3193),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3241,3195),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        Require(walk.Observe(new(3239,3195),now.AddSeconds(2.2),now.AddSeconds(2.3)).Status==
+                "CLIENT_ROUTE_PROGRESS_OBSERVED"&&
+                walk.Observe(new(3239,3196),now.AddSeconds(2.8),now.AddSeconds(2.9)).Status==
+                "WAYPOINT_NEAR_CONFIRMED"&&
+                !walk.WaitingForMovement&&walk.Clicks==1,
+            "real post-stop exporter event would have verified original click with no extra recovery click");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(clientPlan,now,now);
+        walk.Observe(new(3244,3193),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3241,3195),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        walk.Observe(new(3239,3195),now.AddSeconds(2.2),now.AddSeconds(2.3));
         Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3239,3195),
                     now.AddSeconds(2.2),now.AddSeconds(3.2)) is null&&
                 walk.WaitingForMovement,
