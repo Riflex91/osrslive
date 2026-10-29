@@ -361,14 +361,39 @@ internal sealed class RuneLiteAutoWalk
             // It may only hold the existing click briefly; an exact waypoint
             // or the existing time-limited, fresh-API quiet replan is needed
             // before another game input is permitted.
+            // Real 1.8.40 final sample 20:21:15:
+            // (3242,3195) is exact A* prefix index 8/9 and the RuneLite
+            // client chooses (3241,3196), one tile west+north, NOT the
+            // clicked (3242,3196). Both observations are distance 1
+            // from the clicked waypoint but the game is moving toward
+            // the selected final goal (Manhattan 43 -> 41).
+            //
+            // Hold exactly one neighboring lateral observation after
+            // proven late A* prefix progress, not an automatic waypoint
+            // confirmation or a second input. Only after a fresh API
+            // quiet window may the collision router replan. Preserve
+            // the historical distance-2 lateral hold unchanged.
+            bool oneTileEndpointProgress=false;
+            if(before==1&&after==1&&Destination is { } endpointGoal&&
+               tile.Plane==endpointGoal.Tile.Plane&&
+               p.LastObserved.Plane==endpointGoal.Tile.Plane)
+            {
+                int priorGoalDistance=Math.Abs(p.LastObserved.X-endpointGoal.Tile.X)+
+                    Math.Abs(p.LastObserved.Y-endpointGoal.Tile.Y);
+                int currentGoalDistance=Math.Abs(tile.X-endpointGoal.Tile.X)+
+                    Math.Abs(tile.Y-endpointGoal.Tile.Y);
+                oneTileEndpointProgress=currentGoalDistance<priorGoalDistance;
+            }
             bool nearEndpointLateral=tile.Plane==p.Plan.Waypoint.Plane&&
                 p.NearEndpointLateralSamples<MaxNearEndpointLateralSamples&&
                 p.LastIndex>=Math.Max(3,p.Plan.WaypointIndex/2)&&
-                jump==1&&before==2&&after==2&&
+                jump==1&&before==after&&
+                (before==2||oneTileEndpointProgress)&&
                 closestDistance<=MaxCorridorDistance&&
                 closestIndex>=p.LastIndex&&
                 now-p.SentAt<=TimeSpan.FromSeconds(5)&&
                 now-p.LastProgressAt<=EventTimeout&&
+                eventAt-p.LastObservedEventAt>TimeSpan.Zero&&
                 eventAt-p.LastObservedEventAt<=TimeSpan.FromSeconds(2);
             // v1.8.35 real run: the game is already making progress in a
             // narrow, verified corridor when it takes ONE additional side
@@ -403,6 +428,7 @@ internal sealed class RuneLiteAutoWalk
                     $"tile_jump={jump} waypoint_distance_before={before} waypoint_distance_after={after} "+
                     $"closest_prefix_index={closestIndex} closest_prefix_distance={closestDistance} "+
                     $"last_exact_prefix_index={p.LastIndex} "+
+                    $"one_tile_endpoint_progress={oneTileEndpointProgress.ToString().ToLowerInvariant()} "+
                     $"corridor_samples={p.CorridorSamples} "+
                     $"plateau={corridorPlateau.ToString().ToLowerInvariant()} "+
                     $"lateral_samples={p.NearEndpointLateralSamples+1}/{MaxNearEndpointLateralSamples} "+
@@ -561,7 +587,10 @@ internal sealed class RuneLiteAutoWalk
             p.LastObserved.Distance(p.Plan.Waypoint) is >=2 and <=3&&
             now-p.LastProgressAt>=NearWaypointStallDelay&&
             now-p.SentAt<=EventTimeout;
-        bool nearWaypoint=p.LastObserved.Distance(p.Plan.Waypoint)==2&&
+        bool nearWaypoint=
+            (p.LastObserved.Distance(p.Plan.Waypoint)==2||
+             (p.LastObserved.Distance(p.Plan.Waypoint)==1&&
+              p.NearEndpointLateralSamples==1))&&
             (p.LastIndex>=2||p.CorridorSamples>=2)&&
             now-p.LastProgressAt>=NearWaypointStallDelay;
         // Real v1.8.36 live log: fourth injected click from (3234,3171)
@@ -689,7 +718,8 @@ internal sealed class RuneLiteAutoWalk
                 "no_additional_input_permitted=true",false);
         corridorReplans++;pending=null;quietReplanRequestedAt=now;
         shortNextClick=transitionDetour||plateauRecovery||verifiedProgressQuiet||
-            clientRouteQuiet||finalApproachQuiet;
+            clientRouteQuiet||finalApproachQuiet||
+            (nearWaypoint&&p.NearEndpointLateralSamples>0);
         return new(finalApproachQuiet?"FINAL_APPROACH_QUIET_REPLAN":
                 transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
                 clientRouteQuiet?"CLIENT_ROUTE_QUIET_REPLAN":
@@ -1569,6 +1599,89 @@ internal static class RuneLiteAutoWalkTests
         Require(walk.Observe(new(3233,3159),now.AddSeconds(3.5),
                     now.AddSeconds(3.6)).Status=="OFF_PATH",
             "a first off-prefix one-tile observation cannot be accepted arbitrarily late");
+        // Full REAL 1.8.40 user log, 29 Oct 20:21:12–15 (click 6):
+        // RuneLite click from (3243,3190) aimed at (3242,3196)
+        // through a nine-tile verified collision prefix. Exporter
+        // observed four exact progressive tiles, last (3242,3195)
+        // at prefix index 8, then a REAL client step (3241,3196).
+        // The clicked-point Chebyshev distance remained ONE, but
+        // Manhattan distance to Lumbridge went from 43 to 41.
+        // Prior 1.8.40 immediately reported UNEXPECTED_API_TILE.
+        PathStep[] rc5Prefix=[
+            new(new(3244,3190)),new(new(3244,3191)),
+            new(new(3244,3192)),new(new(3244,3193)),
+            new(new(3244,3194)),new(new(3244,3195)),
+            new(new(3243,3195)),new(new(3242,3195)),
+            new(new(3242,3196))];
+        var rc5Plan=RuneLiteAutoWalk.Project(
+            new(3243,3190),rc5Prefix,geom)!;
+        Require(rc5Plan.Waypoint==new WorldTile(3242,3196)&&
+                rc5Plan.WaypointIndex==9,
+            "RC5 exact ninth-prefix RuneLite click is reconstructed");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(rc5Plan,now,now);
+        Require(walk.Observe(new(3244,3191),
+                    now.AddSeconds(.7),now.AddSeconds(.8)).Status=="PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3244,3193),
+                    now.AddSeconds(1.5),now.AddSeconds(1.6)).Status=="PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3242,3195),
+                    now.AddSeconds(2.3),now.AddSeconds(2.4)).Status=="PROGRESS_CONFIRMED",
+            "three real later A* prefix observations of 1.8.40 progress are valid");
+        var rc5Lateral=walk.Observe(new(3241,3196),
+            now.AddSeconds(2.9),now.AddSeconds(3.0));
+        Require(rc5Lateral.Status=="NEAR_WAYPOINT_LATERAL_OBSERVED"&&
+                rc5Lateral.Continue&&walk.WaitingForMovement&&
+                walk.Clicks==1&&walk.CorridorReplans==0&&
+                !walk.CanDispatch(now.AddSeconds(3.0),now.AddSeconds(2.9)),
+            "genuine last-one-tile side step nearer to Lumbridge is observed not stopped or treated as reached");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3241,3196),
+                    now.AddSeconds(2.9),now.AddSeconds(4)) is null&&
+                walk.WaitingForMovement,
+            "no second click before quiet has elapsed");
+        var rc5Recovery=walk.RecoverNearWaypointAfterQuietPeriod(
+            new(3241,3196),now.AddSeconds(2.9),now.AddSeconds(4.7));
+        Require(rc5Recovery?.Status=="WAYPOINT_LATERAL_QUIET_REPLAN"&&
+                !walk.WaitingForMovement&&walk.ShortNextClick&&
+                walk.CorridorReplans==1&&
+                walk.CanDispatch(now.AddSeconds(4.7),now.AddSeconds(2.9)),
+            "real one-tile lateral needs quiet verified short collision replan, never immediate second click");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(rc5Plan,now,now);
+        walk.Observe(new(3244,3191),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3244,3193),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        walk.Observe(new(3242,3195),now.AddSeconds(2.3),now.AddSeconds(2.4));
+        Require(walk.Observe(new(3241,3195),
+                    now.AddSeconds(2.9),now.AddSeconds(3.0)).Status=="OFF_PATH",
+            "side step away from clicked waypoint and no closer to chosen goal is still rejected");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(rc5Plan,now,now);
+        walk.Observe(new(3244,3191),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3244,3193),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        walk.Observe(new(3242,3195),now.AddSeconds(2.3),now.AddSeconds(2.4));
+        walk.Observe(new(3241,3196),now.AddSeconds(2.9),now.AddSeconds(3.0));
+        Require(walk.Observe(new(3240,3196),
+                    now.AddSeconds(3.4),now.AddSeconds(3.5)).Status=="OFF_PATH",
+            "two successive lateral deviations cannot chain unverified path confirmation");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(rc5Plan,now,now);
+        walk.Observe(new(3244,3191),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3244,3193),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        walk.Observe(new(3242,3195),now.AddSeconds(2.3),now.AddSeconds(2.4));
+        walk.Observe(new(3241,3196),now.AddSeconds(2.9),now.AddSeconds(3.0));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3241,3196),
+                    now.AddSeconds(2.9),now.AddSeconds(6.1)) is null&&
+                walk.WaitingForMovement,
+            "stale last exporter event cannot authorize a quiet recovery");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(rc5Plan,now,now);
+        walk.Observe(new(3244,3191),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3244,3193),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        walk.Observe(new(3242,3195),now.AddSeconds(2.3),now.AddSeconds(2.4));
+        Require(walk.Observe(new(3242,3196),
+                    now.AddSeconds(2.9),now.AddSeconds(3.0)).Status==
+                "WAYPOINT_CONFIRMED"&&!walk.WaitingForMovement,
+            "genuine clicked waypoint still immediately completes the old click");
+
         // REAL RC3 19:42:25–28: penultimate A* prefix tile is
         // movement progress, not completed input. The next click must not
         // prematurely overwrite the game's still-active destination.
