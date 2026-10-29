@@ -357,7 +357,9 @@ internal sealed class RuneLiteWindow:Form
                     else
                     {
                         log.Add(Severity.INFO,"RUNELITE_AUTOWALK",quiet.Status,quiet.Diagnostic);
-                        autoWalkDescription=quiet.Status=="VERIFIED_PROGRESS_QUIET_REPLAN"?
+                        autoWalkDescription=quiet.Status=="FINAL_APPROACH_QUIET_REPLAN"?
+                            "Automatik: letzte Kacheln · bestätigte Position nach ruhigem Spielschritt neu planen.":
+                            quiet.Status=="VERIFIED_PROGRESS_QUIET_REPLAN"?
                             "Automatik: bestätigter Spielweg pausiert · kurze geprüfte Route aus frischer API-Position.":
                             quiet.Status=="CLIENT_ROUTE_QUIET_REPLAN"?
                             "Automatik: echte Spielroute bestätigt · nach ruhiger Plugin-Position kurze geprüfte Route neu planen.":
@@ -956,7 +958,47 @@ internal sealed class RuneLiteWindow:Form
                         progress.Diagnostic+" source=PLUGIN_HUB_EXPORT");
                 }
                 if(autoWalk.Active)
-                    await MaybeSendWalkClickAsync(tile,destination,path,eventAt);
+                {
+                    // The final remaining A* tile can project just 4–6
+                    // minimap pixels from the player marker. RC4 real click
+                    // (3227,3220)->(3226,3219) instead exported (3227,3218).
+                    // Ask the pinned collision router for a legal continuation
+                    // one tile DEEPER inside the chosen goal radius; aim
+                    // 2–4 verified steps away instead of clicking the dot.
+                    // Do not manufacture any extension from display pixels.
+                    PathStep[] clickPath=path;
+                    if(path.Length==1&&destination.Radius>=2&&
+                       tile.Plane==destination.Tile.Plane&&
+                       tile.Distance(destination.Tile)>destination.Radius&&
+                       tile.Distance(destination.Tile)<=destination.Radius+2)
+                    {
+                        PathStep[]? deeper;
+                        await routingSemaphore.WaitAsync(closing.Token);
+                        try
+                        {
+                            deeper=await Task.Run(()=>data.FindPath(tile,destination.Tile,
+                                destination.Radius-1,closing.Token),closing.Token);
+                        }
+                        finally{routingSemaphore.Release();}
+                        if(IsDisposed||closing.IsCancellationRequested||
+                           request!=routeGeneration)return;
+                        if(autoWalk.Active&&autoWalk.Geometry is { } calibrated&&
+                           RuneLiteAutoWalk.ProjectDeepFinalApproach(tile,destination,
+                               deeper,calibrated) is { } deeperPlan)
+                        {
+                            clickPath=deeper!;
+                            log.Add(Severity.INFO,"RUNELITE_AUTOWALK","DEEP_GOAL_APPROACH_PLANNED",
+                                $"from={tile.X},{tile.Y},{tile.Plane} "+
+                                $"goal_radius={destination.Radius} deeper_radius={destination.Radius-1} "+
+                                $"clicked_waypoint={deeperPlan.Waypoint.X},{deeperPlan.Waypoint.Y},{deeperPlan.Waypoint.Plane} "+
+                                $"checked_prefix_steps={deeperPlan.WaypointIndex} "+
+                                "source=PINNED_COLLISION_GRAPH no_unverified_tile_extension=true "+
+                                "avoids_player_dot_one_tile_click=true");
+                        }
+                    }
+                    if(autoWalk.Active)
+                        await MaybeSendWalkClickAsync(tile,destination,clickPath,eventAt);
+                }
             }
             UpdateDetailText();RefreshLogPreview();
         }
