@@ -261,17 +261,40 @@ internal sealed class RuneLiteAutoWalk
                 now-p.SentAt<=TimeSpan.FromSeconds(5)&&
                 now-p.LastProgressAt<=EventTimeout&&
                 eventAt-p.LastObservedEventAt<=TimeSpan.FromSeconds(2);
-            if(nearEndpointLateral)
+            // v1.8.35 real run: the game is already making progress in a
+            // narrow, verified corridor when it takes ONE additional side
+            // tile. Chebyshev distance to the clicked point stays at 2 or 3
+            // but the final destination gets closer. This is not a failure,
+            // arrival or authorisation for a new click. Retain the pending
+            // command and wait for real movement or a fresh quiet replan.
+            bool corridorPlateau=!nearEndpointLateral&&
+                p.NearEndpointLateralSamples<MaxNearEndpointLateralSamples&&
+                p.CorridorSamples>=1&&p.Plan.WaypointIndex>=4&&
+                tile.Plane==p.Plan.Waypoint.Plane&&
+                Destination is { } finalGoal&&tile.Plane==finalGoal.Tile.Plane&&
+                jump==1&&before==after&&before is >=2 and <=3&&
+                tile.Distance(finalGoal.Tile)<p.LastObserved.Distance(finalGoal.Tile)&&
+                closestDistance<=MaxCorridorDistance&&
+                closestIndex>=p.LastIndex&&axisConsistent&&
+                tile.Distance(p.Plan.From)>=2&&
+                now-p.SentAt<=TimeSpan.FromSeconds(6)&&
+                now-p.LastProgressAt<=EventTimeout&&
+                eventAt-p.LastObservedEventAt>TimeSpan.Zero&&
+                eventAt-p.LastObservedEventAt<=TimeSpan.FromSeconds(2);
+            if(nearEndpointLateral||corridorPlateau)
             {
                 pending=p with{LastObserved=tile,LastObservedEventAt=eventAt,
                     LastProgressAt=now,NearEndpointLateralSamples=p.NearEndpointLateralSamples+1};
-                return new("NEAR_WAYPOINT_LATERAL_OBSERVED",
+                return new(corridorPlateau?"CORRIDOR_LATERAL_PLATEAU_OBSERVED":
+                        "NEAR_WAYPOINT_LATERAL_OBSERVED",
                     $"observed={tile.X},{tile.Y},{tile.Plane} "+
                     $"previous={p.LastObserved.X},{p.LastObserved.Y},{p.LastObserved.Plane} "+
                     $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
                     $"tile_jump={jump} waypoint_distance_before={before} waypoint_distance_after={after} "+
                     $"closest_prefix_index={closestIndex} closest_prefix_distance={closestDistance} "+
                     $"last_exact_prefix_index={p.LastIndex} "+
+                    $"corridor_samples={p.CorridorSamples} "+
+                    $"plateau={corridorPlateau.ToString().ToLowerInvariant()} "+
                     $"lateral_samples={p.NearEndpointLateralSamples+1}/{MaxNearEndpointLateralSamples} "+
                     "side_step_is_not_route_confirmation=true no_additional_input_sent=true "+
                     "wait_for_exact_waypoint_or_bounded_fresh_api_replan=true",true);
@@ -355,6 +378,11 @@ internal sealed class RuneLiteAutoWalk
            now-p.SentAt<TimeSpan.FromSeconds(3)||
            now-eventAt<TimeSpan.Zero||now-eventAt>TimeSpan.FromSeconds(3))
             return null;
+        bool plateauRecovery=p.NearEndpointLateralSamples>0&&
+            p.CorridorSamples>=1&&
+            p.LastObserved.Distance(p.Plan.Waypoint) is >=2 and <=3&&
+            now-p.LastProgressAt>=NearWaypointStallDelay&&
+            now-p.SentAt<=EventTimeout;
         bool nearWaypoint=p.LastObserved.Distance(p.Plan.Waypoint)==2&&
             (p.LastIndex>=2||p.CorridorSamples>=2)&&
             now-p.LastProgressAt>=NearWaypointStallDelay;
@@ -377,7 +405,7 @@ internal sealed class RuneLiteAutoWalk
             tile.Distance(destination.Tile)<p.Plan.From.Distance(destination.Tile)&&
             now-eventAt>=NearWaypointStallDelay&&
             now-p.SentAt<=EventTimeout;
-        if(!nearWaypoint&&!transitionDetour)return null;
+        if(!nearWaypoint&&!transitionDetour&&!plateauRecovery)return null;
         string diagnostic=$"last_confirmed={tile.X},{tile.Y},{tile.Plane} "+
             $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
             $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
@@ -385,6 +413,7 @@ internal sealed class RuneLiteAutoWalk
             $"last_exact_prefix_index={p.LastIndex} "+
             $"corridor_samples={p.CorridorSamples} "+
             $"transition_detour_samples={p.TransitionDetourSamples} "+
+            $"corridor_lateral_plateau={plateauRecovery.ToString().ToLowerInvariant()} "+
             $"quiet_ms={(now-(transitionDetour?eventAt:p.LastProgressAt)).TotalMilliseconds:0} "+
             $"last_api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"time_since_click_ms={(now-p.SentAt).TotalMilliseconds:0} "+
@@ -396,8 +425,9 @@ internal sealed class RuneLiteAutoWalk
             return new("RECOVERY_LIMIT_REACHED",diagnostic+
                 "no_additional_input_permitted=true",false);
         corridorReplans++;pending=null;quietReplanRequestedAt=now;
-        shortNextClick=transitionDetour;
+        shortNextClick=transitionDetour||plateauRecovery;
         return new(transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
+                plateauRecovery?"CORRIDOR_PLATEAU_QUIET_REPLAN":
                 p.NearEndpointLateralSamples>0?
                 "WAYPOINT_LATERAL_QUIET_REPLAN":"WAYPOINT_QUIET_REPLAN",diagnostic+
             $"recovery_attempts_after={corridorReplans}/{MaxCorridorReplans} "+
