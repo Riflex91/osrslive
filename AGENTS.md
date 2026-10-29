@@ -1,5 +1,23 @@
 # Weiterarbeit an OSRS Play
 
+- 1.8.37: Das echte v1.8.36-Live-Log vom 29.10.2026
+  18:36:55–18:37:50 bestätigt 4 eingefügte
+  Vordergrundklicks und echte Bewegung. Der vierte Klick
+  (3234,3171)->(3238,3178) erreichte zuletzt
+  (3234,3173) im Kollisionspräfix und dann
+  (3235,3175) im Korridor, Distanz 3 zum Wegpunkt.
+  1.8.36 blieb pending, weil Quiet-Replan Distanz
+  genau 2 verlangte; später korrekter Fokus-Stopp.
+  1.8.37 erlaubt ausschließlich bei mindestens
+  zwei bestätigten Präfixschritten, einem späteren
+  gültigen Korridorschritt, Fortschritt zum geklickten
+  UND finalen Ziel, bei >=1,6s ohne neues Export-
+  Event und API-Alter <=3s den begrenzten
+  CORRIDOR_THREE_TILE_QUIET_REPLAN mit höchstens
+  6 geprüften Folgeklick-Schritten. Vier Replans,
+  Vordergrund- und manuelle Stopps bleiben. Selbsttests
+  replayen die echte Folge und Negativfälle.
+
 - 1.8.36: Das v1.8.35-Live-Log vom 29.10.2026
   (18:17–18:20) belegt trotz 7+5 tatsächlicher
   Vordergrund-Klickfolgen zwei zu strikte
