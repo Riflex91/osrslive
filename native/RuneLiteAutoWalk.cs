@@ -18,7 +18,8 @@ internal sealed class RuneLiteAutoWalk
     private sealed record Pending(ClickPlan Plan,DateTimeOffset EventAt,
         DateTimeOffset SentAt,int LastIndex,DateTimeOffset LastProgressAt,
         WorldTile LastObserved,DateTimeOffset LastObservedEventAt,int CorridorSamples,
-        bool TransitionGraceEligible,int TransitionDetourSamples,int NearEndpointLateralSamples);
+        bool TransitionGraceEligible,int TransitionDetourSamples,int NearEndpointLateralSamples,
+        bool CorridorPlateauObserved=false);
 
     private Pending? pending;
     private DateTimeOffset started;
@@ -284,7 +285,8 @@ internal sealed class RuneLiteAutoWalk
             if(nearEndpointLateral||corridorPlateau)
             {
                 pending=p with{LastObserved=tile,LastObservedEventAt=eventAt,
-                    LastProgressAt=now,NearEndpointLateralSamples=p.NearEndpointLateralSamples+1};
+                    LastProgressAt=now,NearEndpointLateralSamples=p.NearEndpointLateralSamples+1,
+                    CorridorPlateauObserved=corridorPlateau};
                 return new(corridorPlateau?"CORRIDOR_LATERAL_PLATEAU_OBSERVED":
                         "NEAR_WAYPOINT_LATERAL_OBSERVED",
                     $"observed={tile.X},{tile.Y},{tile.Plane} "+
@@ -378,7 +380,7 @@ internal sealed class RuneLiteAutoWalk
            now-p.SentAt<TimeSpan.FromSeconds(3)||
            now-eventAt<TimeSpan.Zero||now-eventAt>TimeSpan.FromSeconds(3))
             return null;
-        bool plateauRecovery=p.NearEndpointLateralSamples>0&&
+        bool plateauRecovery=p.CorridorPlateauObserved&&
             p.CorridorSamples>=1&&
             p.LastObserved.Distance(p.Plan.Waypoint) is >=2 and <=3&&
             now-p.LastProgressAt>=NearWaypointStallDelay&&
