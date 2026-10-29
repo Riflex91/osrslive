@@ -1,4 +1,23 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.34
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.35
+
+**1.8.35 – Vier Klicks, dann Umweg ohne automatische Rückkehr zum Wegplan:** 
+Im Log v1.8.34 vom 29.10.2026, 18:02 Uhr, folgten dem vierten Klick
+`(3257,3245)->(3259,3237)` die drei bestätigten RuneLite-Tiles
+`(3255,3244)`, `(3254,3240)`, `(3255,3239)`. Das Programm konnte
+diesen Spielumweg bisher nur beobachten, nicht kontrolliert aus der
+neuen Position fortsetzen. Ein späterer Fokuswechsel beendete den
+Lauf sicher mit `RUNELITE_FOREGROUND_LOST` – kein fehlerhafter
+Game-Klick und kein Anlass, die Foreground-Policy zu lockern.
+1.8.35 ergänzt einen begrenzten, API-frischen Quiet-Replan erst nach
+drei solchen Umweg-Events, nach 1,6 Sekunden ohne weiteren Export,
+nur bei Fortschritt sowohl zum Zwischen- als auch zum Endziel.
+Er benutzt danach einen maximal sechs Tiles langen geprüften
+Wegabschnitt. Der kumulative Session-Replan-Grenzwert ist vier.
+Unverändert: kein Weiterlaufen nach Fokusverlust, kein altes
+Positionsereignis als freier Input, kein unbegrenztes Neuplanen und
+keine Garantie ohne neuen echten Live-Test.
+
+
 
 **1.8.34 – Live-Erfolg und Eingabekonflikt:** Das 29.10.-Log zu
 1.8.33 bestätigt im zweiten Versuch `TARGET_REACHED` bei
