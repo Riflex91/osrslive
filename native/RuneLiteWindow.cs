@@ -733,7 +733,7 @@ internal sealed class RuneLiteWindow:Form
     }
 
     private async Task MaybeSendWalkClickAsync(WorldTile tile,NavigationDestination goal,
-        PathStep[] path,DateTimeOffset eventAt)
+        PathStep[] path,DateTimeOffset eventAt,bool deepGoalApproach=false)
     {
         if(!autoWalk.Active||clickInProgress||paused)return;
         if(autoWalk.Destination?.Id!=goal.Id)
@@ -769,7 +769,8 @@ internal sealed class RuneLiteWindow:Form
         // After a bounded, API-confirmed off-prefix detour, avoid another
         // long minimap leap: the next click covers at most six verified
         // adjacent collision tiles from the last actual plugin tile.
-        int maxPrefixSteps=autoWalk.ShortNextClick?RuneLiteAutoWalk.RecoveryPrefixSteps:9;
+        int maxPrefixSteps=deepGoalApproach?4:
+            autoWalk.ShortNextClick?RuneLiteAutoWalk.RecoveryPrefixSteps:9;
         var plan=RuneLiteAutoWalk.Project(tile,path,geometry,maxPrefixSteps);
         bool finalGoalStep=false;
         if(plan is null)
@@ -795,6 +796,7 @@ internal sealed class RuneLiteWindow:Form
             $"from={tile.X},{tile.Y},{tile.Plane} waypoint={plan.Waypoint.X},{plan.Waypoint.Y},{plan.Waypoint.Plane} "+
             $"waypoint_index={plan.WaypointIndex} max_prefix_steps={maxPrefixSteps} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
             $"single_tile_goal_finish={finalGoalStep.ToString().ToLowerInvariant()} "+
+            $"deep_goal_approach={deepGoalApproach.ToString().ToLowerInvariant()} "+
             $"collision_prefix={string.Join(";",plan.PathPrefix.Select(p=>$"{p.X},{p.Y},{p.Plane}"))} "+
             $"api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"manually_calibrated_first_click={manuallyAttestedFirstClick.ToString().ToLowerInvariant()} "+
@@ -967,6 +969,7 @@ internal sealed class RuneLiteWindow:Form
                     // 2–4 verified steps away instead of clicking the dot.
                     // Do not manufacture any extension from display pixels.
                     PathStep[] clickPath=path;
+                    bool deepGoalApproach=false;
                     if(path.Length==1&&destination.Radius>=2&&
                        tile.Plane==destination.Tile.Plane&&
                        tile.Distance(destination.Tile)>destination.Radius&&
@@ -987,6 +990,7 @@ internal sealed class RuneLiteWindow:Form
                                deeper,calibrated) is { } deeperPlan)
                         {
                             clickPath=deeper!;
+                            deepGoalApproach=true;
                             log.Add(Severity.INFO,"RUNELITE_AUTOWALK","DEEP_GOAL_APPROACH_PLANNED",
                                 $"from={tile.X},{tile.Y},{tile.Plane} "+
                                 $"goal_radius={destination.Radius} deeper_radius={destination.Radius-1} "+
@@ -997,7 +1001,8 @@ internal sealed class RuneLiteWindow:Form
                         }
                     }
                     if(autoWalk.Active)
-                        await MaybeSendWalkClickAsync(tile,destination,clickPath,eventAt);
+                        await MaybeSendWalkClickAsync(tile,destination,clickPath,eventAt,
+                            deepGoalApproach);
                 }
             }
             UpdateDetailText();RefreshLogPreview();
