@@ -341,7 +341,9 @@ internal sealed class RuneLiteWindow:Form
                     else
                     {
                         log.Add(Severity.INFO,"RUNELITE_AUTOWALK",quiet.Status,quiet.Diagnostic);
-                        autoWalkDescription=quiet.Status=="CORRIDOR_PLATEAU_QUIET_REPLAN"?
+                        autoWalkDescription=quiet.Status=="CORRIDOR_THREE_TILE_QUIET_REPLAN"?
+                            "Automatik: drei Kacheln vor Wegpunkt · kurze neue Route aus frischem Plugin-Tile.":
+                            quiet.Status=="CORRIDOR_PLATEAU_QUIET_REPLAN"?
                             "Automatik: Korridor-Seitwärtsschritt · neue kurze Kollisionsroute aus frischem Plugin-Tile.":
                             quiet.Status=="TRANSITION_DETOUR_QUIET_REPLAN"?
                             "Automatik: beobachteter Spielumweg · frische Position und kurze neue Route prüfen.":
