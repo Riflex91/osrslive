@@ -67,7 +67,7 @@ internal sealed class RuneLiteWindow:Form
         status.Dock=position.Dock=detail.Dock=failureBanner.Dock=DockStyle.Fill;
         status.Font=new("Segoe UI",12,FontStyle.Bold);position.Font=new("Segoe UI",20,FontStyle.Bold);
         detail.Font=new("Segoe UI",9);failureBanner.Font=new("Segoe UI",11,FontStyle.Bold);
-        failureBanner.ForeColor=Color.FromArgb(255,105,105);
+        failureBanner.ForeColor=Color.Khaki;
         failureBanner.Text="Automatik standardmäßig AUS. Nur ausdrücklich freigegebene Vordergrundtests senden Spieleingaben.";
         panel.Controls.Add(status,0,1);panel.Controls.Add(position,0,2);
         panel.Controls.Add(detail,0,3);panel.Controls.Add(failureBanner,0,4);
@@ -950,11 +950,13 @@ internal sealed class RuneLiteWindow:Form
         string? reason=failureLog.LastFailureCode;
         if(reason is null)
         {
+            failureBanner.ForeColor=Color.Khaki;
             failureBanner.Text="Automatik nur nach ausdrücklichem Start im RuneLite-Vordergrund. " +
                 "Bei manueller Eingabe bleibt sie sicher gestoppt.";
             copyLog.Text="Gesamte Logdatei kopieren";
             return;
         }
+        failureBanner.ForeColor=Color.FromArgb(255,105,105);
         string copied=failureLog.ClipboardStatus=="COPIED"?
             "Log wurde in die Zwischenablage kopiert.":
             "Log-Kopie ausstehend/fehlgeschlagen – bitte Kopierknopf nutzen.";
