@@ -718,15 +718,17 @@ internal static class RuneLiteAutoWalkTests
         Require(walk.Observe(new(3202,3200),now.AddMilliseconds(650),now.AddMilliseconds(850)).Status=="IGNORED"&&
                 walk.Observe(new(3202,3200),now.AddMilliseconds(920),now.AddMilliseconds(950)).Status=="IGNORED",
             "reread exporter events and a repeated same-tile event cannot cause a false off-path stop");
-        Require(walk.Observe(new(3207,3200),now.AddSeconds(2),now.AddSeconds(2)).Status=="WAYPOINT_CONFIRMED",
-            "API tile near the selected waypoint enables replanning");
-        Require(walk.CanDispatch(now.AddSeconds(2),now.AddSeconds(2)),
-            "a fresh new event authorizes only a new independently planned click");
+        Require(walk.Observe(new(3207,3200),now.AddSeconds(2),now.AddSeconds(2)).Status=="PROGRESS_CONFIRMED"&&
+                walk.WaitingForMovement&&!walk.CanDispatch(now.AddSeconds(2),now.AddSeconds(2)),
+            "one tile short of clicked waypoint keeps previous input in flight");
+        Require(walk.Observe(new(3208,3200),now.AddSeconds(2.4),now.AddSeconds(2.4)).Status=="WAYPOINT_CONFIRMED"&&
+                walk.CanDispatch(now.AddSeconds(2.4),now.AddSeconds(2.4)),
+            "the later real exact clicked waypoint authorizes a new independently planned click");
         Require(!walk.CalibratedFirstClickAllowed(now.AddSeconds(2),now.AddSeconds(-7))&&
                 !walk.CanDispatch(now.AddSeconds(2),now.AddSeconds(-7)),
             "after first dispatch, an old event can never authorize another click");
-        walk.Sent(plan,now.AddSeconds(2),now.AddSeconds(2));
-        Require(walk.Observe(new(3202,3200),now.AddSeconds(2),now.AddSeconds(2)).Status=="IGNORED",
+        walk.Sent(plan,now.AddSeconds(2.4),now.AddSeconds(2.4));
+        Require(walk.Observe(new(3202,3200),now.AddSeconds(2.4),now.AddSeconds(2.4)).Status=="IGNORED",
             "a pre-click event cannot corroborate a new input");
         Require(walk.Observe(new(3202,3201),now.AddSeconds(3),now.AddSeconds(3)).Status=="OFF_PATH",
             "unexpected real API coordinates stop the walk");
@@ -759,8 +761,10 @@ internal static class RuneLiteAutoWalkTests
                 !walk.CanDispatch(now.AddSeconds(2),now.AddSeconds(2)),
             "live one-tile detour is accepted without interrupting the still-moving game click");
         Require(walk.Observe(new(3242,3194),now.AddSeconds(3),now.AddSeconds(3)).Status==
+                "PROGRESS_CONFIRMED"&&walk.WaitingForMovement&&
+                walk.Observe(new(3242,3195),now.AddSeconds(3.7),now.AddSeconds(3.8)).Status==
                 "WAYPOINT_CONFIRMED"&&!walk.WaitingForMovement,
-            "after an off-prefix observation a real API waypoint sample releases the next click");
+            "no early click at penultimate A* tile; actual selected waypoint releases next click");
         walk.Stop();walk.Start(goal,geom,now);walk.Sent(livePlan,now,now);
         walk.Observe(new(3244,3192),now.AddSeconds(1),now.AddSeconds(1));
         Require(walk.Observe(new(3245,3193),now.AddSeconds(2),now.AddSeconds(2)).Status=="OFF_PATH",
@@ -1458,11 +1462,11 @@ internal static class RuneLiteAutoWalkTests
                 "CORRIDOR_PROGRESS_CONFIRMED"&&
                 walk.Observe(new(3236,3164),
                     now.AddSeconds(3.6),now.AddSeconds(3.7)).Status==
-                "WAYPOINT_CONFIRMED"&&
-                !walk.WaitingForMovement&&walk.Clicks==1&&
+                "PROGRESS_CONFIRMED"&&
+                walk.WaitingForMovement&&walk.Clicks==1&&
                 walk.Observe(new(3237,3165),
                     now.AddSeconds(4.2),now.AddSeconds(4.3)).Status==
-                "IGNORED",
+                "WAYPOINT_CONFIRMED"&&!walk.WaitingForMovement,
             "entire REAL post-false-stop exporter series verifies only the original click");
         walk.Stop();walk.Start(lumbridge,geom,now);
         walk.Sent(firstClientPlan,now,now);
@@ -1479,6 +1483,87 @@ internal static class RuneLiteAutoWalkTests
         Require(walk.Observe(new(3233,3159),now.AddSeconds(3.5),
                     now.AddSeconds(3.6)).Status=="OFF_PATH",
             "a first off-prefix one-tile observation cannot be accepted arbitrarily late");
+        // REAL RC3 19:42:25–28: penultimate A* prefix tile is
+        // movement progress, not completed input. The next click must not
+        // prematurely overwrite the game's still-active destination.
+        PathStep[] earlyDispatchPrefix=[
+            new(new(3243,3239)),new(new(3243,3238)),
+            new(new(3243,3237)),new(new(3244,3236)),
+            new(new(3245,3235)),new(new(3246,3234)),
+            new(new(3247,3233))];
+        var earlyDispatchPlan=RuneLiteAutoWalk.Project(
+            new(3243,3240),earlyDispatchPrefix,geom)!;
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(earlyDispatchPlan,now,now);
+        Require(walk.Observe(new(3243,3238),
+                    now.AddSeconds(.7),now.AddSeconds(.8)).Status==
+                "PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3246,3234),
+                    now.AddSeconds(1.5),now.AddSeconds(1.6)).Status==
+                "PROGRESS_CONFIRMED"&&walk.WaitingForMovement&&
+                !walk.CanDispatch(now.AddSeconds(1.6),now.AddSeconds(1.5)),
+            "RC3 second click remains pending at penultimate route tile");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3246,3234),
+                    now.AddSeconds(1.5),now.AddSeconds(2.9)) is null,
+            "no immediate near-endpoint click without real quiet time and 3s click age");
+        var quietOneTile=walk.RecoverNearWaypointAfterQuietPeriod(
+            new(3246,3234),now.AddSeconds(1.5),now.AddSeconds(3.3));
+        Require(quietOneTile?.Status=="VERIFIED_PROGRESS_QUIET_REPLAN"&&
+                quietOneTile.Continue&&!walk.WaitingForMovement&&
+                walk.ShortNextClick&&walk.CorridorReplans==1&&
+                walk.CanDispatch(now.AddSeconds(3.3),now.AddSeconds(1.5)),
+            "quiet one-tile-short progress can recover with one fresh verified <=6 step click");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(earlyDispatchPlan,now,now);
+        walk.Observe(new(3243,3238),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3246,3234),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        Require(walk.Observe(new(3247,3233),
+                    now.AddSeconds(2.5),now.AddSeconds(2.6)).Status==
+                "WAYPOINT_CONFIRMED"&&walk.CorridorReplans==0,
+            "an actual later waypoint supersedes any need to replan");
+
+        // SAME real RC3 attempt, third command: the checked A* collision
+        // path temporarily goes east, away from Lumbridge, before heading
+        // around an obstacle. Existing Manhattan-to-final-goal gate
+        // incorrectly blocked recovery from a genuinely closer click target.
+        PathStep[] verifiedDetourPrefix=[
+            new(new(3247,3233)),new(new(3248,3233)),
+            new(new(3249,3233)),new(new(3249,3232)),
+            new(new(3250,3231)),new(new(3251,3231)),
+            new(new(3252,3231)),new(new(3253,3230))];
+        var verifiedDetourPlan=RuneLiteAutoWalk.Project(
+            new(3246,3234),verifiedDetourPrefix,geom)!;
+        Require(verifiedDetourPlan.Waypoint==new WorldTile(3253,3230)&&
+                verifiedDetourPlan.WaypointIndex==8,
+            "RC3 click-3 replay recreated with original checked collision route");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(verifiedDetourPlan,now,now);
+        Require(walk.Observe(new(3248,3233),
+                    now.AddSeconds(.7),now.AddSeconds(.8)).Status==
+                "PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3250,3233),
+                    now.AddSeconds(1.5),now.AddSeconds(1.6)).Status==
+                "CORRIDOR_PROGRESS_CONFIRMED"&&walk.WaitingForMovement,
+            "RC3 real third click has verified A* and client corridor progress");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3250,3233),
+                    now.AddSeconds(1.5),now.AddSeconds(2.9)) is null&&
+                walk.WaitingForMovement,
+            "RC3 click-3 cannot retry early or infer game stationarity");
+        var detourQuiet=walk.RecoverNearWaypointAfterQuietPeriod(
+            new(3250,3233),now.AddSeconds(1.5),now.AddSeconds(3.6));
+        Require(detourQuiet?.Status=="CORRIDOR_THREE_TILE_QUIET_REPLAN"&&
+                !walk.WaitingForMovement&&walk.ShortNextClick&&
+                walk.CorridorReplans==1&&walk.Clicks==1&&
+                walk.CanDispatch(now.AddSeconds(3.6),now.AddSeconds(1.5)),
+            "RC3 3-tile quiet detour recovers despite increasing Manhattan distance to ultimate goal");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(verifiedDetourPlan,now,now);
+        walk.Observe(new(3248,3233),now.AddSeconds(.7),now.AddSeconds(.8));
+        walk.Observe(new(3250,3233),now.AddSeconds(1.5),now.AddSeconds(1.6));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3250,3233),
+                    now.AddSeconds(1.5),now.AddSeconds(4.6)) is null&&
+                walk.WaitingForMovement,
+            "same legitimate detour still forbids a new click from a >3s old plugin event");
         // End-to-end REAL 1.8.38 RC2 log, 29 October 19:20:56–57:
         // The user-armed companion successfully walked ~60 route tiles
         // with 11 actual foreground clicks. The final collision-verified
