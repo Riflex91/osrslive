@@ -979,8 +979,8 @@ internal sealed class RuneLiteWindow:Form
 
     internal void VerifyDiagnosticLayout()
     {
-        if(!failureBanner.Text.Contains("VERBESSERUNG MUSS EINGEBAUT WERDEN")||
-           failureBanner.ForeColor!=Color.FromArgb(255,105,105)||
+        if(!failureBanner.Text.Contains("Automatik")||
+           failureBanner.ForeColor!=Color.Khaki||
            !logPreview.ReadOnly||!logPreview.Multiline||copyLog.Text.Length==0||
            navigationTarget.DropDownStyle!=ComboBoxStyle.DropDownList||navigationChoices.Length<10||
            startWalk.Text.Length==0||stopWalk.Text.Length==0||stopWalk.Enabled||
