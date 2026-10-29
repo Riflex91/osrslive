@@ -312,7 +312,13 @@ internal sealed class RuneLiteWindow:Form
                 state.ObservedUtc>lastMotionEventUtc&&state.Tile is WorldTile walked)
             {
                 var feedback=autoWalk.Observe(walked,state.ObservedUtc,DateTimeOffset.UtcNow);
-                if(feedback.Status=="OFF_PATH")
+                if(feedback.Status=="TARGET_REACHED")
+                {
+                    log.Add(Severity.INFO,"RUNELITE_AUTOWALK","TARGET_REACHED",
+                        feedback.Diagnostic);
+                    StopAutoWalk("TARGET_REACHED",false,feedback.Diagnostic);
+                }
+                else if(feedback.Status=="OFF_PATH")
                     StopAutoWalk("UNEXPECTED_API_TILE",true,feedback.Diagnostic);
                 else if(feedback.Status!="IGNORED")
                 {
