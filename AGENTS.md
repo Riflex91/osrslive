@@ -1,5 +1,18 @@
 # Weiterarbeit an OSRS Play
 
+- 1.8.35: Das echte v1.8.34-Log (29.10.2026, 18:02) zeigt nach
+  vier eingefügten Vordergrund-Klickfolgen einen abweichenden,
+  aber mehrfach API-bestätigten Spielweg: vom Klick
+  (3257,3245)->(3259,3237) zu (3255,3244), (3254,3240),
+  (3255,3239). 1.8.34 wartete trotz Fortschritt endlos auf den
+  spezifischen Wegpunkt; der spätere Fokusverlust stoppte korrekt.
+  1.8.35 darf ausschließlich nach drei engen Umweg-Ereignissen,
+  frischer Position (<=3s) und >=1,6s ohne neuen Export aus
+  dem letzten echten API-Tile eine neue geprüfte Kollisionsroute
+  mit höchstens sechs Steps für den nächsten Klick planen.
+  Höchstens vier Replans pro Start, alle sonstigen Stopps bleiben.
+  Kein ungeprüftes echtes Ziel- oder Stillstandsversprechen.
+
 Vor Änderungen zuerst `docs/HANDOFF-RUNELITE-2026-10-27.md` und den aktuellen
 Abschnitt in `docs/AKTUELLE-FEHLER.md` lesen. Dort stehen die tatsächlichen
 Live-Ergebnisse und die lokal eingerichteten RuneLite-Einstellungen.

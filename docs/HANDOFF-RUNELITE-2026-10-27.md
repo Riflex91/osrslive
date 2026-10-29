@@ -1,4 +1,45 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.34
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.35
+
+## 1.8.35 – Geprüfter Umweg: letzte frische API-Position neu verplanen
+
+Der neue **v1.8.34-Live-Log vom 29.10.2026, 18:02:02–18:02:50** zeigt echte
+Fortbewegung (vier eingefügte Vordergrund-SendInput-Klickfolgen).
+Der 4. Klick ging von `(3257,3245,0)` nach `(3259,3237,0)`.
+Die RuneLite-API meldete stattdessen die Folge
+`(3255,3244)` -> `(3254,3240)` -> `(3255,3239)`, jeweils
+`TRANSITION_DETOUR_OBSERVED`, ohne den ursprünglichen Wegpunkt zu
+erreichen. Die alte Automatik blieb daraufhin bis zum nachfolgenden
+Benutzer-Fokuswechsel in `waiting_for_waypoint=true`, obwohl der Spieler
+bereits in Richtung Lumbridge weitergelaufen war. Der beobachtete
+`RUNELITE_FOREGROUND_LOST`-Stopp bleibt korrekt und darf keine
+Hintergrundsteuerung oder automatische Fortsetzung auslösen.
+
+**Änderung:** Bei mindestens drei echten, streng begrenzten
+Übergangs-Umwegbeobachtungen NACH einem zuvor API-bestätigten Wegpunkt,
+Fortschritt zum geklickten Wegpunkt UND zum endgültigen Ziel, ohne
+neueres Exportereignis seit mindestens 1,6 Sekunden und höchstens drei
+Sekunden alter letzter Position, darf höchstens eine beschränkte
+`TRANSITION_DETOUR_QUIET_REPLAN`-Freigabe erfolgen. Diese Freigabe
+setzt keine Bewegung oder Stillstand voraus, sondern plant den nächsten
+Klick ausschließlich aus der letzten realen Plugin-Position und den
+geprüften öffentlichen Kollisionsdaten. Der unmittelbar nächste Klick
+umfasst höchstens sechs angrenzende Kollisionstiles statt neun.
+Sämtliche vorhandenen Fenster-Vordergrund-, Maustasten- und
+RuneLite-Profilprüfungen bleiben bindend. Sessionweite automatische
+Replan-Freigaben steigen begrenzt von zwei auf **vier**; keine
+Endlosschleife: 40 Klicks/5 Minuten und neun Sekunden
+Positionsfortschritts-Timeout gelten weiterhin.
+
+**Negativtests:** ohne früheren echten Wegpunkt, bei alter/falscher
+Exporterzeit, vor 1,6 Sekunden Ruhe oder bei Bewegung vom eigentlichen
+Ziel weg darf kein weiterer Klick ausgelöst werden. Der bestehende
+Live-v1.8.34-Fall ist mit den exakten API-Tiles als Selbsttest hinterlegt.
+Der reine Windows-CI-Build weist keine garantierte autonome Navigation
+im laufenden Spiel nach. Ohne Exporter-Heartbeat sind absolute
+Stillstandserkennung und exakte tatsächliche Minimap-Zoomskala nicht
+verfügbar. Für die endgültige Live-Bestätigung erneut im Spiel testen.
+
+
 
 ## 1.8.34 – Live v1.8.33: erster vollständiger Zielradius-Erfolg und Maus-Eingabekonflikt
 

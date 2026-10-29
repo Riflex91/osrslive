@@ -24,6 +24,7 @@ internal sealed class RuneLiteAutoWalk
     private DateTimeOffset started;
     private DateTimeOffset quietReplanRequestedAt;
     private bool lastWaypointConfirmed;
+    private bool shortNextClick;
     private int clicks,corridorReplans;
     internal bool Active{get;private set;}
     internal NavigationDestination? Destination{get;private set;}
@@ -31,9 +32,11 @@ internal sealed class RuneLiteAutoWalk
     internal int Clicks=>clicks;
     internal int CorridorReplans=>corridorReplans;
     internal bool WaitingForMovement=>pending is not null;
+    internal bool ShortNextClick=>shortNextClick;
     internal static readonly TimeSpan EventTimeout=TimeSpan.FromSeconds(9);
     internal const int MaxClicks=40;
-    internal const int MaxCorridorReplans=2;
+    internal const int MaxCorridorReplans=4;
+    internal const int RecoveryPrefixSteps=6;
     internal const int MaxCorridorSamplesPerClick=5;
     internal const int MaxTransitionDetourSamples=5;
     internal const int MaxTransitionDetourDistance=4;
@@ -53,6 +56,7 @@ internal sealed class RuneLiteAutoWalk
     {
         Active=false;pending=null;Destination=null;Geometry=null;
         started=default;quietReplanRequestedAt=default;lastWaypointConfirmed=false;
+        shortNextClick=false;
         clicks=0;corridorReplans=0;
     }
 
@@ -62,13 +66,14 @@ internal sealed class RuneLiteAutoWalk
         c.PlayerCenter.Y is >=35 and <=220&&
         double.IsFinite(c.PixelsPerTile)&&c.PixelsPerTile is >=3 and <=16;
 
-    internal static ClickPlan? Project(WorldTile from,PathStep[] path,Calibration geometry)
+    internal static ClickPlan? Project(WorldTile from,PathStep[] path,Calibration geometry,
+        int maxPrefixSteps=9)
     {
-        if(!ValidGeometry(geometry)||path.Length==0)return null;
+        if(!ValidGeometry(geometry)||path.Length==0||maxPrefixSteps is <2 or >9)return null;
         ClickPlan? chosen=null;
         WorldTile preceding=from;
         var prefix=new List<WorldTile>();
-        foreach(var step in path.Take(9))
+        foreach(var step in path.Take(maxPrefixSteps))
         {
             // The first movement release never clicks through doors, ladders,
             // stairs, teleports, plane changes or non-adjacent collision edges.
@@ -139,7 +144,7 @@ internal sealed class RuneLiteAutoWalk
         pending=new(plan,eventAt,now,0,now,plan.From,eventAt,0,
             lastWaypointConfirmed,0,0);
         lastWaypointConfirmed=false;
-        quietReplanRequestedAt=default;clicks++;
+        quietReplanRequestedAt=default;shortNextClick=false;clicks++;
     }
 
     internal Feedback Observe(WorldTile tile,DateTimeOffset eventAt,DateTimeOffset now)
@@ -346,18 +351,41 @@ internal sealed class RuneLiteAutoWalk
         if(!Active||pending is null)return null;
         var p=pending;
         if(tile!=p.LastObserved||eventAt!=p.LastObservedEventAt||
-           p.LastObserved.Distance(p.Plan.Waypoint)!=2||
-           (p.LastIndex<2&&p.CorridorSamples<2)||
-           now-p.LastProgressAt<NearWaypointStallDelay||
            now-p.LastProgressAt>EventTimeout||
            now-p.SentAt<TimeSpan.FromSeconds(3)||
            now-eventAt<TimeSpan.Zero||now-eventAt>TimeSpan.FromSeconds(3))
             return null;
+        bool nearWaypoint=p.LastObserved.Distance(p.Plan.Waypoint)==2&&
+            (p.LastIndex>=2||p.CorridorSamples>=2)&&
+            now-p.LastProgressAt>=NearWaypointStallDelay;
+        // v1.8.34 live (29 Oct, 18:02): after a confirmed waypoint,
+        // the game took three genuine off-prefix movement observations
+        // 3255,3244 -> 3254,3240 -> 3255,3239. They progressed toward
+        // Lumbridge but never touched the originally clicked waypoint.
+        // Waiting for that exact waypoint indefinitely cannot recover.
+        // A last API tile which advanced toward BOTH destination and
+        // clicked waypoint can seed ONE bounded, short-hop replan after
+        // a quiet window. The game may still be moving: the observer
+        // has no heartbeat, so never claim stationary or arrival here.
+        bool transitionDetour=p.TransitionGraceEligible&&
+            p.TransitionDetourSamples>=3&&p.LastIndex==0&&
+            p.CorridorSamples==0&&
+            Destination is { } destination&&
+            tile.Plane==p.Plan.From.Plane&&tile.Plane==destination.Tile.Plane&&
+            tile.Distance(p.Plan.From)>=3&&
+            tile.Distance(p.Plan.Waypoint)<p.Plan.From.Distance(p.Plan.Waypoint)&&
+            tile.Distance(destination.Tile)<p.Plan.From.Distance(destination.Tile)&&
+            now-eventAt>=NearWaypointStallDelay&&
+            now-p.SentAt<=EventTimeout;
+        if(!nearWaypoint&&!transitionDetour)return null;
         string diagnostic=$"last_confirmed={tile.X},{tile.Y},{tile.Plane} "+
+            $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
             $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
-            $"waypoint_distance=2 last_exact_prefix_index={p.LastIndex} "+
+            $"waypoint_distance={tile.Distance(p.Plan.Waypoint)} "+
+            $"last_exact_prefix_index={p.LastIndex} "+
             $"corridor_samples={p.CorridorSamples} "+
-            $"quiet_ms={(now-p.LastProgressAt).TotalMilliseconds:0} "+
+            $"transition_detour_samples={p.TransitionDetourSamples} "+
+            $"quiet_ms={(now-(transitionDetour?eventAt:p.LastProgressAt)).TotalMilliseconds:0} "+
             $"last_api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"time_since_click_ms={(now-p.SentAt).TotalMilliseconds:0} "+
             $"recovery_attempts={corridorReplans}/{MaxCorridorReplans} "+
@@ -368,10 +396,13 @@ internal sealed class RuneLiteAutoWalk
             return new("RECOVERY_LIMIT_REACHED",diagnostic+
                 "no_additional_input_permitted=true",false);
         corridorReplans++;pending=null;quietReplanRequestedAt=now;
-        return new(p.NearEndpointLateralSamples>0?
+        shortNextClick=transitionDetour;
+        return new(transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
+                p.NearEndpointLateralSamples>0?
                 "WAYPOINT_LATERAL_QUIET_REPLAN":"WAYPOINT_QUIET_REPLAN",diagnostic+
             $"recovery_attempts_after={corridorReplans}/{MaxCorridorReplans} "+
             $"near_endpoint_lateral_observed={p.NearEndpointLateralSamples>0} "+
+            $"short_next_click={shortNextClick} "+
             "next_click_requires_verified_collision_route_and_foreground=true",true);
     }
 
@@ -644,7 +675,7 @@ internal static class RuneLiteAutoWalkTests
                 walk.Timeout(now.AddSeconds(12))=="POSITION_EVENT_TIMEOUT",
             "transition grace never extends the original hard position timeout");
         // Only a sustained series of forward near-prefix observations may
-        // replan before reaching the waypoint, and at most twice per arm.
+        // replan before reaching the waypoint, and at most four times per arm.
         var longStart=new WorldTile(3200,3200);
         WorldTile[] longPath=[new(3201,3201),new(3202,3202),
             new(3203,3202),new(3204,3202),new(3205,3202),
@@ -664,7 +695,7 @@ internal static class RuneLiteAutoWalkTests
                 string expected=j<offSamples.Length-1?"CORRIDOR_PROGRESS_CONFIRMED":
                     i<RuneLiteAutoWalk.MaxCorridorReplans?"WAYPOINT_CORRIDOR_REPLAN":"OFF_PATH";
                 Require(result.Status==expected,
-                    "bounded forward API corridor allows at most two deferred collision replans per arm");
+                    "bounded forward API corridor allows at most four deferred collision replans per arm");
             }
         }
         // Exact v1.8.29 live stop: from (3233,3177) toward (3237,3183),
@@ -812,6 +843,96 @@ internal static class RuneLiteAutoWalkTests
                 new WorldTile(3226,3220).Distance(lumbridge.Tile)<=lumbridge.Radius&&
                 new WorldTile(3226,3222).Distance(lumbridge.Tile)<=lumbridge.Radius,
             "real v1.8.33 route reaches and remains in the configured Lumbridge radius");
+        // Real v1.8.34 test, 29 Oct 18:02:40-18:02:43: command 3
+        // reached the clicked waypoint, then command 4 took THREE
+        // independent exporter-confirmed tiles outside its A* prefix.
+        // The old controller waited for (3259,3237) forever despite
+        // being at (3255,3239) and advancing toward Lumbridge.
+        PathStep[] preLiveDetour=[
+            new(new(3252,3249)),new(new(3253,3249)),
+            new(new(3254,3248)),new(new(3255,3247)),
+            new(new(3256,3246)),new(new(3257,3245))];
+        PathStep[] clickedLiveDetour=[
+            new(new(3258,3244)),new(new(3258,3243)),
+            new(new(3259,3242)),new(new(3259,3241)),
+            new(new(3259,3240)),new(new(3259,3239)),
+            new(new(3259,3238)),new(new(3259,3237))];
+        var preLiveDetourPlan=RuneLiteAutoWalk.Project(
+            new(3251,3250),preLiveDetour,geom)!;
+        var clickedLiveDetourPlan=RuneLiteAutoWalk.Project(
+            new(3257,3245),clickedLiveDetour,geom)!;
+        Require(preLiveDetourPlan.Waypoint==new WorldTile(3257,3245)&&
+                clickedLiveDetourPlan.Waypoint==new WorldTile(3259,3237),
+            "real v1.8.34 clicks projected from checked consecutive collision tiles");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(preLiveDetourPlan,now,now);
+        Require(walk.Observe(new(3255,3247),now.AddSeconds(.8),now.AddSeconds(.9)).Status==
+                "PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3257,3245),now.AddSeconds(1.6),now.AddSeconds(1.7)).Status==
+                "WAYPOINT_CONFIRMED",
+            "a genuinely confirmed preceding waypoint is required for transition detour grace");
+        walk.Sent(clickedLiveDetourPlan,now.AddSeconds(1.6),now.AddSeconds(1.8));
+        WorldTile[] liveDetourSamples=[
+            new(3255,3244),new(3254,3240),new(3255,3239)];
+        for(int i=0;i<liveDetourSamples.Length;i++)
+        {
+            var observed=walk.Observe(liveDetourSamples[i],
+                now.AddSeconds(2.6+i*.8),now.AddSeconds(2.7+i*.8));
+            Require(observed.Status=="TRANSITION_DETOUR_OBSERVED"&&
+                    walk.WaitingForMovement&&!walk.ShortNextClick,
+                "all three real off-prefix samples must be observed without premature clicks");
+        }
+        var finalDetourEvent=now.AddSeconds(4.2);
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3255,3239),
+                    finalDetourEvent,now.AddSeconds(4.9)) is null&&
+                !walk.CanDispatch(now.AddSeconds(4.9),finalDetourEvent),
+            "no new click while the v1.8.34 detour may still be walking");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3255,3239),
+                    now.AddSeconds(3.4),now.AddSeconds(6)) is null,
+            "a stale or mismatched event timestamp cannot authorize recovery");
+        var liveQuietReplan=walk.RecoverNearWaypointAfterQuietPeriod(
+            new(3255,3239),finalDetourEvent,now.AddSeconds(6));
+        Require(liveQuietReplan?.Status=="TRANSITION_DETOUR_QUIET_REPLAN"&&
+                liveQuietReplan.Continue&&!walk.WaitingForMovement&&
+                walk.CorridorReplans==1&&walk.ShortNextClick&&
+                walk.CanDispatch(now.AddSeconds(6),finalDetourEvent),
+            "sustained destination-forward live detour reopens one bounded, still-fresh API replan");
+        PathStep[] safeRecoveryPrefix=Enumerable.Range(1,8)
+            .Select(i=>new PathStep(new WorldTile(3255-i,3239))).ToArray();
+        var boundedNext=RuneLiteAutoWalk.Project(new(3255,3239),
+            safeRecoveryPrefix,geom,RuneLiteAutoWalk.RecoveryPrefixSteps)!;
+        var unboundedNext=RuneLiteAutoWalk.Project(new(3255,3239),
+            safeRecoveryPrefix,geom)!;
+        Require(boundedNext.WaypointIndex==RuneLiteAutoWalk.RecoveryPrefixSteps&&
+                unboundedNext.WaypointIndex==8,
+            "recovery shortens the next minimap hop to at most six adjacent collision steps");
+        walk.Sent(boundedNext,finalDetourEvent,now.AddSeconds(6));
+        Require(!walk.ShortNextClick&&walk.WaitingForMovement&&
+                !walk.CanDispatch(now.AddSeconds(6.1),finalDetourEvent),
+            "replanned click atomically consumes the shortened-hop permission and awaits new API movement");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(preLiveDetourPlan,now,now);
+        walk.Observe(new(3257,3245),now.AddSeconds(1.6),now.AddSeconds(1.7));
+        walk.Sent(clickedLiveDetourPlan,now.AddSeconds(1.6),now.AddSeconds(1.8));
+        for(int i=0;i<liveDetourSamples.Length;i++)
+            walk.Observe(liveDetourSamples[i],now.AddSeconds(2.6+i*.8),
+                now.AddSeconds(2.7+i*.8));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3255,3239),
+                    finalDetourEvent,now.AddSeconds(7.4)) is null&&
+                walk.WaitingForMovement&&!walk.ShortNextClick,
+            "last exporter event older than 3s never authorizes an automatic detour restart");
+        walk.Stop();
+        var oppositeDestination=new NavigationDestination("Opposite","safe",new(3300,3300),1);
+        walk.Start(oppositeDestination,geom,now);
+        walk.Sent(preLiveDetourPlan,now,now);
+        walk.Observe(new(3257,3245),now.AddSeconds(1.6),now.AddSeconds(1.7));
+        walk.Sent(clickedLiveDetourPlan,now.AddSeconds(1.6),now.AddSeconds(1.8));
+        for(int i=0;i<liveDetourSamples.Length;i++)
+            walk.Observe(liveDetourSamples[i],now.AddSeconds(2.6+i*.8),
+                now.AddSeconds(2.7+i*.8));
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3255,3239),
+                    finalDetourEvent,now.AddSeconds(6)) is null&&walk.WaitingForMovement,
+            "same detour moving away from the chosen destination must never be restarted");
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
     }
