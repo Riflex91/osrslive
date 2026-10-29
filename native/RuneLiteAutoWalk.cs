@@ -19,7 +19,7 @@ internal sealed class RuneLiteAutoWalk
         DateTimeOffset SentAt,int LastIndex,DateTimeOffset LastProgressAt,
         WorldTile LastObserved,DateTimeOffset LastObservedEventAt,int CorridorSamples,
         bool TransitionGraceEligible,int TransitionDetourSamples,int NearEndpointLateralSamples,
-        bool CorridorPlateauObserved=false);
+        bool CorridorPlateauObserved=false,int ClientPathSamples=0);
 
     private Pending? pending;
     private DateTimeOffset started;
@@ -301,6 +301,68 @@ internal sealed class RuneLiteAutoWalk
                     "side_step_is_not_route_confirmation=true no_additional_input_sent=true "+
                     "wait_for_exact_waypoint_or_bounded_fresh_api_replan=true",true);
             }
+            // Closed-loop client route follower: the game computes its OWN
+            // path to our clicked minimap tile. Its intermediate waypoints
+            // need not exactly equal the pinned-public A* prefix. A Chebyshev
+            // plateau to the clicked point is not evidence of failure when
+            // fresh RuneLite API tiles are making objective progress toward
+            // the final goal. Use Manhattan progress (both coordinate axes),
+            // since diagonal/Chebyshev distance can remain unchanged even
+            // when the player moves closer along the secondary axis.
+            //
+            // Unlike the previous one-off lateral exceptions, this rule
+            // handles bounded 1..4-tile exporter sampling jumps uniformly.
+            // Observing client progress NEVER sends another click, confirms
+            // a waypoint or infers a stationary player. After quiet, a
+            // short, fresh-tile collision replan is independently required.
+            bool clientRouteProgress=false;
+            int goalManhattanBefore=0,goalManhattanAfter=0;
+            if(Destination is { } finalDestination&&
+               p.LastIndex>=2&&p.Plan.WaypointIndex>=4&&
+               p.NearEndpointLateralSamples==0&&
+               p.TransitionDetourSamples==0&&
+               p.ClientPathSamples<3&&
+               tile.Plane==p.Plan.Waypoint.Plane&&
+               tile.Plane==finalDestination.Tile.Plane&&
+               jump is >=1 and <=MaxObservedTileJump&&
+               before is >=2 and <=5&&after<=before+1&&
+               closestDistance<=MaxCorridorDistance&&
+               closestIndex>=p.LastIndex&&
+               now-p.SentAt<=TimeSpan.FromSeconds(7)&&
+               now-p.LastProgressAt<=EventTimeout&&
+               eventAt-p.LastObservedEventAt>TimeSpan.Zero&&
+               eventAt-p.LastObservedEventAt<=TimeSpan.FromSeconds(2))
+            {
+                goalManhattanBefore=Math.Abs(p.LastObserved.X-finalDestination.Tile.X)+
+                    Math.Abs(p.LastObserved.Y-finalDestination.Tile.Y);
+                goalManhattanAfter=Math.Abs(tile.X-finalDestination.Tile.X)+
+                    Math.Abs(tile.Y-finalDestination.Tile.Y);
+                int goalManhattanAtClick=Math.Abs(p.Plan.From.X-finalDestination.Tile.X)+
+                    Math.Abs(p.Plan.From.Y-finalDestination.Tile.Y);
+                clientRouteProgress=goalManhattanAfter<goalManhattanBefore&&
+                    goalManhattanAfter<goalManhattanAtClick;
+            }
+            if(clientRouteProgress)
+            {
+                int samples=p.ClientPathSamples+1;
+                pending=p with{LastObserved=tile,LastObservedEventAt=eventAt,
+                    LastProgressAt=now,ClientPathSamples=samples};
+                return new("CLIENT_ROUTE_PROGRESS_OBSERVED",
+                    $"observed={tile.X},{tile.Y},{tile.Plane} "+
+                    $"previous={p.LastObserved.X},{p.LastObserved.Y},{p.LastObserved.Plane} "+
+                    $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
+                    $"tile_jump={jump}/{MaxObservedTileJump} "+
+                    $"waypoint_distance_before={before} waypoint_distance_after={after} "+
+                    $"goal_manhattan_before={goalManhattanBefore} "+
+                    $"goal_manhattan_after={goalManhattanAfter} "+
+                    $"closest_prefix_index={closestIndex} "+
+                    $"closest_prefix_distance={closestDistance}/{MaxCorridorDistance} "+
+                    $"last_verified_prefix_index={p.LastIndex} "+
+                    $"bounded_client_path_samples={samples}/3 "+
+                    "client_chosen_path_not_route_confirmation=true "+
+                    "no_additional_input_sent=true "+
+                    "next_click_requires_quiet_recent_api_and_collision_replan=true",true);
+            }
             // The real 1.8.30 run reached an exact first waypoint, sent a
             // second click, and RuneLite immediately took a short northward
             // detour before continuing west. This is NOT route confirmation.
@@ -425,8 +487,22 @@ internal sealed class RuneLiteAutoWalk
             tile.Distance(destination.Tile)<p.Plan.From.Distance(destination.Tile)&&
             now-eventAt>=NearWaypointStallDelay&&
             now-p.SentAt<=EventTimeout;
+        // One or more independently verified client-path progress events
+        // can supersede the exact A* prefix. A fresh quiet interval is
+        // required before ending the in-flight click and issuing a NEW
+        // checked route, never on the observation itself.
+        bool clientRouteQuiet=p.ClientPathSamples>=1&&
+            p.LastIndex>=2&&p.NearEndpointLateralSamples==0&&
+            p.LastObserved.Distance(p.Plan.Waypoint)<=5&&
+            Destination is { } clientGoal&&
+            tile.Plane==clientGoal.Tile.Plane&&
+            Math.Abs(tile.X-clientGoal.Tile.X)+Math.Abs(tile.Y-clientGoal.Tile.Y)<
+                Math.Abs(p.Plan.From.X-clientGoal.Tile.X)+
+                Math.Abs(p.Plan.From.Y-clientGoal.Tile.Y)&&
+            now-p.LastProgressAt>=NearWaypointStallDelay&&
+            now-p.SentAt<=EventTimeout;
         if(!nearWaypoint&&!transitionDetour&&!plateauRecovery&&
-           !threeTileCorridorQuiet)return null;
+           !threeTileCorridorQuiet&&!clientRouteQuiet)return null;
         string diagnostic=$"last_confirmed={tile.X},{tile.Y},{tile.Plane} "+
             $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
             $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
@@ -436,6 +512,8 @@ internal sealed class RuneLiteAutoWalk
             $"transition_detour_samples={p.TransitionDetourSamples} "+
             $"corridor_lateral_plateau={plateauRecovery.ToString().ToLowerInvariant()} "+
             $"three_tile_corridor_quiet={threeTileCorridorQuiet.ToString().ToLowerInvariant()} "+
+            $"client_route_samples={p.ClientPathSamples} "+
+            $"client_route_quiet={clientRouteQuiet.ToString().ToLowerInvariant()} "+
             $"quiet_ms={(now-(transitionDetour?eventAt:p.LastProgressAt)).TotalMilliseconds:0} "+
             $"last_api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"time_since_click_ms={(now-p.SentAt).TotalMilliseconds:0} "+
@@ -447,8 +525,9 @@ internal sealed class RuneLiteAutoWalk
             return new("RECOVERY_LIMIT_REACHED",diagnostic+
                 "no_additional_input_permitted=true",false);
         corridorReplans++;pending=null;quietReplanRequestedAt=now;
-        shortNextClick=transitionDetour||plateauRecovery||threeTileCorridorQuiet;
+        shortNextClick=transitionDetour||plateauRecovery||threeTileCorridorQuiet||clientRouteQuiet;
         return new(transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
+                clientRouteQuiet?"CLIENT_ROUTE_QUIET_REPLAN":
                 threeTileCorridorQuiet?"CORRIDOR_THREE_TILE_QUIET_REPLAN":
                 plateauRecovery?"CORRIDOR_PLATEAU_QUIET_REPLAN":
                 p.NearEndpointLateralSamples>0?
