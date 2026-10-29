@@ -530,7 +530,25 @@ internal sealed class RuneLiteAutoWalk
         //
         // One early waypoint-1 observation is also not completion. The
         // same quiet rule covers this without preempting the in-game click.
-        bool verifiedProgressQuiet=p.LastIndex>=2&&
+        // A bounded A* detour may increase geometric goal distance, but
+        // an arbitrary click heading substantially away from the selected
+        // destination cannot be retried from quiet exporter feedback.
+        // The offset is proportional to the independently checked adjacent
+        // collision prefix, not a fabricated specific map exception.
+        int fromGoalManhattan=0,waypointGoalManhattan=0;
+        bool boundedVerifiedDetour=false;
+        if(Destination is { } quietGoal&&
+           p.Plan.From.Plane==quietGoal.Tile.Plane&&
+           p.Plan.Waypoint.Plane==quietGoal.Tile.Plane)
+        {
+            fromGoalManhattan=Math.Abs(p.Plan.From.X-quietGoal.Tile.X)+
+                Math.Abs(p.Plan.From.Y-quietGoal.Tile.Y);
+            waypointGoalManhattan=Math.Abs(p.Plan.Waypoint.X-quietGoal.Tile.X)+
+                Math.Abs(p.Plan.Waypoint.Y-quietGoal.Tile.Y);
+            boundedVerifiedDetour=waypointGoalManhattan<=
+                fromGoalManhattan+Math.Max(2,p.Plan.WaypointIndex/2);
+        }
+        bool verifiedProgressQuiet=boundedVerifiedDetour&&p.LastIndex>=2&&
             p.NearEndpointLateralSamples==0&&!p.CorridorPlateauObserved&&
             (p.CorridorSamples>=1||
              p.LastIndex>=Math.Max(2,p.Plan.WaypointIndex-2))&&
@@ -594,6 +612,9 @@ internal sealed class RuneLiteAutoWalk
             $"client_route_quiet={clientRouteQuiet.ToString().ToLowerInvariant()} "+
             $"verified_prefix_quiet={verifiedProgressQuiet.ToString().ToLowerInvariant()} "+
             $"route_detour_can_increase_final_goal_manhattan=true "+
+            $"route_goal_manhattan_from={fromGoalManhattan} "+
+            $"route_goal_manhattan_waypoint={waypointGoalManhattan} "+
+            $"route_detour_bounded={boundedVerifiedDetour.ToString().ToLowerInvariant()} "+
             $"quiet_ms={(now-(transitionDetour?eventAt:p.LastProgressAt)).TotalMilliseconds:0} "+
             $"last_api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"time_since_click_ms={(now-p.SentAt).TotalMilliseconds:0} "+
