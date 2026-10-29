@@ -1,4 +1,16 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.33
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.34
+
+**1.8.34 – Live-Erfolg und Eingabekonflikt:** Das 29.10.-Log zu
+1.8.33 bestätigt im zweiten Versuch `TARGET_REACHED` bei
+(3226,3220,0) mit 10 SendInput-Klickfolgen und neuer RuneLite-API-
+Bestätigung; anschließend blieb (3226,3222,0) im Zielradius.
+Der erste Versuch endete korrekt durch `PHYSICAL_MOUSE_BUTTON_HELD`
+bei 0 Input-Events für den dritten angeforderten Befehl; zwei vorherige
+Befehle waren erfolgreich gesendet. 1.8.34 meldet diese freiwillige
+Sicherheitsunterbrechung ohne falschen roten Fehleralarm, prüft die
+Maustaste erneut unmittelbar vor Click-Down und trennt versuchte von
+wirklich eingefügten Klickfolgen im Stoppbericht. Keine automatische
+Fortsetzung, keine Hintergrundklicks, kein Live-Beweis für 1.8.34.
 
 **1.8.33 – Zwei echte v1.8.32-Frühstopps vor dem Wegpunkt:**
 Das 461-Zeilen-Log vom 28.10.2026, 22:21:58–22:23:14
