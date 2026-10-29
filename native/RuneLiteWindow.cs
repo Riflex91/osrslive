@@ -128,7 +128,13 @@ internal sealed class RuneLiteWindow:Form
             UpdateDetailText();_=RefreshPosition();RefreshLogPreview();
         };
         copyLog.Text="Gesamte Logdatei kopieren";copyLog.AutoSize=true;
-        copyLog.Click+=(_,_)=>{failureLog.CopyToClipboard();UpdateFailureBanner();RefreshLogPreview();};
+        copyLog.Click+=(_,_)=>
+        {
+            if(autoWalk.Active)StopAutoWalk("USER_LOG_COPY",false,
+                "user_requested_diagnostics_during_active_walk=true "+
+                "no_more_clicks=true no_automatic_resume=true");
+            failureLog.CopyToClipboard();UpdateFailureBanner();RefreshLogPreview();
+        };
         checkUpdate.Text="Jetzt Updates prüfen";checkUpdate.AutoSize=true;
         checkUpdate.Click+=async(_,_)=>await CheckForUpdatesAsync("MANUAL");
         showExports.Text="Zusatzdaten ansehen";showExports.AutoSize=true;
@@ -303,8 +309,10 @@ internal sealed class RuneLiteWindow:Form
                 StopAutoWalk("RUNELITE_TITLE_CHANGED",true,"player_title_changed=true no_more_input=true");
             else if(autoWalk.Clicks>0&&!clickInProgress&&
                 !BackgroundWindowInput.IsRuneLiteForeground(source.TrustedWindowHandle))
-                StopAutoWalk("RUNELITE_FOREGROUND_LOST",true,
-                    "active_user_window_changed=true no_more_clicks=true input_not_targeted_elsewhere=true");
+                StopAutoWalk("RUNELITE_FOREGROUND_LOST",false,
+                    "intentional_foreground_only_safety_interruption=true "+
+                    "active_user_window_changed=true no_more_clicks=true "+
+                    "input_not_targeted_elsewhere=true no_automatic_resume=true");
             else if(state.Status is "RUNELITE_NOT_RUNNING" or "MULTIPLE_RUNELITE_CLIENTS" or
                 "PLUGIN_EXPORT_UNAVAILABLE" or "PLUGIN_EXPORT_INVALID" or "INTERNAL_ERROR")
                 StopAutoWalk("API_SOURCE_LOST",true,$"sample={sequence} state={state.Status}");
@@ -312,7 +320,13 @@ internal sealed class RuneLiteWindow:Form
                 state.ObservedUtc>lastMotionEventUtc&&state.Tile is WorldTile walked)
             {
                 var feedback=autoWalk.Observe(walked,state.ObservedUtc,DateTimeOffset.UtcNow);
-                if(feedback.Status=="OFF_PATH")
+                if(feedback.Status=="TARGET_REACHED")
+                {
+                    log.Add(Severity.INFO,"RUNELITE_AUTOWALK","TARGET_REACHED",
+                        feedback.Diagnostic);
+                    StopAutoWalk("TARGET_REACHED",false,feedback.Diagnostic);
+                }
+                else if(feedback.Status=="OFF_PATH")
                     StopAutoWalk("UNEXPECTED_API_TILE",true,feedback.Diagnostic);
                 else if(feedback.Status!="IGNORED")
                 {
@@ -321,6 +335,8 @@ internal sealed class RuneLiteWindow:Form
                         "Automatik: RuneLite-API-Fortschritt bestätigt · prüfe neue Kollisionsroute.":
                         feedback.Status=="TRANSITION_DETOUR_OBSERVED"?
                         "Automatik: Spiel geht Umweg · beobachte den laufenden Klick, keine neue Eingabe.":
+                        feedback.Status=="CLIENT_ROUTE_PROGRESS_OBSERVED"?
+                        "Automatik: Spielroute weicht von A* ab, bewegt sich aber näher zum Endziel · beobachte ohne neuen Klick.":
                         feedback.Status=="CORRIDOR_LATERAL_PLATEAU_OBSERVED"?
                         "Automatik: einzelner Seitwärtsschritt im bestätigten Korridor · warte ohne neuen Klick.":
                         feedback.Status=="NEAR_WAYPOINT_LATERAL_OBSERVED"?
@@ -341,7 +357,13 @@ internal sealed class RuneLiteWindow:Form
                     else
                     {
                         log.Add(Severity.INFO,"RUNELITE_AUTOWALK",quiet.Status,quiet.Diagnostic);
-                        autoWalkDescription=quiet.Status=="CORRIDOR_THREE_TILE_QUIET_REPLAN"?
+                        autoWalkDescription=quiet.Status=="FINAL_APPROACH_QUIET_REPLAN"?
+                            "Automatik: letzte Kacheln · bestätigte Position nach ruhigem Spielschritt neu planen.":
+                            quiet.Status=="VERIFIED_PROGRESS_QUIET_REPLAN"?
+                            "Automatik: bestätigter Spielweg pausiert · kurze geprüfte Route aus frischer API-Position.":
+                            quiet.Status=="CLIENT_ROUTE_QUIET_REPLAN"?
+                            "Automatik: echte Spielroute bestätigt · nach ruhiger Plugin-Position kurze geprüfte Route neu planen.":
+                            quiet.Status=="CORRIDOR_THREE_TILE_QUIET_REPLAN"?
                             "Automatik: drei Kacheln vor Wegpunkt · kurze neue Route aus frischem Plugin-Tile.":
                             quiet.Status=="CORRIDOR_PLATEAU_QUIET_REPLAN"?
                             "Automatik: Korridor-Seitwärtsschritt · neue kurze Kollisionsroute aus frischem Plugin-Tile.":
@@ -414,15 +436,25 @@ internal sealed class RuneLiteWindow:Form
         }
         if(state.Tile is not null)lastConfirmedUtc=DateTimeOffset.UtcNow;
         else if(!paused&&state.Status!="API_WAITING_FOR_NEW_EVENT"&&
+            state.Status!="RUNELITE_NOT_RUNNING"&&
+            !(state.Status=="PLUGIN_EXPORT_UNAVAILABLE"&&
+              DateTimeOffset.UtcNow-blockedSince<TimeSpan.FromSeconds(20))&&
             DateTimeOffset.UtcNow-lastConfirmedUtc>=TimeSpan.FromSeconds(10))
             failureLog.ReportFailure("RUNELITE","POSITION_NOT_CONFIRMED_TIMEOUT",
                 $"sample={sequence} latest_status={state.Status} "+
                 $"unconfirmed_s={(DateTimeOffset.UtcNow-lastConfirmedUtc).TotalSeconds:0} {state.Diagnostic}");
         bool stalledSecondFrame=state.Status=="WAITING_FOR_SECOND_FRAME"&&
             DateTimeOffset.UtcNow-blockedSince>=TimeSpan.FromSeconds(8);
-        if(stalledSecondFrame||(FailureLogPolicy.RuneLiteBlocked(state.Status)&&
+        // No red failure while the user is simply launching RuneLite or
+        // while Plugin Hub's exporter has not yet initialized. Existing
+        // foreground opt-in movement still hard-stops if its source is lost.
+        if(stalledSecondFrame||
+           (FailureLogPolicy.RuneLiteBlocked(state.Status)&&
+            state.Status!="RUNELITE_NOT_RUNNING"&&
             (state.Status is "INTERNAL_ERROR" or "OCR_LANGUAGE_UNAVAILABLE" or "MULTIPLE_RUNELITE_CLIENTS"||
-             DateTimeOffset.UtcNow-blockedSince>=TimeSpan.FromSeconds(4))))
+             DateTimeOffset.UtcNow-blockedSince>=
+                 (state.Status=="PLUGIN_EXPORT_UNAVAILABLE"?
+                     TimeSpan.FromSeconds(20):TimeSpan.FromSeconds(4)))))
             failureLog.ReportFailure("RUNELITE",state.Status,
                 $"sample={sequence} {state.Diagnostic} position_not_released=true stalled_second_frame={stalledSecondFrame}");
 
@@ -701,7 +733,7 @@ internal sealed class RuneLiteWindow:Form
     }
 
     private async Task MaybeSendWalkClickAsync(WorldTile tile,NavigationDestination goal,
-        PathStep[] path,DateTimeOffset eventAt)
+        PathStep[] path,DateTimeOffset eventAt,bool deepGoalApproach=false)
     {
         if(!autoWalk.Active||clickInProgress||paused)return;
         if(autoWalk.Destination?.Id!=goal.Id)
@@ -737,7 +769,8 @@ internal sealed class RuneLiteWindow:Form
         // After a bounded, API-confirmed off-prefix detour, avoid another
         // long minimap leap: the next click covers at most six verified
         // adjacent collision tiles from the last actual plugin tile.
-        int maxPrefixSteps=autoWalk.ShortNextClick?RuneLiteAutoWalk.RecoveryPrefixSteps:9;
+        int maxPrefixSteps=deepGoalApproach?4:
+            autoWalk.ShortNextClick?RuneLiteAutoWalk.RecoveryPrefixSteps:9;
         var plan=RuneLiteAutoWalk.Project(tile,path,geometry,maxPrefixSteps);
         bool finalGoalStep=false;
         if(plan is null)
@@ -763,6 +796,7 @@ internal sealed class RuneLiteWindow:Form
             $"from={tile.X},{tile.Y},{tile.Plane} waypoint={plan.Waypoint.X},{plan.Waypoint.Y},{plan.Waypoint.Plane} "+
             $"waypoint_index={plan.WaypointIndex} max_prefix_steps={maxPrefixSteps} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
             $"single_tile_goal_finish={finalGoalStep.ToString().ToLowerInvariant()} "+
+            $"deep_goal_approach={deepGoalApproach.ToString().ToLowerInvariant()} "+
             $"collision_prefix={string.Join(";",plan.PathPrefix.Select(p=>$"{p.X},{p.Y},{p.Plane}"))} "+
             $"api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"manually_calibrated_first_click={manuallyAttestedFirstClick.ToString().ToLowerInvariant()} "+
@@ -839,6 +873,10 @@ internal sealed class RuneLiteWindow:Form
         stopWalk.Enabled=false;startWalk.Enabled=!calibrating;
         autoWalkDescription=reason=="TARGET_REACHED"?
             "Automatik: Zielradius laut RuneLite-API erreicht!":
+            reason=="RUNELITE_FOREGROUND_LOST"?
+                "Automatik: angehalten, weil RuneLite nicht mehr im Vordergrund ist · kein automatisches Fortsetzen.":
+            reason=="USER_LOG_COPY"?
+                "Automatik: für die manuelle Logkopie sicher angehalten · kein automatisches Fortsetzen.":
             reason=="USER_MOUSE_INPUT_INTERRUPTED"?
                 "Automatik: durch gedrückte Maustaste gestoppt – zum Fortsetzen neu starten.":
             failed?"Automatik: FEHLER – gestoppt; bitte rotes Diagnosefeld beachten.":
@@ -922,7 +960,50 @@ internal sealed class RuneLiteWindow:Form
                         progress.Diagnostic+" source=PLUGIN_HUB_EXPORT");
                 }
                 if(autoWalk.Active)
-                    await MaybeSendWalkClickAsync(tile,destination,path,eventAt);
+                {
+                    // The final remaining A* tile can project just 4–6
+                    // minimap pixels from the player marker. RC4 real click
+                    // (3227,3220)->(3226,3219) instead exported (3227,3218).
+                    // Ask the pinned collision router for a legal continuation
+                    // one tile DEEPER inside the chosen goal radius; aim
+                    // 2–4 verified steps away instead of clicking the dot.
+                    // Do not manufacture any extension from display pixels.
+                    PathStep[] clickPath=path;
+                    bool deepGoalApproach=false;
+                    if(path.Length==1&&destination.Radius>=2&&
+                       tile.Plane==destination.Tile.Plane&&
+                       tile.Distance(destination.Tile)>destination.Radius&&
+                       tile.Distance(destination.Tile)<=destination.Radius+2)
+                    {
+                        PathStep[]? deeper;
+                        await routingSemaphore.WaitAsync(closing.Token);
+                        try
+                        {
+                            deeper=await Task.Run(()=>data.FindPath(tile,destination.Tile,
+                                destination.Radius-1,closing.Token),closing.Token);
+                        }
+                        finally{routingSemaphore.Release();}
+                        if(IsDisposed||closing.IsCancellationRequested||
+                           request!=routeGeneration)return;
+                        if(autoWalk.Active&&autoWalk.Geometry is { } calibrated&&
+                           RuneLiteAutoWalk.ProjectDeepFinalApproach(tile,destination,
+                               deeper,calibrated) is { } deeperPlan)
+                        {
+                            clickPath=deeper!;
+                            deepGoalApproach=true;
+                            log.Add(Severity.INFO,"RUNELITE_AUTOWALK","DEEP_GOAL_APPROACH_PLANNED",
+                                $"from={tile.X},{tile.Y},{tile.Plane} "+
+                                $"goal_radius={destination.Radius} deeper_radius={destination.Radius-1} "+
+                                $"clicked_waypoint={deeperPlan.Waypoint.X},{deeperPlan.Waypoint.Y},{deeperPlan.Waypoint.Plane} "+
+                                $"checked_prefix_steps={deeperPlan.WaypointIndex} "+
+                                "source=PINNED_COLLISION_GRAPH no_unverified_tile_extension=true "+
+                                "avoids_player_dot_one_tile_click=true");
+                        }
+                    }
+                    if(autoWalk.Active)
+                        await MaybeSendWalkClickAsync(tile,destination,clickPath,eventAt,
+                            deepGoalApproach);
+                }
             }
             UpdateDetailText();RefreshLogPreview();
         }
