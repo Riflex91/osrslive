@@ -203,10 +203,39 @@ internal sealed class RuneLiteAutoWalk
                 (p.Plan.From.Y!=p.Plan.Waypoint.Y||
                     tile.Y>=Math.Min(p.Plan.From.Y,p.Plan.PathPrefix.Min(t=>t.Y))&&
                     tile.Y<=Math.Max(p.Plan.From.Y,p.Plan.PathPrefix.Max(t=>t.Y)));
+            // The earliest in-game step may be a single adjacent
+            // client-selected tile rather than the first A* tile.
+            // The 1.8.38 real log: first click from (3233,3158) toward
+            // (3237,3165) yielded (3233,3159), one tile from the
+            // click origin and from the verified collision prefix.
+            // Rejecting all one-tile off-prefix departures aborted the
+            // command before a fully successful game movement reached
+            // the clicked waypoint five seconds later.
+            //
+            // This is one narrowly verifiable departure observation:
+            // client API event after click, one tile from origin,
+            // within one tile of checked prefix, and genuinely closer
+            // to BOTH clicked waypoint and final destination. It does
+            // not prove the clicked prefix, issue another input, or
+            // bypass any foreground/user-consent guard.
+            bool firstClientStep=p.LastIndex==0&&p.CorridorSamples==0&&
+                p.ClientPathSamples==0&&p.TransitionDetourSamples==0&&
+                p.NearEndpointLateralSamples==0&&
+                tile.Distance(p.Plan.From)==1&&
+                closestDistance<=1&&closestIndex>=1&&
+                Destination is { } firstStepGoal&&
+                tile.Plane==p.Plan.From.Plane&&
+                tile.Plane==firstStepGoal.Tile.Plane&&
+                Math.Abs(tile.X-firstStepGoal.Tile.X)+
+                    Math.Abs(tile.Y-firstStepGoal.Tile.Y)<
+                    Math.Abs(p.Plan.From.X-firstStepGoal.Tile.X)+
+                    Math.Abs(p.Plan.From.Y-firstStepGoal.Tile.Y)&&
+                now-p.SentAt<=TimeSpan.FromSeconds(3);
             bool safeCorridor=tile.Plane==p.Plan.Waypoint.Plane&&
                 jump is >=1 and <=MaxObservedTileJump&&after<before&&
                 closestDistance<=MaxCorridorDistance&&axisConsistent&&
-                (p.LastIndex>=2||tile.Distance(p.Plan.From)>=2)&&
+                (p.LastIndex>=2||tile.Distance(p.Plan.From)>=2||
+                    firstClientStep)&&
                 now-p.LastProgressAt<=EventTimeout;
             if(safeCorridor)
             {
@@ -1337,6 +1366,64 @@ internal static class RuneLiteAutoWalkTests
         Require(walk.Observe(new(3236,3195),now.AddSeconds(2.2),now.AddSeconds(2.3)).Status==
                 "OFF_PATH",
             "unbounded five-tile exporter jump still stops");
+        // Exact 1.8.38 test-candidate log, 29 Oct 19:06:11:
+        // a successfully sent click from (3233,3158) toward
+        // (3237,3165) took one intermediate client tile (3233,3159).
+        // That tile was just ONE neighbor of the origin and one away
+        // from the checked collision prefix. v1.8.38 stopped with
+        // UNEXPECTED_API_TILE; the game then naturally reached its
+        // ORIGINAL clicked waypoint via the following exporter tiles.
+        PathStep[] firstClientPrefix=[
+            new(new(3232,3159)),new(new(3233,3160)),
+            new(new(3234,3161)),new(new(3235,3162)),
+            new(new(3236,3163)),new(new(3236,3164)),
+            new(new(3237,3165))];
+        var firstClientPlan=RuneLiteAutoWalk.Project(
+            new(3233,3158),firstClientPrefix,geom)!;
+        Require(firstClientPlan.Waypoint==new WorldTile(3237,3165)&&
+                firstClientPlan.WaypointIndex==7,
+            "v1.8.38 actual first-click full checked collision path recreated");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(firstClientPlan,now,now);
+        var firstClientEvent=walk.Observe(new(3233,3159),
+            now.AddSeconds(.6),now.AddSeconds(.7));
+        Require(firstClientEvent.Status=="CORRIDOR_PROGRESS_CONFIRMED"&&
+                firstClientEvent.Continue&&walk.WaitingForMovement&&
+                walk.Clicks==1&&walk.CorridorReplans==0&&
+                !walk.CanDispatch(now.AddSeconds(.7),now.AddSeconds(.6)),
+            "valid one-tile first game departure is observed, not rejected or counted as arrival");
+        Require(walk.Observe(new(3233,3160),
+                    now.AddSeconds(1.2),now.AddSeconds(1.3)).Status==
+                "PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3234,3162),
+                    now.AddSeconds(2.4),now.AddSeconds(2.5)).Status==
+                "CORRIDOR_PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3235,3163),
+                    now.AddSeconds(3),now.AddSeconds(3.1)).Status==
+                "CORRIDOR_PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3236,3164),
+                    now.AddSeconds(3.6),now.AddSeconds(3.7)).Status==
+                "PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3237,3165),
+                    now.AddSeconds(4.2),now.AddSeconds(4.3)).Status==
+                "WAYPOINT_CONFIRMED"&&
+                !walk.WaitingForMovement&&walk.Clicks==1,
+            "entire REAL post-false-stop exporter series verifies only the original click");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(firstClientPlan,now,now);
+        Require(walk.Observe(new(3234,3158),now.AddSeconds(.6),
+                    now.AddSeconds(.7)).Status=="OFF_PATH",
+            "one-tile step moving no closer to clicked waypoint is not a safe departure");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(firstClientPlan,now,now);
+        Require(walk.Observe(new(3232,3158),now.AddSeconds(.6),
+                    now.AddSeconds(.7)).Status=="OFF_PATH",
+            "one-tile step outside destination-forward corridor is rejected");
+        walk.Stop();walk.Start(lumbridge,geom,now);
+        walk.Sent(firstClientPlan,now,now);
+        Require(walk.Observe(new(3233,3159),now.AddSeconds(3.5),
+                    now.AddSeconds(3.6)).Status=="OFF_PATH",
+            "a first off-prefix one-tile observation cannot be accepted arbitrarily late");
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
     }
