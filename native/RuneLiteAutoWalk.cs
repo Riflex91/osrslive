@@ -788,14 +788,17 @@ internal static class RuneLiteAutoWalkTests
         // Replay the actual v1.8.33 final Lumbridge click (29 October 2026):
         // the first API sample is 1 tile off the prefix, then the exporter
         // confirms the destination inside the configured four-tile radius.
-        var liveFrom=new WorldTile(3232,3219);
-        WorldTile[] livePrefix=[new(3231,3218),new(3230,3219),
-            new(3229,3218),new(3228,3218),new(3227,3219),new(3226,3220)];
-        var livePlan=RuneLiteAutoWalk.Project(liveFrom,
-            livePrefix.Select(t=>new PathStep(t)).ToArray(),geom)!;
-        Require(livePlan.Waypoint==new WorldTile(3226,3220)&&livePlan.WaypointIndex==6,
+        var lumbridgeLiveFrom=new WorldTile(3232,3219);
+        PathStep[] lumbridgeLivePrefix=[
+            new(new(3231,3218)),new(new(3230,3219)),
+            new(new(3229,3218)),new(new(3228,3218)),
+            new(new(3227,3219)),new(new(3226,3220))];
+        var lumbridgeLivePlan=RuneLiteAutoWalk.Project(lumbridgeLiveFrom,
+            lumbridgeLivePrefix,geom)!;
+        Require(lumbridgeLivePlan.Waypoint==new WorldTile(3226,3220)&&
+                lumbridgeLivePlan.WaypointIndex==6,
             "real v1.8.33 final click uses a verified six-step collision prefix");
-        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(livePlan,now,now);
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(lumbridgeLivePlan,now,now);
         var liveCorridor=walk.Observe(new(3228,3219),
             now.AddMilliseconds(900),now.AddSeconds(1));
         Require(liveCorridor.Status=="CORRIDOR_PROGRESS_CONFIRMED"&&
