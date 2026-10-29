@@ -339,7 +339,9 @@ internal sealed class RuneLiteWindow:Form
                     else
                     {
                         log.Add(Severity.INFO,"RUNELITE_AUTOWALK",quiet.Status,quiet.Diagnostic);
-                        autoWalkDescription=quiet.Status=="WAYPOINT_LATERAL_QUIET_REPLAN"?
+                        autoWalkDescription=quiet.Status=="TRANSITION_DETOUR_QUIET_REPLAN"?
+                            "Automatik: beobachteter Spielumweg · frische Position und kurze neue Route prüfen.":
+                            quiet.Status=="WAYPOINT_LATERAL_QUIET_REPLAN"?
                             "Automatik: seitlicher Spielumweg · neue Kollisionsroute aus frischer Plugin-Kachel prüfen.":
                             "Automatik: Pause nahe Wegpunkt · prüfe neu geplante Kollisionsroute.";
                         refreshQuietWaypointRoute=true;
@@ -663,6 +665,7 @@ internal sealed class RuneLiteWindow:Form
                     "first_calibrated_click_last_known_api_max_age_s=60 first_click_window_s=12 "+
                     "later_clicks_require_event_age_s_at_most=3 "+
                     $"click_limit=40 corridor_replan_limit={RuneLiteAutoWalk.MaxCorridorReplans} "+
+                    $"detour_recovery_short_prefix_steps={RuneLiteAutoWalk.RecoveryPrefixSteps} "+
                     $"corridor_samples_per_click={RuneLiteAutoWalk.MaxCorridorSamplesPerClick} "+
                     $"api_tile_jump_limit={RuneLiteAutoWalk.MaxObservedTileJump} "+
                     $"corridor_distance_limit={RuneLiteAutoWalk.MaxCorridorDistance} "+
@@ -725,7 +728,11 @@ internal sealed class RuneLiteWindow:Form
                 "trusted_runeLite_process_or_calibrated_client_size_changed=true no_input_sent=true");
             return;
         }
-        var plan=RuneLiteAutoWalk.Project(tile,path,geometry);
+        // After a bounded, API-confirmed off-prefix detour, avoid another
+        // long minimap leap: the next click covers at most six verified
+        // adjacent collision tiles from the last actual plugin tile.
+        int maxPrefixSteps=autoWalk.ShortNextClick?RuneLiteAutoWalk.RecoveryPrefixSteps:9;
+        var plan=RuneLiteAutoWalk.Project(tile,path,geometry,maxPrefixSteps);
         bool finalGoalStep=false;
         if(plan is null)
         {
@@ -748,7 +755,7 @@ internal sealed class RuneLiteWindow:Form
         log.Add(Severity.INFO,"RUNELITE_AUTOWALK","CLICK_INTENT",
             $"command={autoWalk.Clicks} target={goal.Id.Replace(' ','_')} "+
             $"from={tile.X},{tile.Y},{tile.Plane} waypoint={plan.Waypoint.X},{plan.Waypoint.Y},{plan.Waypoint.Plane} "+
-            $"waypoint_index={plan.WaypointIndex} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
+            $"waypoint_index={plan.WaypointIndex} max_prefix_steps={maxPrefixSteps} click_x={plan.Pixel.X} click_y={plan.Pixel.Y} "+
             $"single_tile_goal_finish={finalGoalStep.ToString().ToLowerInvariant()} "+
             $"collision_prefix={string.Join(";",plan.PathPrefix.Select(p=>$"{p.X},{p.Y},{p.Plane}"))} "+
             $"api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
