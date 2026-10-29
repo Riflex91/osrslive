@@ -463,7 +463,13 @@ internal sealed class RuneLiteAutoWalk
                 $"last_exact_prefix_index={p.LastIndex} corridor_samples={p.CorridorSamples} "+
                 $"axis_consistent={axisConsistent} event_gap_ms={(eventAt-p.LastObservedEventAt).TotalMilliseconds:0}",false);
         }
-        bool reached=index>=p.Plan.WaypointIndex-1;
+        // A* penultimate prefix tile is not proof that RuneLite has
+        // completed the *current* click. The previous observer treated
+        // waypoint_index-1 as reached and immediately injected a new click,
+        // preempting actual in-flight movement. Require the exact clicked
+        // tile; if RuneLite stops one tile early, a bounded quiet replan
+        // may later use the fresh last verified client position instead.
+        bool reached=index==p.Plan.WaypointIndex;
         if(reached)
         {
             pending=null;lastWaypointConfirmed=true;
@@ -512,17 +518,32 @@ internal sealed class RuneLiteAutoWalk
         // quiet recovery left the controller pending until foreground loss.
         // This narrowly covers a mixed exact+forward-corridor progression,
         // never a first observation, unsupported detour or unknown position.
-        bool threeTileCorridorQuiet=p.LastObserved.Distance(p.Plan.Waypoint)==3&&
-            p.LastIndex>=2&&p.CorridorSamples>=1&&
-            !p.CorridorPlateauObserved&&p.TransitionDetourSamples==0&&
-            Destination is { } corridorDestination&&
+        // Replan on independently verified *click-target* progress,
+        // not merely decreasing straight-line distance to the final goal.
+        // Real A* collision paths can detour AWAY from that goal in
+        // Manhattan distance to navigate obstacles. The 19:42:26 click
+        // (3246,3234) -> (3253,3230) progressed to genuine API tiles
+        // (3248,3233) and (3250,3233) before falling quiet. That made
+        // the clicked waypoint closer (7 -> 3 tiles), but Manhattan
+        // distance to Lumbridge increased; the old gate prevented a
+        // verified short recovery and waited for timeout/focus loss.
+        //
+        // One early waypoint-1 observation is also not completion. The
+        // same quiet rule covers this without preempting the in-game click.
+        bool verifiedProgressQuiet=p.LastIndex>=2&&
+            (p.CorridorSamples>=1||
+             p.LastIndex>=Math.Max(2,p.Plan.WaypointIndex-2))&&
+            p.TransitionDetourSamples==0&&
             tile.Plane==p.Plan.From.Plane&&
-            tile.Plane==corridorDestination.Tile.Plane&&
+            tile.Plane==p.Plan.Waypoint.Plane&&
+            tile.Distance(p.Plan.From)>=2&&
+            tile.Distance(p.Plan.Waypoint) is >=1 and <=4&&
             tile.Distance(p.Plan.Waypoint)<p.Plan.From.Distance(p.Plan.Waypoint)&&
-            tile.Distance(corridorDestination.Tile)<
-                p.Plan.From.Distance(corridorDestination.Tile)&&
             now-p.LastProgressAt>=NearWaypointStallDelay&&
             now-p.SentAt<=EventTimeout;
+        bool threeTileCorridorQuiet=verifiedProgressQuiet&&
+            p.LastObserved.Distance(p.Plan.Waypoint)==3&&
+            p.CorridorSamples>=1&&!p.CorridorPlateauObserved;
         // v1.8.34 live (29 Oct, 18:02): after a confirmed waypoint,
         // the game took three genuine off-prefix movement observations
         // 3255,3244 -> 3254,3240 -> 3255,3239. They progressed toward
@@ -557,7 +578,8 @@ internal sealed class RuneLiteAutoWalk
             now-p.LastProgressAt>=NearWaypointStallDelay&&
             now-p.SentAt<=EventTimeout;
         if(!nearWaypoint&&!transitionDetour&&!plateauRecovery&&
-           !threeTileCorridorQuiet&&!clientRouteQuiet)return null;
+           !threeTileCorridorQuiet&&!clientRouteQuiet&&
+           !verifiedProgressQuiet)return null;
         string diagnostic=$"last_confirmed={tile.X},{tile.Y},{tile.Plane} "+
             $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
             $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
@@ -569,6 +591,8 @@ internal sealed class RuneLiteAutoWalk
             $"three_tile_corridor_quiet={threeTileCorridorQuiet.ToString().ToLowerInvariant()} "+
             $"client_route_samples={p.ClientPathSamples} "+
             $"client_route_quiet={clientRouteQuiet.ToString().ToLowerInvariant()} "+
+            $"verified_prefix_quiet={verifiedProgressQuiet.ToString().ToLowerInvariant()} "+
+            $"route_detour_can_increase_final_goal_manhattan=true "+
             $"quiet_ms={(now-(transitionDetour?eventAt:p.LastProgressAt)).TotalMilliseconds:0} "+
             $"last_api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"time_since_click_ms={(now-p.SentAt).TotalMilliseconds:0} "+
@@ -580,11 +604,12 @@ internal sealed class RuneLiteAutoWalk
             return new("RECOVERY_LIMIT_REACHED",diagnostic+
                 "no_additional_input_permitted=true",false);
         corridorReplans++;pending=null;quietReplanRequestedAt=now;
-        shortNextClick=transitionDetour||plateauRecovery||threeTileCorridorQuiet||clientRouteQuiet;
+        shortNextClick=transitionDetour||plateauRecovery||verifiedProgressQuiet||clientRouteQuiet;
         return new(transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
                 clientRouteQuiet?"CLIENT_ROUTE_QUIET_REPLAN":
                 threeTileCorridorQuiet?"CORRIDOR_THREE_TILE_QUIET_REPLAN":
                 plateauRecovery?"CORRIDOR_PLATEAU_QUIET_REPLAN":
+                verifiedProgressQuiet?"VERIFIED_PROGRESS_QUIET_REPLAN":
                 p.NearEndpointLateralSamples>0?
                 "WAYPOINT_LATERAL_QUIET_REPLAN":"WAYPOINT_QUIET_REPLAN",diagnostic+
             $"recovery_attempts_after={corridorReplans}/{MaxCorridorReplans} "+
