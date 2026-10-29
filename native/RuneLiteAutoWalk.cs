@@ -19,7 +19,8 @@ internal sealed class RuneLiteAutoWalk
         DateTimeOffset SentAt,int LastIndex,DateTimeOffset LastProgressAt,
         WorldTile LastObserved,DateTimeOffset LastObservedEventAt,int CorridorSamples,
         bool TransitionGraceEligible,int TransitionDetourSamples,int NearEndpointLateralSamples,
-        bool CorridorPlateauObserved=false,int ClientPathSamples=0);
+        bool CorridorPlateauObserved=false,int ClientPathSamples=0,
+        int FinalApproachSamples=0);
 
     private Pending? pending;
     private DateTimeOffset started;
@@ -121,6 +122,26 @@ internal sealed class RuneLiteAutoWalk
         return new(pixel,from,step.Tile,1,[step.Tile]);
     }
 
+    // A 4px/tile minimap makes a single adjacent end-of-route click
+    // physically overlap the player's white dot. Real 1.8.39 RC4:
+    // from (3227,3220) a 5.7px diagonal click toward (3226,3219)
+    // instead ended at (3227,3218), still one tile outside Lumbridge
+    // but two Manhattan tiles closer. Prefer a SECOND, independently
+    // collision-verified route ending deeper inside the goal radius.
+    // Never synthesize or extend unverified tiles from pixel geometry.
+    internal static ClickPlan? ProjectDeepFinalApproach(WorldTile from,
+        NavigationDestination goal,PathStep[]? deeperPath,Calibration geometry)
+    {
+        if(goal.Radius<2||from.Plane!=goal.Tile.Plane||
+           from.Distance(goal.Tile)<=goal.Radius||
+           from.Distance(goal.Tile)>goal.Radius+2||
+           deeperPath is not {Length:>=2})return null;
+        var plan=Project(from,deeperPath,geometry,4);
+        if(plan is null||plan.WaypointIndex<2||
+           plan.Waypoint.Plane!=goal.Tile.Plane)return null;
+        return plan;
+    }
+
     // A successful, explicit on-screen minimap calibration provides a narrow
     // one-shot starting attestation. The official exporter has no heartbeat:
     // a stationary player may have a correct, older last API tile. We allow
@@ -179,6 +200,38 @@ internal sealed class RuneLiteAutoWalk
                 "newer_than_last_click=true source=NEW_PLUGIN_API_EVENT "+
                 "goal_verified_before_prefix_matching=true "+
                 "no_additional_click_required=true screenshot_position_estimation=false",true);
+        }
+        // The final close-range minimap click is not a reliable
+        // one-tile actuator. If a fresh authentic RuneLite observation
+        // moves toward the true destination and remains within two
+        // tiles of the selected click waypoint, keep observing the
+        // in-flight click instead of classifying this as an unrelated
+        // trajectory. A new click requires later quiet + a fresh
+        // verified collision replan. No invented goal completion.
+        if(Destination is { } approachGoal&&p.Plan.WaypointIndex<=3&&
+           p.FinalApproachSamples<2&&
+           tile.Plane==p.Plan.From.Plane&&
+           tile.Plane==approachGoal.Tile.Plane&&
+           tile.Distance(p.LastObserved) is >=1 and <=MaxObservedTileJump&&
+           tile.Distance(p.Plan.Waypoint)<=2&&
+           tile.Distance(approachGoal.Tile)>approachGoal.Radius&&
+           tile.Distance(approachGoal.Tile)<=approachGoal.Radius+2&&
+           now-p.SentAt<=TimeSpan.FromSeconds(6)&&
+           Math.Abs(tile.X-approachGoal.Tile.X)+
+              Math.Abs(tile.Y-approachGoal.Tile.Y)<
+           Math.Abs(p.LastObserved.X-approachGoal.Tile.X)+
+              Math.Abs(p.LastObserved.Y-approachGoal.Tile.Y))
+        {
+            pending=p with{LastObserved=tile,LastObservedEventAt=eventAt,
+                LastProgressAt=now,FinalApproachSamples=p.FinalApproachSamples+1};
+            return new("FINAL_APPROACH_PROGRESS_OBSERVED",
+                $"observed={tile.X},{tile.Y},{tile.Plane} "+
+                $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
+                $"goal={approachGoal.Tile.X},{approachGoal.Tile.Y},{approachGoal.Tile.Plane} "+
+                $"radius={approachGoal.Radius} "+
+                $"samples={p.FinalApproachSamples+1}/2 "+
+                "fresh_client_progress_without_goal_arrival=true "+
+                "no_new_click_until_quiet_verified_collision_replan=true",true);
         }
         int index=Array.FindIndex(p.Plan.PathPrefix,t=>t==tile)+1;
         // A reread of the same exporter event is NOT a new move. Even a
@@ -596,9 +649,16 @@ internal sealed class RuneLiteAutoWalk
                 Math.Abs(p.Plan.From.Y-clientGoal.Tile.Y)&&
             now-p.LastProgressAt>=NearWaypointStallDelay&&
             now-p.SentAt<=EventTimeout;
+        bool finalApproachQuiet=p.FinalApproachSamples>=1&&
+            Destination is { } finishingGoal&&
+            tile.Plane==finishingGoal.Tile.Plane&&
+            tile.Distance(finishingGoal.Tile)>finishingGoal.Radius&&
+            tile.Distance(finishingGoal.Tile)<=finishingGoal.Radius+2&&
+            now-p.LastProgressAt>=NearWaypointStallDelay&&
+            now-p.SentAt<=EventTimeout;
         if(!nearWaypoint&&!transitionDetour&&!plateauRecovery&&
            !threeTileCorridorQuiet&&!clientRouteQuiet&&
-           !verifiedProgressQuiet)return null;
+           !verifiedProgressQuiet&&!finalApproachQuiet)return null;
         string diagnostic=$"last_confirmed={tile.X},{tile.Y},{tile.Plane} "+
             $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
             $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
@@ -609,6 +669,8 @@ internal sealed class RuneLiteAutoWalk
             $"corridor_lateral_plateau={plateauRecovery.ToString().ToLowerInvariant()} "+
             $"three_tile_corridor_quiet={threeTileCorridorQuiet.ToString().ToLowerInvariant()} "+
             $"client_route_samples={p.ClientPathSamples} "+
+            $"final_approach_samples={p.FinalApproachSamples} "+
+            $"final_approach_quiet={finalApproachQuiet.ToString().ToLowerInvariant()} "+
             $"client_route_quiet={clientRouteQuiet.ToString().ToLowerInvariant()} "+
             $"verified_prefix_quiet={verifiedProgressQuiet.ToString().ToLowerInvariant()} "+
             $"route_detour_can_increase_final_goal_manhattan=true "+
@@ -626,8 +688,10 @@ internal sealed class RuneLiteAutoWalk
             return new("RECOVERY_LIMIT_REACHED",diagnostic+
                 "no_additional_input_permitted=true",false);
         corridorReplans++;pending=null;quietReplanRequestedAt=now;
-        shortNextClick=transitionDetour||plateauRecovery||verifiedProgressQuiet||clientRouteQuiet;
-        return new(transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
+        shortNextClick=transitionDetour||plateauRecovery||verifiedProgressQuiet||
+            clientRouteQuiet||finalApproachQuiet;
+        return new(finalApproachQuiet?"FINAL_APPROACH_QUIET_REPLAN":
+                transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
                 clientRouteQuiet?"CLIENT_ROUTE_QUIET_REPLAN":
                 threeTileCorridorQuiet?"CORRIDOR_THREE_TILE_QUIET_REPLAN":
                 plateauRecovery?"CORRIDOR_PLATEAU_QUIET_REPLAN":
