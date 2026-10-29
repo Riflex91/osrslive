@@ -1,4 +1,61 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.36
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.37
+
+## 1.8.37 – Wiederaufnahme aus echter Drei-Kachel-Korridorpause
+
+**Live-Log v1.8.36 vom 29.10.2026, 18:36:55–18:37:50:**
+Der echte offizielle Build `40922328226` wurde erfolgreich installiert.
+Nach anfänglich noch nicht gefundenem RuneLite-Exporter (Launcher-
+Übergang) wurden echte Plugin-API-Positionen erkannt. Der Nutzer
+wählte Lumbridge; der automatische Gehtest wurde ausdrücklich
+kalibriert und gestartet. Vier echte, in den Vordergrund
+eingefügte SendInput-Klickfolgen erzeugten überprüften
+Kachelfortschritt. Nach dem 2. Klick wurde bereits einmal
+`WAYPOINT_QUIET_REPLAN` von (3229,3166) ausgelöst.
+
+Der vierte Klick um 18:37:41 ging von `(3234,3171)` zum
+geprüften Wegpunkt `(3238,3178)` entlang
+`3233,3172;3234,3173;3235,3174;3236,3175;3237,3176;
+3237,3177;3238,3178`. Die API meldete danach exakt
+`(3234,3173)` und im zugelassenen Korridor
+`(3235,3175)` (nur noch **3** Tiles vom geklickten
+Wegpunkt entfernt). Danach blieb der Export bei
+`(3235,3175)`; der Controller blieb wartend, weil die
+bestehende `nearWaypoint`-Recovery **genau 2** Tiles
+verlangte. Um 18:37:44.698 wäre das letzte echte API-
+Tile erst ca. 2,3 Sekunden alt gewesen und der letzte
+bestätigte Fortschritt ca. 1,6 Sekunden ruhig; die alte
+Bedingung sperrte trotzdem den geplanten Folgeklick.
+Später folgte `RUNELITE_FOREGROUND_LOST` bei
+vier/ vier eingefügten Klickfolgen. Die Vordergrund-
+Sperre war korrekt und darf nicht abgeschwächt werden.
+
+**1.8.37-Korrektur:** Zusätzlich zu allen bisherigen
+Bedingungen darf ein `CORRIDOR_THREE_TILE_QUIET_REPLAN`
+nur erfolgen, wenn mindestens Präfixindex 2 bestätigt
+ist, mindestens eine echte vorwärts gerichtete
+Korridorbeobachtung folgte, der letzte echte API-Tile
+drei Tiles vom geklickten Wegpunkt entfernt ist,
+zum geklickten Wegpunkt UND finalen Ziel näher als
+die Startposition liegt, dieselbe Ebene hat und
+der Positionsexport noch höchstens 3 Sekunden alt
+ist. Das letzte Ereignis muss mindestens 1,6 Sekunden
+ohne neue Position liegen und der Klick mindestens
+3 Sekunden alt sein. Keine Stillstandsbehauptung.
+Neuplanung ausschließlich mit geprüften Kollisionstiles;
+der nächste Folgeklick hat höchstens 6 Schritte.
+Die bestehenden vier Replan-Gesamtversuche,
+neun Sekunden Ereignis-Timeout, 40 Klicks / 5 Minuten,
+Vordergrund-/Eingabe- und manuellen Stopps bleiben.
+
+**Tests:** Loggenaues Präfix und beide echten API-Tiles,
+frische/alte/fremde Exportbeobachtung, zu kurze Ruhe,
+Endziel-Rückschritt, fehlender Korridorfortschritt,
+einmalige Nutzung des kurzen Folgeklicks. Neuer
+echter RuneLite-Spieltest ist weiterhin notwendig.
+Der Exporter hat kein aktives Stillstands-Heartbeat;
+eine garantiert autonome Navigation wird hier nicht behauptet.
+
+
 
 ## 1.8.36 – Zweimal falscher Off-Path-Stopp bei seitlichem Plateau nach Korridorfortschritt
 
