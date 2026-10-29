@@ -1650,9 +1650,9 @@ internal static class RuneLiteAutoWalkTests
         walk.Observe(new(3244,3191),now.AddSeconds(.7),now.AddSeconds(.8));
         walk.Observe(new(3244,3193),now.AddSeconds(1.5),now.AddSeconds(1.6));
         walk.Observe(new(3242,3195),now.AddSeconds(2.3),now.AddSeconds(2.4));
-        Require(walk.Observe(new(3241,3195),
+        Require(walk.Observe(new(3242,3194),
                     now.AddSeconds(2.9),now.AddSeconds(3.0)).Status=="OFF_PATH",
-            "side step away from clicked waypoint and no closer to chosen goal is still rejected");
+            "backward step away from clicked waypoint and final goal is still rejected");
         walk.Stop();walk.Start(lumbridge,geom,now);
         walk.Sent(rc5Plan,now,now);
         walk.Observe(new(3244,3191),now.AddSeconds(.7),now.AddSeconds(.8));
