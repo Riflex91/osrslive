@@ -1463,13 +1463,13 @@ internal static class RuneLiteAutoWalkTests
         // BEFORE the route reader reported ARRIVED, remaining_steps=0.
         // Arrival must take precedence over exact clicked-waypoint
         // matching when the POST-CLICK API tile is both fresh and near.
-        var finalFrom=new WorldTile(3227,3219);
-        var finalPath=new PathStep[]{new(new WorldTile(3226,3218))};
+        var lumbridgeArrivalFrom=new WorldTile(3227,3219);
+        var lumbridgeArrivalPath=new PathStep[]{new(new WorldTile(3226,3218))};
         var finalStepPlan=RuneLiteAutoWalk.ProjectFinalGoalStep(
-            finalFrom,finalPath,geom,lumbridge)!;
+            lumbridgeArrivalFrom,lumbridgeArrivalPath,geom,lumbridge)!;
         Require(finalStepPlan is not null&&
                 finalStepPlan.Waypoint==new WorldTile(3226,3218)&&
-                finalFrom.Distance(lumbridge.Tile)>lumbridge.Radius,
+                lumbridgeArrivalFrom.Distance(lumbridge.Tile)>lumbridge.Radius,
             "reproduce real final goal-radius one-tile click without pre-existing arrival");
         walk.Stop();walk.Start(lumbridge,geom,now);
         walk.Sent(finalStepPlan,now,now);
