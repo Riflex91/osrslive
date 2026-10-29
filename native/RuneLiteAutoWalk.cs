@@ -1025,7 +1025,7 @@ internal static class RuneLiteAutoWalkTests
             "live off-prefix intermediate tile may not trigger an extra click");
         var liveArrival=walk.Observe(new(3226,3220),
             now.AddMilliseconds(1800),now.AddSeconds(1.9));
-        Require(liveArrival.Status=="WAYPOINT_CONFIRMED"&&
+        Require(liveArrival.Status=="TARGET_REACHED"&&
                 !walk.WaitingForMovement&&
                 new WorldTile(3226,3220).Distance(lumbridge.Tile)<=lumbridge.Radius&&
                 new WorldTile(3226,3222).Distance(lumbridge.Tile)<=lumbridge.Radius,
