@@ -1,4 +1,32 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.36
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.37
+
+**1.8.37 – Live v1.8.36: Korridorbewegung bis drei Kacheln
+vor dem Wegpunkt, danach fehlende Neuplanung.** Vier echte
+Vordergrund-SendInput-Klickfolgen nach Lumbridge; beim
+vierten Klick `(3234,3171)->(3238,3178)` wurden
+`(3234,3173)` als Präfix und `(3235,3175)` als
+Korridorfortschritt durch das Plugin bestätigt.
+Danach keine Positionsevents; die Automatik wartete
+weiterhin, weil `nearWaypoint` bisher nur bei
+Wegpunktdistanz 2 replante, nicht bei 3. Der letzte
+bestätigte Tile war im ruhigen Fenster noch
+aktuell genug für eine kurze Wiederaufnahme.
+Ein späterer aktiver-Fensterwechsel führte
+korrekt zu `RUNELITE_FOREGROUND_LOST`.
+1.8.37 ergänzt nur im engen Fall von echtem
+Präfix- UND Korridorfortschritt, Endzielannäherung,
+1,6s ohne neue Position und höchstens 3s alter
+API-Position den begrenzten
+`CORRIDOR_THREE_TILE_QUIET_REPLAN`.
+Danach ist ein neuer, verifizierter Kollisionsweg
+mit maximal sechs Schritten zulässig, weiterhin
+höchstens vier Replans pro Start. Kein
+Hintergrundinput, keine automatische Fortsetzung
+bei Fokusverlust und keine tatsächliche Stillstands-
+behauptung ohne Plugin-Heartbeat. Realer Langstrecken-
+Erfolg bleibt erneut zu testen.
+
+
 
 **1.8.36 – Live v1.8.35: Seitwärtsschritte wurden zweimal fälschlich verworfen.**
 Der neue Log vom 29.10.2026, 18:17–18:20 Uhr belegt zwei Laufversuche
