@@ -321,6 +321,8 @@ internal sealed class RuneLiteWindow:Form
                         "Automatik: RuneLite-API-Fortschritt bestätigt · prüfe neue Kollisionsroute.":
                         feedback.Status=="TRANSITION_DETOUR_OBSERVED"?
                         "Automatik: Spiel geht Umweg · beobachte den laufenden Klick, keine neue Eingabe.":
+                        feedback.Status=="CORRIDOR_LATERAL_PLATEAU_OBSERVED"?
+                        "Automatik: einzelner Seitwärtsschritt im bestätigten Korridor · warte ohne neuen Klick.":
                         feedback.Status=="NEAR_WAYPOINT_LATERAL_OBSERVED"?
                         "Automatik: seitliche Abweichung nahe Wegpunkt · beobachte ohne neuen Klick.":
                         "Automatik: echte Kachelbewegung bestätigt · warte auf Wegpunkt.";
@@ -339,7 +341,9 @@ internal sealed class RuneLiteWindow:Form
                     else
                     {
                         log.Add(Severity.INFO,"RUNELITE_AUTOWALK",quiet.Status,quiet.Diagnostic);
-                        autoWalkDescription=quiet.Status=="TRANSITION_DETOUR_QUIET_REPLAN"?
+                        autoWalkDescription=quiet.Status=="CORRIDOR_PLATEAU_QUIET_REPLAN"?
+                            "Automatik: Korridor-Seitwärtsschritt · neue kurze Kollisionsroute aus frischem Plugin-Tile.":
+                            quiet.Status=="TRANSITION_DETOUR_QUIET_REPLAN"?
                             "Automatik: beobachteter Spielumweg · frische Position und kurze neue Route prüfen.":
                             quiet.Status=="WAYPOINT_LATERAL_QUIET_REPLAN"?
                             "Automatik: seitlicher Spielumweg · neue Kollisionsroute aus frischer Plugin-Kachel prüfen.":

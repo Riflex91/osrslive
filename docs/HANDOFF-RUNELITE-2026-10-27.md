@@ -1,4 +1,59 @@
-# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.35
+# Übergabe: RuneLite, Profil auto, OSRS Play 1.8.36
+
+## 1.8.36 – Zweimal falscher Off-Path-Stopp bei seitlichem Plateau nach Korridorfortschritt
+
+Der neue **v1.8.35-Live-Log vom 29.10.2026, 18:17:53–18:20:52**
+zeigt zwei automatisch gestartete Navigationsversuche nach Lumbridge,
+mit sieben beziehungsweise fünf vollständig eingefügten SendInput-
+Vordergrundklicks und fortlaufend bestätigtem RuneLite-API-Fortschritt.
+
+**Versuch 1, 18:19:14**: Letzter Klick ab `(3236,3220)` nach
+`(3228,3218)`; anschließend Korridorfortschritt
+`(3232,3219)`, `(3230,3219)`, danach nur
+`(3229,3220)` (ein Chebyshev-Tile seitlich, Distanz zum
+geklickten Wegpunkt unverändert 2, Abstand zum verifizierten
+Kollisionspräfix 2). Die v1.8.35-Logik meldete fälschlich
+`UNEXPECTED_API_TILE`.
+
+**Versuch 2, 18:20:47**: Klick ab `(3238,3179)` nach
+`(3241,3186)`; dann verifizierter Präfix-Tile
+`(3238,3181)`, Korridor-Tile `(3238,3183)` und
+Seitwärtsschritt `(3238,3184)` (Distanz zum Wegpunkt
+unverändert 3, noch zwei Tiles neben dem öffentlichen
+Kollisionspräfix). Auch hier kam `UNEXPECTED_API_TILE`
+obwohl die RuneLite-Position tatsächlich aktuell war.
+
+**Korrektur:** `CORRIDOR_LATERAL_PLATEAU_OBSERVED` behandelt
+maximal einen solchen seitlichen Ein-Kachel-Schritt pro
+Mausklick als weiterhin unbestätigte Beobachtung, wenn
+mindestens ein vorheriger echter Korridorschritt vorliegt,
+Wegpunktentfernung gleich und maximal 3 bleibt, die letzte
+Position weiterhin innerhalb von zwei Tiles des verifizierten
+Präfixes liegt, der endgültige Zielort näher kommt, der
+Exporter-Eventabstand höchstens 2 Sekunden beträgt und
+Vordergrund-/Zeit-/Ebenen-/Koordinatenbedingungen stimmen.
+**Kein weiterer Klick und keine Ankunftsbehauptung** bei
+dieser Beobachtung.
+
+Ein `CORRIDOR_PLATEAU_QUIET_REPLAN` darf danach nur nach
+mindestens 1,6 Sekunden ohne ein weiteres Exportereignis
+aus der höchstens 3 Sekunden alten letzten echten Position
+neu planen, maximal vier Replans in fünf Minuten, mit
+höchstens sechs geprüften Kollisionsschritten im nächsten
+Klick. Mehrfache oder sich vom eigentlichen Ziel
+entfernende seitliche Schritte bleiben harte Stopps.
+Kein automatisches Fortsetzen nach Fokusverlust oder
+ohne ausdrücklichen ursprünglichen Start.
+Die Selbsttests reproduzieren beide konkreten
+v1.8.35-Klickpräfixe und negative Fälle.
+
+**Einschränkung:** Diese Reparatur ist nur nach
+Windows-CI-Selbsttests validiert, bis ein neuer echter
+Spieltest Erfolg/Fortsetzung belegt. Der externe Plugin-Hub-
+Exporter meldet kein echtes Stillstands-Heartbeat und
+die Minimap-Skalierung ist nicht separat als API-Wert prüfbar.
+
+
 
 ## 1.8.35 – Geprüfter Umweg: letzte frische API-Position neu verplanen
 

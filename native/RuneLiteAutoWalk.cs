@@ -18,7 +18,8 @@ internal sealed class RuneLiteAutoWalk
     private sealed record Pending(ClickPlan Plan,DateTimeOffset EventAt,
         DateTimeOffset SentAt,int LastIndex,DateTimeOffset LastProgressAt,
         WorldTile LastObserved,DateTimeOffset LastObservedEventAt,int CorridorSamples,
-        bool TransitionGraceEligible,int TransitionDetourSamples,int NearEndpointLateralSamples);
+        bool TransitionGraceEligible,int TransitionDetourSamples,int NearEndpointLateralSamples,
+        bool CorridorPlateauObserved=false);
 
     private Pending? pending;
     private DateTimeOffset started;
@@ -261,17 +262,41 @@ internal sealed class RuneLiteAutoWalk
                 now-p.SentAt<=TimeSpan.FromSeconds(5)&&
                 now-p.LastProgressAt<=EventTimeout&&
                 eventAt-p.LastObservedEventAt<=TimeSpan.FromSeconds(2);
-            if(nearEndpointLateral)
+            // v1.8.35 real run: the game is already making progress in a
+            // narrow, verified corridor when it takes ONE additional side
+            // tile. Chebyshev distance to the clicked point stays at 2 or 3
+            // but the final destination gets closer. This is not a failure,
+            // arrival or authorisation for a new click. Retain the pending
+            // command and wait for real movement or a fresh quiet replan.
+            bool corridorPlateau=!nearEndpointLateral&&
+                p.NearEndpointLateralSamples<MaxNearEndpointLateralSamples&&
+                p.CorridorSamples>=1&&p.Plan.WaypointIndex>=4&&
+                tile.Plane==p.Plan.Waypoint.Plane&&
+                Destination is { } finalGoal&&tile.Plane==finalGoal.Tile.Plane&&
+                jump==1&&before==after&&before is >=2 and <=3&&
+                tile.Distance(finalGoal.Tile)<p.LastObserved.Distance(finalGoal.Tile)&&
+                closestDistance<=MaxCorridorDistance&&
+                closestIndex>=p.LastIndex&&axisConsistent&&
+                tile.Distance(p.Plan.From)>=2&&
+                now-p.SentAt<=TimeSpan.FromSeconds(6)&&
+                now-p.LastProgressAt<=EventTimeout&&
+                eventAt-p.LastObservedEventAt>TimeSpan.Zero&&
+                eventAt-p.LastObservedEventAt<=TimeSpan.FromSeconds(2);
+            if(nearEndpointLateral||corridorPlateau)
             {
                 pending=p with{LastObserved=tile,LastObservedEventAt=eventAt,
-                    LastProgressAt=now,NearEndpointLateralSamples=p.NearEndpointLateralSamples+1};
-                return new("NEAR_WAYPOINT_LATERAL_OBSERVED",
+                    LastProgressAt=now,NearEndpointLateralSamples=p.NearEndpointLateralSamples+1,
+                    CorridorPlateauObserved=corridorPlateau};
+                return new(corridorPlateau?"CORRIDOR_LATERAL_PLATEAU_OBSERVED":
+                        "NEAR_WAYPOINT_LATERAL_OBSERVED",
                     $"observed={tile.X},{tile.Y},{tile.Plane} "+
                     $"previous={p.LastObserved.X},{p.LastObserved.Y},{p.LastObserved.Plane} "+
                     $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
                     $"tile_jump={jump} waypoint_distance_before={before} waypoint_distance_after={after} "+
                     $"closest_prefix_index={closestIndex} closest_prefix_distance={closestDistance} "+
                     $"last_exact_prefix_index={p.LastIndex} "+
+                    $"corridor_samples={p.CorridorSamples} "+
+                    $"plateau={corridorPlateau.ToString().ToLowerInvariant()} "+
                     $"lateral_samples={p.NearEndpointLateralSamples+1}/{MaxNearEndpointLateralSamples} "+
                     "side_step_is_not_route_confirmation=true no_additional_input_sent=true "+
                     "wait_for_exact_waypoint_or_bounded_fresh_api_replan=true",true);
@@ -355,6 +380,11 @@ internal sealed class RuneLiteAutoWalk
            now-p.SentAt<TimeSpan.FromSeconds(3)||
            now-eventAt<TimeSpan.Zero||now-eventAt>TimeSpan.FromSeconds(3))
             return null;
+        bool plateauRecovery=p.CorridorPlateauObserved&&
+            p.CorridorSamples>=1&&
+            p.LastObserved.Distance(p.Plan.Waypoint) is >=2 and <=3&&
+            now-p.LastProgressAt>=NearWaypointStallDelay&&
+            now-p.SentAt<=EventTimeout;
         bool nearWaypoint=p.LastObserved.Distance(p.Plan.Waypoint)==2&&
             (p.LastIndex>=2||p.CorridorSamples>=2)&&
             now-p.LastProgressAt>=NearWaypointStallDelay;
@@ -377,7 +407,7 @@ internal sealed class RuneLiteAutoWalk
             tile.Distance(destination.Tile)<p.Plan.From.Distance(destination.Tile)&&
             now-eventAt>=NearWaypointStallDelay&&
             now-p.SentAt<=EventTimeout;
-        if(!nearWaypoint&&!transitionDetour)return null;
+        if(!nearWaypoint&&!transitionDetour&&!plateauRecovery)return null;
         string diagnostic=$"last_confirmed={tile.X},{tile.Y},{tile.Plane} "+
             $"from={p.Plan.From.X},{p.Plan.From.Y},{p.Plan.From.Plane} "+
             $"waypoint={p.Plan.Waypoint.X},{p.Plan.Waypoint.Y},{p.Plan.Waypoint.Plane} "+
@@ -385,6 +415,7 @@ internal sealed class RuneLiteAutoWalk
             $"last_exact_prefix_index={p.LastIndex} "+
             $"corridor_samples={p.CorridorSamples} "+
             $"transition_detour_samples={p.TransitionDetourSamples} "+
+            $"corridor_lateral_plateau={plateauRecovery.ToString().ToLowerInvariant()} "+
             $"quiet_ms={(now-(transitionDetour?eventAt:p.LastProgressAt)).TotalMilliseconds:0} "+
             $"last_api_event_age_ms={(now-eventAt).TotalMilliseconds:0} "+
             $"time_since_click_ms={(now-p.SentAt).TotalMilliseconds:0} "+
@@ -396,8 +427,9 @@ internal sealed class RuneLiteAutoWalk
             return new("RECOVERY_LIMIT_REACHED",diagnostic+
                 "no_additional_input_permitted=true",false);
         corridorReplans++;pending=null;quietReplanRequestedAt=now;
-        shortNextClick=transitionDetour;
+        shortNextClick=transitionDetour||plateauRecovery;
         return new(transitionDetour?"TRANSITION_DETOUR_QUIET_REPLAN":
+                plateauRecovery?"CORRIDOR_PLATEAU_QUIET_REPLAN":
                 p.NearEndpointLateralSamples>0?
                 "WAYPOINT_LATERAL_QUIET_REPLAN":"WAYPOINT_QUIET_REPLAN",diagnostic+
             $"recovery_attempts_after={corridorReplans}/{MaxCorridorReplans} "+
@@ -933,6 +965,115 @@ internal static class RuneLiteAutoWalkTests
         Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3255,3239),
                     finalDetourEvent,now.AddSeconds(6)) is null&&walk.WaitingForMovement,
             "same detour moving away from the chosen destination must never be restarted");
+        // v1.8.35 live, 29 October 18:19:14: seven real foreground
+        // click batches progressed toward Lumbridge, but the final click
+        // moved (3232,3219) -> (3230,3219) -> (3229,3220).
+        // The last one-tile side step has equal clicked-waypoint distance
+        // (2), is within two tiles of the checked collision prefix, and
+        // reduces distance to the ultimate destination. It must not
+        // generate UNEXPECTED_API_TILE or a premature new mouse input.
+        PathStep[] firstPlateauPrefix=[
+            new(new(3235,3219)),new(new(3234,3218)),
+            new(new(3233,3217)),new(new(3232,3218)),
+            new(new(3231,3218)),new(new(3230,3218)),
+            new(new(3229,3218)),new(new(3228,3218))];
+        var firstPlateauPlan=RuneLiteAutoWalk.Project(
+            new(3236,3220),firstPlateauPrefix,geom)!;
+        Require(firstPlateauPlan.Waypoint==new WorldTile(3228,3218)&&
+                firstPlateauPlan.WaypointIndex==8,
+            "v1.8.35 first failed route is reproduced from its eight verified collision steps");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(firstPlateauPlan,now,now);
+        Require(walk.Observe(new(3232,3219),now.AddSeconds(.8),now.AddSeconds(.9)).Status==
+                "CORRIDOR_PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3230,3219),now.AddSeconds(1.6),now.AddSeconds(1.7)).Status==
+                "CORRIDOR_PROGRESS_CONFIRMED",
+            "first v1.8.35 click has two authentic forward-corridor observations");
+        var firstPlateau=walk.Observe(new(3229,3220),
+            now.AddSeconds(2.4),now.AddSeconds(2.5));
+        Require(firstPlateau.Status=="CORRIDOR_LATERAL_PLATEAU_OBSERVED"&&
+                firstPlateau.Continue&&walk.WaitingForMovement&&walk.Clicks==1&&
+                !walk.CanDispatch(now.AddSeconds(2.5),now.AddSeconds(2.4)),
+            "real lateral plateau at waypoint distance two must not hard-stop or trigger a second click");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3229,3220),
+                    now.AddSeconds(2.4),now.AddSeconds(3.3)) is null&&
+                walk.WaitingForMovement,
+            "no second click before 1.6 seconds of position-event quiet");
+        var plateauRetry=walk.RecoverNearWaypointAfterQuietPeriod(
+            new(3229,3220),now.AddSeconds(2.4),now.AddSeconds(4.2));
+        Require(plateauRetry?.Status=="CORRIDOR_PLATEAU_QUIET_REPLAN"&&
+                plateauRetry.Continue&&!walk.WaitingForMovement&&walk.ShortNextClick&&
+                walk.CorridorReplans==1&&
+                walk.CanDispatch(now.AddSeconds(4.2),now.AddSeconds(2.4)),
+            "authentic quiet plateau can replan from a <=3s-old exported tile with one short hop");
+        PathStep[] nextAfterPlateau=Enumerable.Range(1,8)
+            .Select(i=>new PathStep(new WorldTile(3229-i,3220))).ToArray();
+        var shortenedPlateauPlan=RuneLiteAutoWalk.Project(new(3229,3220),
+            nextAfterPlateau,geom,RuneLiteAutoWalk.RecoveryPrefixSteps)!;
+        Require(shortenedPlateauPlan.WaypointIndex==RuneLiteAutoWalk.RecoveryPrefixSteps,
+            "first recovery click never projects beyond the bounded six adjacent checked tiles");
+        walk.Sent(shortenedPlateauPlan,now.AddSeconds(2.4),now.AddSeconds(4.2));
+        Require(walk.WaitingForMovement&&!walk.ShortNextClick&&
+                !walk.CanDispatch(now.AddSeconds(4.3),now.AddSeconds(2.4)),
+            "shortened recovery permission is consumed and pending verification is restored");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(firstPlateauPlan,now,now);
+        walk.Observe(new(3232,3219),now.AddSeconds(.8),now.AddSeconds(.9));
+        walk.Observe(new(3230,3219),now.AddSeconds(1.6),now.AddSeconds(1.7));
+        walk.Observe(new(3229,3220),now.AddSeconds(2.4),now.AddSeconds(2.5));
+        Require(walk.Observe(new(3228,3218),now.AddSeconds(3),now.AddSeconds(3.1)).Status==
+                "WAYPOINT_CONFIRMED"&&!walk.WaitingForMovement,
+            "a later actual clicked waypoint is still accepted without a forced replan");
+        // v1.8.35 second attempt, 18:20:47: after exact prefix
+        // (3238,3181), RuneLite diverged to (3238,3183) and then
+        // (3238,3184). The side step is just one tile, with distance 3
+        // to the clicked waypoint before AND after.
+        PathStep[] secondPlateauPrefix=[
+            new(new(3237,3180)),new(new(3238,3181)),
+            new(new(3239,3182)),new(new(3240,3183)),
+            new(new(3241,3184)),new(new(3240,3185)),
+            new(new(3241,3186))];
+        var secondPlateauPlan=RuneLiteAutoWalk.Project(
+            new(3238,3179),secondPlateauPrefix,geom)!;
+        Require(secondPlateauPlan.Waypoint==new WorldTile(3241,3186)&&
+                secondPlateauPlan.WaypointIndex==7,
+            "v1.8.35 second failed click has the original seven-tile collision prefix");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(secondPlateauPlan,now,now);
+        Require(walk.Observe(new(3238,3181),now.AddSeconds(.8),now.AddSeconds(.9)).Status==
+                "PROGRESS_CONFIRMED"&&
+                walk.Observe(new(3238,3183),now.AddSeconds(1.6),now.AddSeconds(1.7)).Status==
+                "CORRIDOR_PROGRESS_CONFIRMED",
+            "second live click has an exact and an authentic corridor movement before the lateral tile");
+        var secondPlateau=walk.Observe(new(3238,3184),
+            now.AddSeconds(2.4),now.AddSeconds(2.5));
+        Require(secondPlateau.Status=="CORRIDOR_LATERAL_PLATEAU_OBSERVED"&&
+                secondPlateau.Continue&&walk.WaitingForMovement,
+            "real one-step plateau three tiles from waypoint is not a hard off-path stop");
+        Require(walk.RecoverNearWaypointAfterQuietPeriod(new(3238,3184),
+                    now.AddSeconds(2.4),now.AddSeconds(5.6)) is null&&
+                walk.WaitingForMovement,
+            "3.2s-old exporter tile must never authorize another input");
+        var secondQuiet=walk.RecoverNearWaypointAfterQuietPeriod(new(3238,3184),
+            now.AddSeconds(2.4),now.AddSeconds(4.2));
+        Require(secondQuiet?.Status=="CORRIDOR_PLATEAU_QUIET_REPLAN"&&
+                secondQuiet.Continue&&walk.ShortNextClick,
+            "second real lateral plateau may replan only on a fresh exporter tile");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(secondPlateauPlan,now,now);
+        walk.Observe(new(3238,3181),now.AddSeconds(.8),now.AddSeconds(.9));
+        walk.Observe(new(3238,3183),now.AddSeconds(1.6),now.AddSeconds(1.7));
+        walk.Observe(new(3238,3184),now.AddSeconds(2.4),now.AddSeconds(2.5));
+        Require(walk.Observe(new(3237,3184),now.AddSeconds(3),now.AddSeconds(3.1)).Status==
+                "OFF_PATH",
+            "a second lateral turn away from the clicked waypoint is still a hard stop");
+        walk.Stop();walk.Start(lumbridge,geom,now);walk.Sent(secondPlateauPlan,now,now);
+        Require(walk.Observe(new(3238,3180),now.AddSeconds(.8),now.AddSeconds(.9)).Status==
+                "OFF_PATH",
+            "without prior exact or corridor progress a random early off-prefix tile remains blocked");
+        var oppositeGoal=new NavigationDestination("Opposite","safe",new(3300,3218),1);
+        walk.Stop();walk.Start(oppositeGoal,geom,now);walk.Sent(firstPlateauPlan,now,now);
+        walk.Observe(new(3232,3219),now.AddSeconds(.8),now.AddSeconds(.9));
+        walk.Observe(new(3230,3219),now.AddSeconds(1.6),now.AddSeconds(1.7));
+        Require(walk.Observe(new(3229,3220),now.AddSeconds(2.4),now.AddSeconds(2.5)).Status==
+                "OFF_PATH",
+            "a side step toward the clicked waypoint but farther from the selected destination is not a safe plateau");
         walk.Stop();Require(!walk.Active&&walk.Timeout(now.AddSeconds(40)) is null,
             "manual stop prevents further movement");
     }

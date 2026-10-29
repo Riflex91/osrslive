@@ -1,4 +1,34 @@
-# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.35
+# Bekannte Fehler und offene Live-Grenzen – OSRS Play 1.8.36
+
+**1.8.36 – Live v1.8.35: Seitwärtsschritte wurden zweimal fälschlich verworfen.**
+Der neue Log vom 29.10.2026, 18:17–18:20 Uhr belegt zwei Laufversuche
+mit 7 und 5 erfolgreichen Vordergrund-SendInput-Klickfolgen.
+Sie endeten mit `UNEXPECTED_API_TILE` bei `(3229,3220)`
+aus `(3230,3219)` (Wegpunkt `(3228,3218)`, Distanz 2)
+und bei `(3238,3184)` aus `(3238,3183)` (Wegpunkt
+`(3241,3186)`, Distanz 3). Vor beiden Seitwärtsschritten
+hatte der tatsächliche RuneLite-Export mehrere eindeutige
+Vorwärts-/Korridorbewegungen bestätigt.
+V1.8.36 beobachtet einen einzelnen neuen Seitwärtsschritt
+in unmittelbarer Nähe der verifizierten Route, sofern
+die Entfernung zum finalen Ziel sinkt, und sendet beim
+bloßen Seitwärtsschritt KEINEN neuen Klick.
+Nur nach einem ruhigen Intervall und bei höchstens
+3 Sekunden alter API-Position wird die
+neu geplante Kollisionsroute mit maximal sechs
+Wegschritten geklickt, wobei Fokus- und Eingabesperren
+unverändert bleiben. Die konkrete Erfolgslauf-Quote
+muss erneut im realen Spiel gemessen werden.
+
+**Weiterer Befund:** Direkt beim Start schwankte das
+RuneLite-Launcher-/Plugin-Profil kurz zwischen
+`RUNELITE_NOT_RUNNING` und `PLUGIN_EXPORT_UNAVAILABLE`;
+dies ist nicht die Ursache der späteren Autowalk-Fehler.
+Die anschließend erkannte historische Position
+(15 Minuten alt) wurde korrekt nicht für Spielklicks
+freigegeben.
+
+
 
 **1.8.35 – Vier Klicks, dann Umweg ohne automatische Rückkehr zum Wegplan:** 
 Im Log v1.8.34 vom 29.10.2026, 18:02 Uhr, folgten dem vierten Klick
